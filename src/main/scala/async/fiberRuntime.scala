@@ -8,7 +8,6 @@ object util:
   private val rand = new java.util.Random
 
   def sleepABit() =
-    Thread.ofVirtual().start(() => print("ababag"))
     Thread.sleep(rand.nextInt(100))
 
 
@@ -44,11 +43,9 @@ object boundary:
     threadName.set(name)
 
   def apply[T](body: Label[T] ?=> Unit): Unit =
-    new Thread:
-      override def run() =
-        sleepABit()
-        try body(using Label[T]())
-        finally log(s"finished ${threadName.get()} ${Thread.currentThread.getId()}")
-    .start()
+    Thread.ofVirtual().start: () =>
+      sleepABit()
+      try body(using Label[T]())
+      finally log(s"finished ${threadName.get()} ${Thread.currentThread.getId()}")
 
 
