@@ -408,7 +408,7 @@ A stream represents a sequence of values that are computed one-by-one in a separ
     case End extends StreamResult[Nothing]
 ```
 One can see a stream as a static representation of the values that are transmitted over a channel. This poses the question of termination -- when do we know that a channel receives no further values, so the stream can be terminated
-with an `StreamResult.End` value. The following implementation shows one
+with an `StreamResult.End` value? The following implementation shows one
 possibility: Here we map a channel of `Try` results to a stream, mapping
 failures with a special =`ChannelClosedException` to `StreamResult.End`.
 ```scala
