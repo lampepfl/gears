@@ -131,7 +131,8 @@ object Async:
     protected def addListener(k: Listener[T]): Unit
 
     def onComplete(k: Listener[T]): Unit =
-      if !poll(k) then addListener(k)
+      synchronized:
+        if !poll(k) then addListener(k)
 
   end OriginalSource
 
