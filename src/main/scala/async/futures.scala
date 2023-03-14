@@ -37,9 +37,9 @@ object Future:
   private class CoreFuture[+T] extends Future[T]:
 
     @volatile protected var hasCompleted: Boolean = false
-    protected var cancelRequest = false
-    private var result: Try[T] = uninitialized // guaranteed to be set if hasCompleted = true
-    private val waiting: mutable.Set[Try[T] => Boolean] = mutable.Set()
+    @volatile protected var cancelRequest = false
+    private var result: Try[T] @uncheckedVariance = uninitialized // guaranteed to be set if hasCompleted = true
+    private val waiting: mutable.Set[Try[T] @uncheckedVariance => Boolean] = mutable.Set()
 
     // Async.Source method implementations
 
@@ -89,7 +89,7 @@ object Future:
   private class RunnableFuture[+T](body: Async ?=> T)(using ac: Async.Config)
   extends CoreFuture[T]:
 
-    def checkCancellation() =
+    private def checkCancellation(): Unit =
       if cancelRequest then throw CancellationException()
 
     /** a handler for Async */
@@ -125,13 +125,15 @@ object Future:
                       k.resume(x)
                   true
               */
-            finally checkCancellation()
+            finally
+              println("I'm here in the finally and the value is " + cancelRequest)
+              checkCancellation()
 
-        def withConfig(config: Async.Config) = FutureAsync(using config)
+        def withConfig(config: Async.Config): Async = FutureAsync(using config)
 
       sleepABit()
       try body(using FutureAsync())
-      finally log(s"finished ${threadName.get()} ${Thread.currentThread.getId()}")
+      finally log(s"finished ${threadName.get()} ${Thread.currentThread.threadId}")
       /** With continuations, this becomes:
 
       boundary [Unit]:
@@ -139,12 +141,32 @@ object Future:
       */
     end async
 
-    ac.scheduler.execute: () =>
+    override def cancel(): Unit =
+      super.cancel()
+      executor_thread.interrupt()
+      println("interrupted executor thread")
+
+    private val executor_thread: Thread = Thread.startVirtualThread: () =>
       async:
-        link()
-        Async.group:
-          complete(Try(body))
-        unlink()
+        complete(Try({
+          try
+            checkCancellation()
+            val r = body
+            checkCancellation()
+            r
+          catch
+            case _: InterruptedException => throw CancellationException()
+        }))
+
+//    private val executor_thread: Thread = Thread.startVirtualThread: () =>
+//      ()
+//    ac.scheduler.execute: () =>
+//      async:
+//        link()
+//        Async.group:
+//          complete(Try(body))
+//        unlink()
+
 
   end RunnableFuture
 
@@ -214,7 +236,7 @@ end Future
 class Task[+T](val body: Async ?=> T):
 
   /** Start a future computed from the `body` of this task */
-  def run(using Async.Config) = Future(body)
+  def run(using Async.Config): Future[T] = Future(body)
 
 end Task
 

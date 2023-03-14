@@ -4,10 +4,14 @@ import concurrent.*
 import fiberRuntime.boundary.setName
 import scala.concurrent.ExecutionContext
 
-@main def Test =
+@main def Test(): Unit =
+  Thread.startVirtualThread(() => {
+    println("!!!!!!!!!!!!!")
+  })
   given ExecutionContext = ExecutionContext.global
   val x = Future:
     setName("x")
+    println("virt here? " + Thread.currentThread().isVirtual)
     val a = Future{ setName("xa"); 22 }
     val b = Future{ setName("xb"); 11 }
     val c = Future { setName("xc"); assert(false); 1 }

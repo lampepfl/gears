@@ -1,7 +1,7 @@
 package runtime
 import scala.util.boundary, boundary.Label
 
-/** Contains a delimited contination, which can be invoked with `resume` */
+/** Contains a delimited continuation, which can be invoked with `resume` */
 class Suspension[-T, +R]:
   def resume(arg: T): R = ???
 

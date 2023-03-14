@@ -1,8 +1,11 @@
 package simpleFutures
 
 import scala.collection.mutable.ListBuffer
-import scala.util.boundary, boundary.Label
+import scala.util.boundary
+import boundary.Label
 import runtime.suspend
+
+import scala.annotation.unchecked.uncheckedVariance
 
 object Scheduler:
   def schedule(task: Runnable): Unit = ???
@@ -11,8 +14,8 @@ trait Async:
   def await[T](f: Future[T]): T
 
 class Future[+T](body: Async ?=> T):
-  private var result: Option[T] = None
-  private var waiting: ListBuffer[T => Unit] = ListBuffer()
+  private var result: Option[T] @uncheckedVariance = None
+  private var waiting: ListBuffer[T => Unit] @uncheckedVariance = ListBuffer()
   private def addWaiting(k: T => Unit): Unit = waiting += k
 
   def await(using a: Async): T = a.await(this)

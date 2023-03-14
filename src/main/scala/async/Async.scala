@@ -33,7 +33,7 @@ object Async:
 
   object Config extends LowPrioConfig:
 
-    /** The async configuration stored in the given async capabaility */
+    /** The async configuration stored in the given async capability */
     given fromAsync(using async: Async): Config = async.config
 
   end Config
@@ -50,6 +50,8 @@ object Async:
             notify()
           true
         synchronized:
+          // TODO it hangs here, the listener was never called. src.hasCompleted=true
+          // TODO the onComplete is added after it's already completed
           while result.isEmpty do wait()
           result.get
 
@@ -85,8 +87,8 @@ object Async:
   abstract case class ForwardingListener[T](src: Source[?], continue: Listener[?]) extends Listener[T]
 
   /** An asynchronous data source. Sources can be persistent or ephemeral.
-   *  A persistent source will always pass same data to calls of `poll and `onComplete`.
-   *  An ephememral source can pass new data in every call.
+   *  A persistent source will always pass same data to calls of `poll` and `onComplete`.
+   *  An ephemeral source can pass new data in every call.
    *  An example of a persistent source is `Future`.
    *  An example of an ephemeral source is `Channel`.
    */
@@ -120,7 +122,7 @@ object Async:
 
   end Source
 
-  /** An original source has a standard definition of `onCopmplete` in terms
+  /** An original source has a standard definition of `onComplete` in terms
    *  of `poll` and `addListener`.
    */
   abstract class OriginalSource[+T] extends Source[T]:
@@ -137,7 +139,7 @@ object Async:
   abstract class DerivedSource[T, U](val original: Source[T]) extends Source[U]:
 
     /** Handle a value `x` passed to the original source by possibly
-     *  invokiong the continuation for this source.
+     *  invoking the continuation for this source.
      */
     protected def listen(x: T, k: Listener[U]): Boolean
 
@@ -180,7 +182,7 @@ object Async:
         found
 
       def onComplete(k: Listener[T]): Unit =
-        val listener = new ForwardingListener[T](this, k):
+        val listener: ForwardingListener[T] = new ForwardingListener[T](this, k):
           var foundBefore = false
           def continueIfFirst(x: T): Boolean = synchronized:
             if foundBefore then false else { foundBefore = k(x); foundBefore }

@@ -31,10 +31,10 @@ trait Cancellable:
 end Cancellable
 
 class CancellationGroup extends Cancellable:
-  private var members: mutable.Set[Cancellable] = mutable.Set()
+  private val members: mutable.Set[Cancellable] = mutable.Set()
 
   /** Cancel all members and clear the members set */
-  def cancel() =
+  def cancel(): Unit =
     members.toArray.foreach(_.cancel())
     members.clear()
 
@@ -48,12 +48,12 @@ class CancellationGroup extends Cancellable:
 
 object CancellationGroup:
 
-  /** A sentinal group of cancellables that are in fact not linked
+  /** A sentinel group of cancellables that are in fact not linked
    *  to any real group. `cancel`, `add`, and `drop` do nothing when
    *  called on this group.
    */
   object Unlinked extends CancellationGroup:
-    override def cancel() = ()
+    override def cancel(): Unit = ()
     override def add(member: Cancellable): Unit = ()
     override def drop(member: Cancellable): Unit = ()
   end Unlinked
