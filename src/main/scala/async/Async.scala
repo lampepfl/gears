@@ -128,7 +128,7 @@ object Async:
     /** Add `k` to the listener set of this source */
     protected def addListener(k: Listener[T]): Unit
 
-    def onComplete(k: Listener[T]): Unit =
+    def onComplete(k: Listener[T]): Unit = synchronized:
       if !poll(k) then addListener(k)
 
   end OriginalSource
