@@ -131,7 +131,7 @@ object SyncChannel:
 
 end SyncChannel
 
-def TestChannel(using ExecutionContext) =
+def TestChannel(using ExecutionContext) = Async.blocking:
   val c = SyncChannel[Option[Int]]()
   Future:
     for i <- 0 to 100 do

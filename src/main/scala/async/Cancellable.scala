@@ -22,7 +22,7 @@ trait Cancellable:
    *  current async context.
    */
   def link()(using async: Async): this.type =
-    link(async.config.group)
+    link(async.group)
 
   /** Unlink this cancellable from its group. */
   def unlink(): this.type =

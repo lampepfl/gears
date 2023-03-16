@@ -10,36 +10,19 @@ trait Async:
   /** Wait for completion of async source `src` and return the result */
   def await[T](src: Async.Source[T]): T
 
-  /** The configuration of this Async */
-  def config: Async.Config
+  /** The execution context for this Async */
+  def scheduler: ExecutionContext
 
-  /** An Async of the same kind as this one, with a new configuration as given */
-  def withConfig(config: Async.Config): Async
+  /** The cancellation group for this Async */
+  def group: CancellationGroup
+
+  /** An Async of the same kind as this one, with a new cancellation group */
+  def withGroup(group: CancellationGroup): Async
 
 object Async:
 
-  /** The underlying configuration of an async block */
-  case class Config(scheduler: ExecutionContext, group: CancellationGroup)
-
-  trait LowPrioConfig:
-
-    /** A toplevel async group with given scheduler and a synthetic root that
-     *  ignores cancellation requests
-     */
-    given fromExecutionContext(using scheduler: ExecutionContext): Config =
-      Config(scheduler, CancellationGroup.Unlinked)
-
-  end LowPrioConfig
-
-  object Config extends LowPrioConfig:
-
-    /** The async configuration stored in the given async capabaility */
-    given fromAsync(using async: Async): Config = async.config
-
-  end Config
-
   /** An implementation of Async that blocks the running thread when waiting */
-  private class Blocking(using val config: Config) extends Async:
+  private class Blocking(group: CancellationGroup)(using val scheduler: ExecutionContext) extends Async:
 
     def await[T](src: Source[T]): T =
       src.poll().getOrElse:
@@ -53,14 +36,14 @@ object Async:
           while result.isEmpty do wait()
           result.get
 
-    def withConfig(config: Config) = Blocking(using config)
+    def withGroup(group: CancellationGroup) = Blocking(group)
   end Blocking
 
   /** Execute asynchronous computation `body` on currently running thread.
    *  The thread will suspend when the computation waits.
    */
   def blocking[T](body: Async ?=> T)(using ExecutionContext): T =
-    body(using Blocking())
+    body(using Blocking(CancellationGroup.Unlinked))
 
   /** The currently executing Async context */
   inline def current(using async: Async): Async = async
@@ -70,7 +53,7 @@ object Async:
 
   def group[T](body: Async ?=> T)(using async: Async): T =
     val newGroup = CancellationGroup().link()
-    try body(using async.withConfig(async.config.copy(group = newGroup)))
+    try body(using async.withGroup(newGroup))
     finally newGroup.cancel()
 
   /** A function `T => Boolean` whose lineage is recorded by its implementing
