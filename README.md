@@ -167,7 +167,7 @@ The `Future.apply` method is has the following signature:
 ```scala
   def apply[T](body: Async ?=> T)(using Async): Future[T]
 ```
-`apply` creates an `Async` capability and passes it to its `body` argument.
+`apply` wraps an `Async` capability with cancellation handling (tied to the returned `Future`) and passes it to its `body` argument.
 
 Futures also have a set of useful combinators that support what is usually called _structured concurrency_. In particular, there is the `zip` operator,
 which takes two futures and if they complete successfully returns their results in a pair. If one or both of the operand futures fail, the first failure is returned as failure result of the zip. Dually, there is the `alt` operator, which returns the result of the first succeeding future and fails only if both operand futures fail.
@@ -437,7 +437,7 @@ An async context provides three elements:
 
  - an `await` method that allows a caller to suspend while waiting for the result of an async source to arrive,
  - a `scheduler` value that refers to execution context on which tasks are scheduled,
- - a `group` value that contains a cancellation group which determines the default linkage of all cancellable objects that are created in an async context context.
+ - a `group` value that contains a cancellation group which determines the default linkage of all cancellable objects that are created in an async context.
 
 ## Implementing Await
 
