@@ -1,12 +1,17 @@
 package concurrent
 
-import scala.collection.mutable, mutable.ListBuffer
+import concurrent.Async.race
+
+import scala.collection.mutable
+import mutable.ListBuffer
 import fiberRuntime.util.*
 import fiberRuntime.boundary
+
 import scala.compiletime.uninitialized
-import scala.util.{Try, Success, Failure}
+import scala.util.{Failure, Success, Try}
 import scala.annotation.unchecked.uncheckedVariance
 import java.util.concurrent.CancellationException
+import scala.annotation.tailrec
 import scala.concurrent.ExecutionContext
 
 /** A cancellable future that can suspend waiting for other asynchronous sources
@@ -187,8 +192,6 @@ object Future:
 
   end extension
 
-  // TODO: efficient n-ary versions of the last two operations
-
   /** A promise defines a future that is be completed via the
    *  promise's `complete` method.
    */
@@ -206,6 +209,48 @@ object Future:
 
   end Promise
 end Future
+
+// TODO profile alt and zip
+def alt[T](futures: Future[T]*)(using Async): Future[T] = Future[T]:
+  val fs: Seq[Future[(Try[T], Int)]] = futures.zipWithIndex.map({ (f, i) =>
+    Future:
+      try
+        (Success(f.value), i)
+      catch case e => (Failure(e), i)
+  })
+
+  @tailrec
+  def helper(failed: Int, fs: Seq[(Future[(Try[T], Int)], Int)]): Try[T] =
+    Async.await(Async.race( fs.map(_._1)* )) match
+      case Success((Success(x), _)) => Success(x)
+      case Success((Failure(e), i)) =>
+        if (failed + 1 == futures.length)
+          Failure(e)
+        else
+          helper(failed + 1, fs.filter({ case (_, j) => j != i }))
+      case _ => assert(false)
+
+  helper(0, fs.zipWithIndex).get
+
+private sealed abstract class Types1to3[+A,+B,+C]
+final case class OneOfThree[+A,+B,+C](value: A) extends Types1to3[A, B, C]
+final case class TwoOfThree[+A,+B,+C](value: B) extends Types1to3[A, B, C]
+final case class ThreeOfThree[+A,+B,+C](value: C) extends Types1to3[A, B, C]
+
+def zip[T1, T2, T3](f1: Future[T1], f2: Future[T2], f3: Future[T3])(using Async): Future[(T1, T2, T3)] = Future:
+  Async.await(race(f1.map(OneOfThree(_)), f2.map(TwoOfThree(_)), f3.map(ThreeOfThree(_)))) match
+    case OneOfThree(Success(x1)) =>
+      val rest = f2.zip(f3).value
+      (x1, rest._1, rest._2)
+    case TwoOfThree(Success(x2)) =>
+      val rest = f1.zip(f3).value
+      (rest._1, x2, rest._2)
+    case ThreeOfThree(Success(x3)) =>
+      val rest = f1.zip(f2).value
+      (rest._1, rest._2, x3)
+    case OneOfThree(Failure(e)) => throw e
+    case TwoOfThree(Failure(e)) => throw e
+    case ThreeOfThree(Failure(e)) => throw e
 
 /** A task is a template that can be turned into a runnable future
  *  Composing tasks can be referentially transparent.
