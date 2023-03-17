@@ -143,8 +143,6 @@ object Future:
 
     override def cancel(): Unit =
       super.cancel()
-      executor_thread.interrupt()
-      println("interrupted executor thread")
 
     private val executor_thread: Thread = Thread.startVirtualThread: () =>
       async:
