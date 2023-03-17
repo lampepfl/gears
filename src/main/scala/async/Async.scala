@@ -22,7 +22,7 @@ trait Async:
 object Async:
 
   /** An implementation of Async that blocks the running thread when waiting */
-  private class Blocking(group: CancellationGroup)(using val scheduler: ExecutionContext) extends Async:
+  private class Blocking(val group: CancellationGroup)(using val scheduler: ExecutionContext) extends Async:
 
     def await[T](src: Source[T]): T =
       src.poll().getOrElse:
