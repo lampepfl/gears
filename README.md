@@ -5,7 +5,8 @@ This is a proof of concept for a base library for asynchronous computing in dire
 
 The concepts and code here should be regarded as a strawman, in the sense of "meant to be knocked down".
 
-A general rationale and introduction follows.
+Here is a [slidedeck](./scalar-slides.pdf) of a talk given at Scalar 2023
+covering some aspects of the library. A general rationale and introduction follows.
 
 ---
 
