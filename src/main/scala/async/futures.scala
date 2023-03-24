@@ -86,15 +86,14 @@ object Future:
   /** A future that is completed by evaluating `body` as a separate
    *  asynchronous operation in the given `scheduler`
    */
-  private class RunnableFuture[+T](body: Async ?=> T)(using ac: Async.Config)
-  extends CoreFuture[T]:
+  private class RunnableFuture[+T](body: Async ?=> T)(using ac: Async) extends CoreFuture[T]:
 
     def checkCancellation() =
       if cancelRequest then throw CancellationException()
 
     /** a handler for Async */
     private def async(body: Async ?=> Unit): Unit =
-      class FutureAsync(using val config: Async.Config) extends Async:
+      class FutureAsync(val group: CancellationGroup)(using val scheduler: ExecutionContext) extends Async:
 
         /** Await a source first by polling it, and, if that fails, by suspending
          *  in a onComplete call.
@@ -127,10 +126,10 @@ object Future:
               */
             finally checkCancellation()
 
-        def withConfig(config: Async.Config) = FutureAsync(using config)
+        def withGroup(group: CancellationGroup) = FutureAsync(group)
 
       sleepABit()
-      try body(using FutureAsync())
+      try body(using FutureAsync(ac.group)(using ac.scheduler))
       finally log(s"finished ${threadName.get()} ${Thread.currentThread.getId()}")
       /** With continuations, this becomes:
 
@@ -153,7 +152,7 @@ object Future:
    *  If the future is created in an Async context, it is added to the
    *  children of that context's root.
    */
-  def apply[T](body: Async ?=> T)(using ac: Async.Config): Future[T] =
+  def apply[T](body: Async ?=> T)(using Async): Future[T] =
     RunnableFuture(body)
 
   /** A future that immediately terminates with the given result */
@@ -168,7 +167,7 @@ object Future:
      *  If both futures succeed, succeed with their values in a pair. Otherwise,
      *  fail with the failure that was returned first.
      */
-    def zip[U](f2: Future[U])(using Async.Config): Future[(T, U)] = Future:
+    def zip[U](f2: Future[U])(using Async): Future[(T, U)] = Future:
       Async.await(Async.either(f1, f2)) match
         case Left(Success(x1))  => (x1, f2.value)
         case Right(Success(x2)) => (f1.value, x2)
@@ -179,7 +178,7 @@ object Future:
      *  If either task succeeds, succeed with the success that was returned first.
      *  Otherwise, fail with the failure that was returned last.
      */
-    def alt(f2: Future[T])(using Async.Config): Future[T] = Future:
+    def alt(f2: Future[T])(using Async): Future[T] = Future:
       Async.await(Async.either(f1, f2)) match
         case Left(Success(x1))    => x1
         case Right(Success(x2))   => x2
@@ -214,11 +213,11 @@ end Future
 class Task[+T](val body: Async ?=> T):
 
   /** Start a future computed from the `body` of this task */
-  def run(using Async.Config) = Future(body)
+  def run(using Async) = Future(body)
 
 end Task
 
-def add(x: Future[Int], xs: List[Future[Int]])(using ExecutionContext): Future[Int] =
+def add(x: Future[Int], xs: List[Future[Int]])(using Async): Future[Int] =
   val b = x.zip:
     Future:
       xs.headOption.toString

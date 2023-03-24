@@ -80,12 +80,11 @@ Here, `async` is a capability that allows to suspend in an `await` method. The `
 trait Async:
   def await[T](src: Async.Source[T]): T
 
-  def config: Async.Config
-  def withConfig(config: Async.Config): Async
+  def scheduler: ExecutionContext
+  def group: CancellationGroup
+  def withGroup(group: CancellationGroup): Async
 ```
-The most important abstraction here is the `await` method. We will get
-to configurations handling with the other two methods later.
-
+The most important abstraction here is the `await` method.
 Code with the `Async` capability can _await_ an _asynchronous source_ of type `Async.Source`. This implies that the code will suspend if the
 result of the async source is not yet ready. Futures are async sources of type `Try[T]`.
 
@@ -166,9 +165,9 @@ A simple future can be created by calling the `apply` method of the `Future` obj
 ```
 The `Future.apply` method is has the following signature:
 ```scala
-  def apply[T](body: Async ?=> T)(using config: Async.Config): Future[T]
+  def apply[T](body: Async ?=> T)(using Async): Future[T]
 ```
-`apply` creates an `Async` capability with the given configuration `config` and passes it to its `body` argument.
+`apply` wraps an `Async` capability with cancellation handling (tied to the returned `Future`) and passes it to its `body` argument.
 
 Futures also have a set of useful combinators that support what is usually called _structured concurrency_. In particular, there is the `zip` operator,
 which takes two futures and if they complete successfully returns their results in a pair. If one or both of the operand futures fail, the first failure is returned as failure result of the zip. Dually, there is the `alt` operator, which returns the result of the first succeeding future and fails only if both operand futures fail.
@@ -178,14 +177,14 @@ which takes two futures and if they complete successfully returns their results 
 ```scala
   extension [T](f1: Future[T])
 
-    def zip[U](f2: Future[U])(using Async.Config): Future[(T, U)] = Future:
+    def zip[U](f2: Future[U])(using Async): Future[(T, U)] = Future:
       Async.await(Async.either(f1, f2)) match
         case Left(Success(x1))    => (x1, f2.value)
         case Right(Success(x2))   => (f1.value, x2)
         case Left(Failure(ex))    => throw ex
         case Right(Failure(ex))   => throw ex
 
-    def alt(f2: Future[T])(using Async.Config): Future[T] = Future:
+    def alt(f2: Future[T])(using Async): Future[T] = Future:
       Async.await(Async.either(f1, f2)) match
         case Left(Success(x1))    => x1
         case Right(Success(x2))   => x2
@@ -251,7 +250,7 @@ There are also two variants of `link` in `Cancellable`, defined as follows:
 trait Cancellable:
   ...
   def link()(using async: Async): this.type =
-    link(async.config.group)
+    link(async.group)
   def unlink(): this.type =
     link(CancellationGroup.Unlinked)
 ```
@@ -283,9 +282,9 @@ The mechanism which achieves this is as follows: When defining a future,
 the body of the future is run in the scope of an `Async.group` wrapper, which is defined like this:
 ```scala
   def group[T](body: Async ?=> T)(using async: Async): T =
-    val g = CancellationGroup().link()
-    try body(using async.withConfig(async.config.copy(group = g)))
-    finally g.cancel()
+    val newGroup = CancellationGroup().link()
+    try body(using async.withGroup(newGroup))
+    finally newGroup.cancel()
 ```
 The `group` wrapper sets up a new cancellation group, runs the given `body` in an `Async` context with that group, and finally cancels the group once `body` has finished.
 
@@ -352,7 +351,7 @@ Tasks make the definition of such delayed futures a bit easier. The `Task` class
 as follows:
 ```scala
 class Task[+T](val body: Async ?=> T):
-  def run(using Async.Config) = Future(body)
+  def run(using Async) = Future(body)
 ```
 A `Task` takes the body of a future as an argument. Its `run` method converts that body to a `Future`, which means starting its execution.
 
@@ -413,7 +412,7 @@ possibility: Here we map a channel of `Try` results to a stream, mapping
 failures with a special =`ChannelClosedException` to `StreamResult.End`.
 ```scala
   extension [T](c: Channel[Try[T]])
-    def toStream(using Async.Config): Stream[T] = Future:
+    def toStream(using Async): Stream[T] = Future:
       c.read() match
         case Success(x) => StreamResult.More(x, toStream)
         case Failure(ex: ChannelClosedException) => StreamResult.End
@@ -434,30 +433,11 @@ Similarly, we can model an actor by a `Future[Unit]` paired with a channel which
 
 ## Internals of Async Contexts
 
-An async context provides two elements:
+An async context provides three elements:
 
  - an `await` method that allows a caller to suspend while waiting for the result of an async source to arrive,
- - a `config` value that refers to the configuration used in the async
- context.
-
-A configuration of an async context is defined by the following class:
-```scala
-  case class Config(scheduler: ExecutionContext, group: CancellationGroup)
-```
-It contains as members a scheduler and a cancellation group. The scheduler
-is an `ExecutionContext` that determines when and how suspended tasks are run. The cancellation group determines the default linkage of all cancellable objects that are created in an async context.
-
-Async contexts and their configurations are usually passed as implicit parameters. Async configurations can be implicitly generated from async contexts by simply pulling out the `config` value of the context.
-They can also be implicitly generated from execution contexts, by
-combining an execution context with the special `Unlinked` cancellation group. The generation from an async context has higher priority than the generation from an execution context. This schema is implemented in the companion object of class `Config`:
-```scala
-  trait LowPrioConfig:
-    given fromExecutionContext(using scheduler: ExecutionContext): Config =
-      Config(scheduler, CancellationGroup.Unlinked)
-
-  object Config extends LowPrioConfig:
-    given fromAsync(using async: Async): Config = async.config
-```
+ - a `scheduler` value that refers to execution context on which tasks are scheduled,
+ - a `group` value that contains a cancellation group which determines the default linkage of all cancellable objects that are created in an async context.
 
 ## Implementing Await
 
@@ -486,7 +466,7 @@ Using this infrastructure, `await` can be implemented like this:
       try
         suspend[T, Unit]: k =>
           src.onComplete: x =>
-            config.scheduler.schedule: () =>
+            scheduler.schedule: () =>
               k.resume(x)
             true // signals to `src` that result `x` was consumed
       finally checkCancellation()
@@ -503,12 +483,12 @@ An Async context with this version of `await` is used in the following
 implementation of `async`, the wrapper for the body of a future:
 ```scala
 private def async(body: Async ?=> Unit): Unit =
-  class FutureAsync(using val config: Async.Config) extends Async:
+  class FutureAsync ... extends Async:
     def await[T](src: Async.Source[T]): T = ...
     ...
 
   boundary [Unit]:
-    body(using FutureAsync())
+    body(using FutureAsync(...))
 ```
 
 ### Using Fibers
@@ -535,9 +515,9 @@ Only the body of the `try` is different from the previous implementation. Here w
 Since the whole fiber suspends, we don't need a `boundary` anymore to delineate the limit of a continuation, so the `async` can be defined as follows:
 ```scala
 private def async(body: Async ?=> Unit): Unit =
-  class FutureAsync(using val config: Async.Config) extends Async:
+  class FutureAsync(...) extends Async:
     def await[T](src: Async.Source[T]): T = ...
     ...
 
-  body(using FutureAsync())
+  body(using FutureAsync(...))
 ```
