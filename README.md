@@ -1,3 +1,14 @@
+
+
+
+This is a proof of concept for a base library for asynchronous computing in direct style. The library needs either fibers or  virtual threads as a basis. It is at present highly experimental, incomplete and provisional. It is not yet extensively tested and not optimized at all.
+
+The concepts and code here should be regarded as a strawman, in the sense of "meant to be knocked down".
+
+A general rationale and introduction follows.
+
+---
+
 # Towards A New Base Library for Asynchronous Computing
 
 Martin Odersky
@@ -124,7 +135,7 @@ All three methods take a `Listener` argument. A `Listener[T]` is a function from
 ```scala
   trait Listener[-T] extends (T => Boolean)
 ```
-The `T` argument is the value obtained from an async source. The boolean result returns `true` if the argument was read by another async computation. It returns `false` if the argument was dropped by a `filter` or lost in a `race`.
+The `T` argument is the value obtained from an async source. A listener returns `true` if the argument was read by another async computation. It returns `false` if the argument was dropped by a `filter` or lost in a `race`.
 Listeners also come with a _lineage_, which tells us what source combinators were used to build a listener.
 
 The `poll` method of an async source allows to poll whether data is present. If that's the case, the listener `k` is applied to the data. The result of `poll` is the result of the listener if it was applied and `false` otherwise. There is also a first-order variant of `poll` that returns data in an `Option`. It is defined
@@ -148,7 +159,7 @@ A typical way to implement `onComplete` for original sources is to poll first an
     /** Add `k` to the waiting list of this source */
     protected def addListener(k: Listener[T]): Unit
 
-    def onComplete(k: Listener[T]): Unit =
+    def onComplete(k: Listener[T]): Unit = synchronized:
       if !poll(k) then addListener(k)
 ```
 So original sources are defined in terms if `poll`, `addListener`, and `dropListener`.
@@ -163,14 +174,14 @@ A simple future can be created by calling the `apply` method of the `Future` obj
     val f2 = Future(c2.read)
     f1.value + f2.value
 ```
-The `Future.apply` method is has the following signature:
+The `Future.apply` method has the following signature:
 ```scala
   def apply[T](body: Async ?=> T)(using Async): Future[T]
 ```
 `apply` wraps an `Async` capability with cancellation handling (tied to the returned `Future`) and passes it to its `body` argument.
 
 Futures also have a set of useful combinators that support what is usually called _structured concurrency_. In particular, there is the `zip` operator,
-which takes two futures and if they complete successfully returns their results in a pair. If one or both of the operand futures fail, the first failure is returned as failure result of the zip. Dually, there is the `alt` operator, which returns the result of the first succeeding future and fails only if both operand futures fail.
+which takes two futures and if they both complete successfully returns their results in a pair. If one or both of the operand futures fail, the first failure is returned as failure result of the zip. Dually, there is the `alt` operator, which returns the result of the first succeeding future and fails only if both operand futures fail.
 
 `zip` and `alt` can be implemented as extension methods on futures as follows:
 
@@ -373,7 +384,7 @@ Example:
 
 Tasks have two advantages over simple lambdas when it comes to delaying futures:
 
- - The intent is made clear: This is a computation intended to be executed concurrently in a future.
+ - The intent is made clear: This is a delayed computation intended to be executed concurrently in a future once it is started.
  - The `Async` context is implicitly provided, since `Task.apply` takes a context function over `Async` as argument.
 
 ## Promises
@@ -409,7 +420,7 @@ A stream represents a sequence of values that are computed one-by-one in a separ
 One can see a stream as a static representation of the values that are transmitted over a channel. This poses the question of termination -- when do we know that a channel receives no further values, so the stream can be terminated
 with an `StreamResult.End` value? The following implementation shows one
 possibility: Here we map a channel of `Try` results to a stream, mapping
-failures with a special =`ChannelClosedException` to `StreamResult.End`.
+failures with a special `ChannelClosedException` to `StreamResult.End`.
 ```scala
   extension [T](c: Channel[Try[T]])
     def toStream(using Async): Stream[T] = Future:

@@ -43,6 +43,8 @@ trait Monadic[M[_]: Monad]:
    */
   def reflect[R](mr: M[R])(using r: CanReflect[M]): R = r.reflect(mr)
 
+  def back[R](m: M[R])(using )
+
   /**
    * Reify a computation into a monadic value
    */
@@ -50,7 +52,7 @@ trait Monadic[M[_]: Monad]:
     boundary [M[R]]:
       given CanReflect[M] with
         def reflect[R2](mr: M[R2]): R2 =
-          suspend [R2, M[R]] (s => mr.flatMap(s.resume))
+          suspend [R2, M[R]] (k => mr.flatMap(k.resume))
       pure(prog)
 
 end Monadic
