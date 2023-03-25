@@ -319,7 +319,7 @@ Channels provide
 
 ### Async Channels
 
-An asynchronous channel implements both the `Async.Source` and `Channel` interfaces. This means inputs from an asychronous channel can be mapped, filtered or combined with other sources in races.
+An asynchronous channel implements both the `Async.Source` and `Channel` interfaces. This means inputs from an asynchronous channel can be mapped, filtered or combined with other sources in races.
 
 ```scala
 class AsyncChannel[T] extends Async.OriginalSource[T], Channel[T]
