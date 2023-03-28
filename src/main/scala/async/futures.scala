@@ -93,7 +93,7 @@ object Future:
 
     /** a handler for Async */
     private def async(body: Async ?=> Unit): Unit =
-      class FutureAsync(val group: CancellationGroup)(using val scheduler: ExecutionContext) extends Async:
+      class FutureAsync(val group: CompletionGroup)(using val scheduler: ExecutionContext) extends Async:
 
         /** Await a source first by polling it, and, if that fails, by suspending
          *  in a onComplete call.
@@ -126,7 +126,7 @@ object Future:
               */
             finally checkCancellation()
 
-        def withGroup(group: CancellationGroup) = FutureAsync(group)
+        def withGroup(group: CompletionGroup) = FutureAsync(group)
 
       sleepABit()
       try body(using FutureAsync(ac.group)(using ac.scheduler))
@@ -143,7 +143,7 @@ object Future:
         link()
         Async.group:
           complete(Try(body))
-        unlink()
+        signalCompletion()
 
   end RunnableFuture
 

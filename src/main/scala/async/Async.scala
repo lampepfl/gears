@@ -14,15 +14,15 @@ trait Async:
   def scheduler: ExecutionContext
 
   /** The cancellation group for this Async */
-  def group: CancellationGroup
+  def group: CompletionGroup
 
   /** An Async of the same kind as this one, with a new cancellation group */
-  def withGroup(group: CancellationGroup): Async
+  def withGroup(group: CompletionGroup): Async
 
 object Async:
 
   /** An implementation of Async that blocks the running thread when waiting */
-  private class Blocking(val group: CancellationGroup)(using val scheduler: ExecutionContext) extends Async:
+  private class Blocking(val group: CompletionGroup)(using val scheduler: ExecutionContext) extends Async:
 
     def await[T](src: Source[T]): T =
       src.poll().getOrElse:
@@ -36,14 +36,14 @@ object Async:
           while result.isEmpty do wait()
           result.get
 
-    def withGroup(group: CancellationGroup) = Blocking(group)
+    def withGroup(group: CompletionGroup) = Blocking(group)
   end Blocking
 
   /** Execute asynchronous computation `body` on currently running thread.
    *  The thread will suspend when the computation waits.
    */
   def blocking[T](body: Async ?=> T)(using ExecutionContext): T =
-    body(using Blocking(CancellationGroup.Unlinked))
+    body(using Blocking(CompletionGroup.Unlinked))
 
   /** The currently executing Async context */
   inline def current(using async: Async): Async = async
@@ -52,9 +52,17 @@ object Async:
   inline def await[T](src: Source[T])(using async: Async): T = async.await(src)
 
   def group[T](body: Async ?=> T)(using async: Async): T =
-    val newGroup = CancellationGroup().link()
-    try body(using async.withGroup(newGroup))
-    finally newGroup.cancel()
+    withNewCompletionGroup(CompletionGroup())(body)
+
+  def withCompletionHander[T](handler: Cancellable => Async => Unit)(body: Async ?=> T)(using async: Async): T =
+    val combined = (c: Cancellable) => (async: Async) ?=>
+      handler(c)
+      async.group.handleCompletion(c)
+    withNewCompletionGroup(CompletionGroup(combined))(body)
+
+  private def withNewCompletionGroup[T](group: CompletionGroup)(body: Async ?=> T)(using async: Async): T =
+    try body(using async.withGroup(group.link()))
+    finally group.cancel()
 
   /** A function `T => Boolean` whose lineage is recorded by its implementing
    *  classes. The Listener function accepts values of type `T` and returns

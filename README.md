@@ -93,8 +93,8 @@ trait Async:
   def await[T](src: Async.Source[T]): T
 
   def scheduler: ExecutionContext
-  def group: CancellationGroup
-  def withGroup(group: CancellationGroup): Async
+  def group: CompletionGroup
+  def withGroup(group: CompletionGroup): Async
 ```
 The most important abstraction here is the `await` method.
 Code with the `Async` capability can _await_ an _asynchronous source_ of type `Async.Source`. This implies that the code will suspend if the
@@ -215,7 +215,7 @@ Futures that are no longer needed can be cancelled. `Future` extends the `Cancel
 ```scala
   trait Cancellable:
     def cancel(): Unit
-    def link(group: CancellationGroup): this.type
+    def link(group: CompletionGroup): this.type
     ...
 ```
 A cancel request is transmitted via the `cancel` method. It sets the
@@ -224,13 +224,14 @@ before and after each `await` and can also be tested from user code.
 If a test returns `true`, a `CancellationException` is thrown, which
 usually terminates the running future.
 
-## Cancellation Groups
+## Completion Groups
 
-A cancellable object such as a future belongs to a `CancellationGroup`.
-Cancellation groups are themselves cancellable objects. Cancelling
-a cancellation group means cancelling all its members.
+A cancellable object such as a future belongs to a `CompletionGroup`.
+Completion groups are themselves cancellable objects. Cancelling
+a completion group means cancelling all its members.
 ```scala
-class CancellationGroup extends Cancellable:
+class CompletionGroup(val handleCompletion: Cancellable => Async ?=> Unit)
+extends Cancellable:
   private var members: mutable.Set[Cancellable] = mutable.Set()
 
   /** Cancel all members and clear the members set */
@@ -246,11 +247,11 @@ class CancellationGroup extends Cancellable:
   def drop(member: Cancellable): Unit = synchronized:
     members -= member
 ```
-One can include a cancellable object in a cancellation group using
-the object's `link` method. An object can belong only to one cancellation group, so linking an already linked cancellable object will unlink it from its previous cancellation group. The `link` method is defined
+One can include a cancellable object in a completion group using
+the object's `link` method. An object can belong only to one completion group, so linking an already linked cancellable object will unlink it from its previous completion group. The `link` method is defined
 as follows:
 ```scala
-def link(group: CancellationGroup): this.type =
+def link(group: CompletionGroup): this.type =
     this.group.drop(this)
     this.group = group
     this.group.add(this)
@@ -264,14 +265,14 @@ trait Cancellable:
   def link()(using async: Async): this.type =
     link(async.group)
   def unlink(): this.type =
-    link(CancellationGroup.Unlinked)
+    link(CompletionGroup.Unlinked)
 ```
 The second variant of `link` links a cancellable object to the group of the current `Async` context. The `unlink` method drops a cancellable object from its group. This is achieved by "linking" the object to the
-special `Unlinked` cancellation group, which ignores all cancel requests
+special `Unlinked` completion group, which ignores all cancel requests
 as well as all add/drop member requests.
 ```scala
-object CancellationGroup
-  object Unlinked extends CancellationGroup:
+object CompletionGroup
+  object Unlinked extends CompletionGroup:
     override def cancel() = ()
     override def add(member: Cancellable): Unit = ()
     override def drop(member: Cancellable): Unit = ()
@@ -294,11 +295,11 @@ The mechanism which achieves this is as follows: When defining a future,
 the body of the future is run in the scope of an `Async.group` wrapper, which is defined like this:
 ```scala
   def group[T](body: Async ?=> T)(using async: Async): T =
-    val newGroup = CancellationGroup().link()
+    val newGroup = CompletionGroup().link()
     try body(using async.withGroup(newGroup))
     finally newGroup.cancel()
 ```
-The `group` wrapper sets up a new cancellation group, runs the given `body` in an `Async` context with that group, and finally cancels the group once `body` has finished.
+The `group` wrapper sets up a new completion group, runs the given `body` in an `Async` context with that group, and finally cancels the group once `body` has finished.
 
 ## Channels
 
@@ -449,7 +450,7 @@ An async context provides three elements:
 
  - an `await` method that allows a caller to suspend while waiting for the result of an async source to arrive,
  - a `scheduler` value that refers to execution context on which tasks are scheduled,
- - a `group` value that contains a cancellation group which determines the default linkage of all cancellable objects that are created in an async context.
+ - a `group` value that contains a completion group which determines the default linkage of all cancellable objects that are created in an async context.
 
 ## Implementing Await
 
