@@ -43,8 +43,6 @@ trait Monadic[M[_]: Monad]:
    */
   def reflect[R](mr: M[R])(using r: CanReflect[M]): R = r.reflect(mr)
 
-  def back[R](m: M[R])(using )
-
   /**
    * Reify a computation into a monadic value
    */
