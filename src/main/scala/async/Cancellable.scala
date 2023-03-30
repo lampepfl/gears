@@ -6,7 +6,7 @@ trait Cancellable:
   private var group: CompletionGroup = CompletionGroup.Unlinked
 
   /** Issue a cancel request */
-  def cancel(): Unit
+  def cancel()(using Async): Unit
 
   /** Add this cancellable to the given group after removing
    *  it from the previous group in which it was.

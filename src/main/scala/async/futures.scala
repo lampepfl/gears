@@ -24,7 +24,7 @@ trait Future[+T] extends Async.OriginalSource[Try[T]], Cancellable:
   /** Eventually stop computation of this future and fail with
    *  a `Cancellation` exception.
    */
-  def cancel(): Unit
+  def cancel()(using Async): Unit
 
 object Future:
 
@@ -54,7 +54,7 @@ object Future:
 
     // Cancellable method implementations
 
-    def cancel(): Unit =
+    def cancel()(using Async): Unit =
       cancelRequest = true
 
     // Future method implementations

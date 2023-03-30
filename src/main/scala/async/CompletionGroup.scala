@@ -10,9 +10,11 @@ class CompletionGroup(val handleCompletion: Cancellable => Async ?=> Unit = _.un
   private var members: mutable.Set[Cancellable] = mutable.Set()
 
   /** Cancel all members and clear the members set */
-  def cancel() =
+  def cancel()(using Async) =
     members.toArray.foreach(_.cancel())
-    members.clear()
+    synchronized:
+      while members.nonEmpty do wait()
+    signalCompletion()
 
   /** Add given member to the members set */
   def add(member: Cancellable): Unit = synchronized:
@@ -21,6 +23,7 @@ class CompletionGroup(val handleCompletion: Cancellable => Async ?=> Unit = _.un
   /** Remove given member from the members set if it is an element */
   def drop(member: Cancellable): Unit = synchronized:
     members -= member
+    if members.isEmpty then notifyAll()
 
 object CompletionGroup:
 
@@ -29,7 +32,7 @@ object CompletionGroup:
    *  called on this group.
    */
   object Unlinked extends CompletionGroup:
-    override def cancel() = ()
+    override def cancel()(using Async) = ()
     override def add(member: Cancellable): Unit = ()
     override def drop(member: Cancellable): Unit = ()
   end Unlinked
