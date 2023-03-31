@@ -54,8 +54,9 @@ object Future:
 
     // Cancellable method implementations
 
-    def cancel()(using Async): Unit =
+    def cancel()(using Async): Unit = synchronized:
       cancelRequest = true
+      notify() // wake up future in case it is waiting on an async source
 
     // Future method implementations
 
@@ -101,30 +102,32 @@ object Future:
         def await[T](src: Async.Source[T]): T =
           checkCancellation()
           src.poll().getOrElse:
-            try
-              src.poll().getOrElse:
-                sleepABit()
-                log(s"suspending ${threadName.get()}")
-                var result: Option[T] = None
-                src.onComplete: x =>
-                  synchronized:
-                    result = Some(x)
-                    notify()
-                  true
-                sleepABit()
-                synchronized:
-                  log(s"suspended ${threadName.get()}")
-                  while result.isEmpty do wait()
-                  result.get
-              /* With full continuations, the try block can be written more simply as follows:
+            src.poll().getOrElse:
+              sleepABit()
+              log(s"suspending ${threadName.get()}")
+              var result: Option[T] = None
+              src.onComplete: x =>
+                Future.this.synchronized:
+                  result = Some(x)
+                  notify()
+                true
+              sleepABit()
+              Future.this.synchronized:
+                log(s"suspended ${threadName.get()}")
+                while result.isEmpty do
+                  wait()
+                  checkCancellation()
+                result.get
 
-                suspend[T, Unit]: k =>
-                  src.onComplete: x =>
-                    scheduler.schedule: () =>
-                      k.resume(x)
-                  true
-              */
-            finally checkCancellation()
+            /* With full continuations, the try block can be written more simply as follows
+               (ignoring cancellation for now):
+
+              suspend[T, Unit]: k =>
+                src.onComplete: x =>
+                  scheduler.schedule: () =>
+                    k.resume(x)
+                true
+            */
 
         def withGroup(group: CompletionGroup) = FutureAsync(group)
 
