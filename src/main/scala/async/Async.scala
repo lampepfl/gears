@@ -23,18 +23,16 @@ object Async:
 
   /** An implementation of Async that blocks the running thread when waiting */
   private class Blocking(val group: CancellationGroup)(using val scheduler: ExecutionContext) extends Async:
-
     def await[T](src: Source[T]): T =
-      src.poll().getOrElse:
-        var result: Option[T] = None
-        src.onComplete: x =>
-          synchronized:
-            result = Some(x)
-            notify()
-          true
+      var result: Option[T] = None
+      val poll = src.poll: x =>
         synchronized:
-          while result.isEmpty do wait()
-          result.get
+          result = Some(x)
+          notify()
+        true
+      if !poll then synchronized:
+        while result.isEmpty do wait()
+      result.get
 
     def withGroup(group: CancellationGroup) = Blocking(group)
   end Blocking
@@ -74,20 +72,12 @@ object Async:
    *  An example of an ephemeral source is `Channel`.
    */
   trait Source[+T]:
-
     /** If data is available at present, pass it to function `k`
-     *  and return the result of this call. Otherwise return false.
+     *  and return the result of this call. Otherwise, call when the source is complete asynchronously.
      *  `k` returns true iff the data was consumed in an async block.
-     *  Calls to `poll` are always synchronous.
+     *  Returns whether the poll was done synchronously.
      */
     def poll(k: Listener[T]): Boolean
-
-    /** Once data is available, pass it to function `k`.
-     *  `k` returns true iff the data was consumed in an async block.
-     *  Calls to `onComplete` are usually asynchronous, meaning that
-     *  the passed continuation `k` is a suspension.
-     */
-    def onComplete(k: Listener[T]): Unit
 
     /** Signal that listener `k` is dead (i.e. will always return `false` from now on).
      *  This permits original, (i.e. non-derived) sources like futures or channels
@@ -95,30 +85,10 @@ object Async:
      */
     def dropListener(k: Listener[T]): Unit
 
-    /** Utililty method for direct polling. */
-    def poll(): Option[T] =
-      var resultOpt: Option[T] = None
-      poll { x => resultOpt = Some(x); true }
-      resultOpt
-
   end Source
-
-  /** An original source has a standard definition of `onCopmplete` in terms
-   *  of `poll` and `addListener`.
-   */
-  abstract class OriginalSource[+T] extends Source[T]:
-
-    /** Add `k` to the listener set of this source */
-    protected def addListener(k: Listener[T]): Unit
-
-    def onComplete(k: Listener[T]): Unit = synchronized:
-      if !poll(k) then addListener(k)
-
-  end OriginalSource
 
   /** A source that transforms an original source in some way */
   abstract class DerivedSource[T, U](val original: Source[T]) extends Source[U]:
-
     /** Handle a value `x` passed to the original source by possibly
      *  invokiong the continuation for this source.
      */
@@ -130,8 +100,7 @@ object Async:
 
     def poll(k: Listener[U]): Boolean =
       original.poll(transform(k))
-    def onComplete(k: Listener[U]): Unit =
-      original.onComplete(transform(k))
+
     def dropListener(k: Listener[U]): Unit =
       original.dropListener(transform(k))
 
@@ -152,17 +121,7 @@ object Async:
   /** Pass first result from any of `sources` to the continuation */
   def race[T](sources: Source[T]*): Source[T] =
     new Source[T]:
-
       def poll(k: Listener[T]): Boolean =
-        val it = sources.iterator
-        var found = false
-        while it.hasNext && !found do
-          it.next.poll: x =>
-            found = k(x)
-            found
-        found
-
-      def onComplete(k: Listener[T]): Unit =
         val listener = new ForwardingListener[T](this, k):
           var foundBefore = false
           def continueIfFirst(x: T): Boolean = synchronized:
@@ -171,7 +130,7 @@ object Async:
             val found = continueIfFirst(x)
             if found then sources.foreach(_.dropListener(this))
             found
-        sources.foreach(_.onComplete(listener))
+        sources.iterator.exists(_.poll(listener))
 
       def dropListener(k: Listener[T]): Unit =
         val listener = new ForwardingListener[T](this, k):

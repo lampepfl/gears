@@ -23,7 +23,7 @@ class ChannelClosedException extends Exception
 /** An unbounded asynchronous channel. Senders do not wait for matching
  *  readers.
  */
-class AsyncChannel[T] extends Async.OriginalSource[T], Channel[T]:
+class AsyncChannel[T] extends Async.Source[T], Channel[T]:
 
   private val pending = ListBuffer[T]()
   private val waiting = mutable.Set[Listener[T]]()
@@ -56,10 +56,10 @@ class AsyncChannel[T] extends Async.OriginalSource[T], Channel[T]:
 
   def poll(k: Listener[T]): Boolean = synchronized:
     ensureOpen()
-    drainPending(k)
-
-  def addListener(k: Listener[T]): Unit = synchronized:
-    waiting += k
+    if drainPending(k) then true
+    else
+      waiting += k
+      false
 
   def dropListener(k: Listener[T]): Unit = synchronized:
     waiting -= k
@@ -109,23 +109,27 @@ object SyncChannel:
       var r: Option[T] = None
       if k2 { x => r = Some(x); true } then r else None
 
-    val canRead = new Async.OriginalSource[T]:
-      def poll(k: Listener[T]): Boolean =
-        link(pendingSends, sender => collapse(sender).map(k) == Some(true))
-      def addListener(k: Listener[T]) = synchronized:
-        pendingReads += k
-      def dropListener(k: Listener[T]): Unit = synchronized:
+    val canRead = new Async.Source[T]:
+      def poll(k: Listener[T]): Boolean = SyncChannel.this.synchronized:
+        if link(pendingSends, sender => collapse(sender).map(k) == Some(true)) then true
+        else
+          pendingReads += k
+          false
+
+      def dropListener(k: Listener[T]): Unit = SyncChannel.this.synchronized:
         pendingReads -= k
 
-    val canSend = new Async.OriginalSource[Listener[T]]:
-      def poll(k: Listener[Listener[T]]): Boolean =
-        link(pendingReads, k(_))
-      def addListener(k: Listener[Listener[T]]) = synchronized:
-        pendingSends += k
-      def dropListener(k: Listener[Listener[T]]): Unit = synchronized:
+    val canSend = new Async.Source[Listener[T]]:
+      def poll(k: Listener[Listener[T]]): Boolean = SyncChannel.this.synchronized:
+        if link(pendingReads, k(_)) then true
+        else
+          pendingSends += k
+          false
+
+      def dropListener(k: Listener[Listener[T]]): Unit = SyncChannel.this.synchronized:
         pendingSends -= k
 
-    protected def shutDown(finalValue: T) =
+    protected def shutDown(finalValue: T) = synchronized:
       isClosed = true
       pendingReads.foreach(_(finalValue))
 

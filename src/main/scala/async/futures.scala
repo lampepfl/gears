@@ -11,7 +11,7 @@ import scala.concurrent.ExecutionContext
 
 /** A cancellable future that can suspend waiting for other asynchronous sources
  */
-trait Future[+T] extends Async.OriginalSource[Try[T]], Cancellable:
+trait Future[+T] extends Async.Source[Try[T]], Cancellable:
 
   /** Wait for this future to be completed and return its result */
   def result(using async: Async): Try[T]
@@ -44,10 +44,13 @@ object Future:
     // Async.Source method implementations
 
     def poll(k: Async.Listener[Try[T]]): Boolean =
-      hasCompleted && k(result)
-
-    def addListener(k: Async.Listener[Try[T]]): Unit = synchronized:
-      waiting += k
+      // fast path
+      if hasCompleted && k(result) then true
+      else synchronized:
+        if hasCompleted && k(result) then true
+        else
+          waiting += k
+          false
 
     def dropListener(k: Async.Listener[Try[T]]): Unit = synchronized:
       waiting -= k
@@ -100,22 +103,19 @@ object Future:
          */
         def await[T](src: Async.Source[T]): T =
           checkCancellation()
-          src.poll().getOrElse:
-            try
-              src.poll().getOrElse:
-                sleepABit()
-                log(s"suspending ${threadName.get()}")
-                var result: Option[T] = None
-                src.onComplete: x =>
-                  synchronized:
-                    result = Some(x)
-                    notify()
-                  true
-                sleepABit()
-                synchronized:
-                  log(s"suspended ${threadName.get()}")
-                  while result.isEmpty do wait()
-                  result.get
+          var result: Option[T] = None
+          val poll = src.poll: x =>
+            synchronized:
+              result = Some(x)
+              notify()
+            true
+          if !poll then
+            log(s"suspending ${threadName.get()}")
+            sleepABit()
+            synchronized:
+              log(s"suspended ${threadName.get()}")
+              while result.isEmpty do wait()
+          try result.get
               /* With full continuations, the try block can be written more simply as follows:
 
                 suspend[T, Unit]: k =>
@@ -124,7 +124,7 @@ object Future:
                       k.resume(x)
                   true
               */
-            finally checkCancellation()
+          finally checkCancellation()
 
         def withGroup(group: CancellationGroup) = FutureAsync(group)
 
