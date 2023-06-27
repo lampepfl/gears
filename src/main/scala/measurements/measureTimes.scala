@@ -156,15 +156,7 @@ def measureIterations[T](action: () => T): Int =
 @main def channelsVsJava(): Unit =
   given ExecutionContext = ExecutionContext.global
 
-  /*
-    Java "channel" sends per second: 8691652
-    SyncChannel sends per second: 319371.0
-    BufferedChannel sends per second: 308286.0
-    ChannelMultiplexer over SyncChannels sends per second: 155737.0
-    ChannelMultiplexer over BufferedChannels sends per second: 151995.0
-  */
-
-  val sec = 20
+  val sec = 60
 
   // java
   @volatile var shared: Long = 0
@@ -312,11 +304,12 @@ def measureIterations[T](action: () => T): Int =
     Thread.sleep(500)
     println("ChannelMultiplexer over BufferedChannels sends per second: " + cmOverBufferedSendsPerSecond)
 
-  /*
-  SyncChannel sends per second: 389657.0
-  BufferedChannel sends per second: 382243.0
-  ChannelMultiplexer over SyncChannel sends per second: 204518.0
-  ChannelMultiplexer over SyncChannel sends per second: 142378.0
+  /* Linux
+    Java "channel" sends per second: 8691652
+    SyncChannel sends per second: 319371.0
+    BufferedChannel sends per second: 308286.0
+    ChannelMultiplexer over SyncChannels sends per second: 155737.0
+    ChannelMultiplexer over BufferedChannels sends per second: 151995.0
   */
 
 /** Warmup for 10 seconds and benchmark for 60 seconds.
@@ -337,7 +330,7 @@ def measureRunTimes[T](action: () => T): TimeMeasurementResult =
 
   {
     val warmupStart = System.currentTimeMillis()
-    while (System.currentTimeMillis() - warmupStart < 2L * 1000)
+    while (System.currentTimeMillis() - warmupStart < 10L * 1000)
       action()
   }
 
@@ -354,7 +347,7 @@ def measureRunTimes[T](action: () => T): TimeMeasurementResult =
     var nanoTimePerOperation: Double = (end - start + (0.0).toDouble) / timesIn25Milliseconds.toDouble
     times.append(nanoTimePerOperation)
 
-    if (end - benchmarkingStart >= 10L * 1000 * 1000 * 1000)
+    if (end - benchmarkingStart >= 60L * 1000 * 1000 * 1000)
       benchmarkingTimeStillNotPassed = false
   }
 
@@ -374,50 +367,16 @@ def measureRunTimes[T](action: () => T): TimeMeasurementResult =
 @main def measureSomething(): Unit =
 
   val g = measureRunTimes: () =>
-//    var t = 100100
-//    t *= 321984834
-//    t /= 1238433
-//    t /= 1222
+    var t = 100100
+    t *= 321984834
+    t /= 1238433
+    t /= 1222
     Thread.sleep(11)
   println(g)
 
 @main def measureTimesNew: Unit =
 
   // mkdir -p /tmp/FIO && sudo mount -t tmpfs -o size=8g tmpfs /tmp/FIO
-
-  /* Linux:
-  {
-    "File writing": {
-
-      "Size 4": {
-  "PosixLikeIO": [0.019330398100000007, 0.02539598958144832],
-  "Java FileWriter": [0.009646040700000004, 0.0053465575899217625],
-  "Java Files.writeString": [0.0060547288999999995, 0.0035444597483020052],
-  },
-
-      "Size 41943040": {
-  "PosixLikeIO": [17.027633586999997, 0.7486469677380989],
-  "Java FileWriter": [30.45175985000001, 4.189321550366144],
-  "Java Files.writeString": [17.11834752, 2.6243451330927066],
-  },
-  },
-
-    "File reading": {
-
-      "Size 4": {
-  "PosixLikeIO": [0.017123947300000008, 0.03542323168500447],
-  "Java FileReeader": [0.005593237600000002, 0.001719272596104352],
-  "Java Files.readString": [0.004321956800000001, 0.0024380564850612573],
-  },
-
-      "Size 41943040": {
-  "PosixLikeIO": [28.739885630999982, 0.4682373710339424],
-  "Java FileReeader": [12.521057180000003, 0.15858452136794252],
-  "Java Files.readString": [19.780039794999997, 2.1086356124522125],
-  },
-  },
-  }
-  */
 
   given ExecutionContext = ExecutionContext.global
 
@@ -536,23 +495,6 @@ def measureRunTimes[T](action: () => T): TimeMeasurementResult =
   println(dataAlmostJson.toString)
 
   /* Linux
-  {
-    "Write 4B File": {
-
-      "Size 4": {
-  "PosixLikeIO": [0.29, 0.06, 0.06, 0.05, 0.04, 0.05, 0.04, 0.04, 0.03, 0.03, 0.04, 0.04, 0.03, 0.03, 0.03, 0.03, 0.02, 0.02, 0.02, 0.02, 0.01, 0.02, 0.01, 0.02, 0.01, 0.01, 0.02, 0.01, 0.01, 0.02, 0.01, 0.01, 0.02, 0.01, 0.01, 0.01, 0.02, 0.01, 0.01, 0.01, 0.01, 0.02, 0.01, 0.01, 0.01, 0.01, 0.02, 0.01, 0.01, 0.01, 0.02, 0.01, 0.01, 0.02, 0.01, 0.02, 0.01, 0.01, 0.01, 0.02, 0.01, 0.01, 0.01, 0.01, 0.01, 0.02, 0.01, 0.01, 0.02, 0.01, 0.01, 0.02, 0.01, 0.01, 0.01, 0.01, 0.01, 0.02, 0.01, 0.01, 0.01, 0.02, 0.01, 0.01, 0.01, 0.01, 0.01, 0.02, 0.01, 0.01, 0.02, 0.01, 0.02, 0.01, 0.01, 0.02, 0.01, 0.01, 0.02, 0.01, ],
-  "Java FileWriter": [0.03, 0.03, 0.02, 0.02, 0.01, 0.02, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.0, 0.01, 0.01, 0.0, 0.01, 0.01, 0.0, 0.01, 0.01, 0.0, 0.01, 0.01, 0.01, 0.0, 0.01, 0.01, 0.0, 0.01, 0.01, 0.0, 0.01, 0.01, 0.01, 0.0, 0.01, 0.01, 0.05, 0.0, 0.01, 0.01, 0.0, 0.0, 0.01, 0.0, 0.01, 0.0, 0.01, 0.0, 0.01, 0.0, 0.01, 0.0, 0.0, 0.01, 0.0, 0.01, 0.0, 0.01, 0.0, 0.01, 0.0, 0.01, 0.0, 0.0, 0.01, 0.0, 0.01, 0.0, 0.01, 0.0, 0.0, 0.01, 0.0, 0.01, 0.0, 0.01, 0.0, 0.01, 0.0, 0.0, 0.01, 0.0, 0.01, 0.0, 0.01, 0.0, 0.01, 0.0, 0.0, 0.01, 0.0, 0.01, 0.0, 0.01, 0.0, 0.0, 0.01, ],
-  "Java Files.write": [0.03, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.0, 0.01, 0.01, 0.0, 0.01, 0.0, 0.01, 0.01, 0.0, 0.0, 0.01, 0.0, 0.01, 0.0, 0.01, 0.0, 0.01, 0.01, 0.01, 0.0, 0.01, 0.0, 0.01, 0.0, 0.01, 0.0, 0.0, 0.01, 0.0, 0.01, 0.0, 0.01, 0.0, 0.0, 0.01, 0.0, 0.01, 0.0, 0.0, 0.01, 0.0, 0.01, 0.0, 0.0, 0.01, 0.0, 0.01, 0.0, 0.01, 0.0, 0.01, 0.0, 0.01, 0.0, 0.0, 0.01, 0.0, 0.01, 0.0, 0.0, 0.01, 0.0, 0.0, 0.01, 0.0, 0.01, 0.0, 0.0, 0.01, 0.0, 0.0, 0.01, 0.0, 0.01, 0.0, 0.0, 0.01, 0.0, 0.0, 0.01, 0.0, 0.01, 0.0, 0.0, 0.01, 0.0, 0.0, 0.01, 0.01, 0.0, 0.01, 0.0, ],
-  },
-
-      "Size 41943040": {
-  "PosixLikeIO": [24.2, 17.1, 17.1, 17.3, 18.1, 17.2, 17.1, 17.1, 17.0, 17.0, 17.2, 17.1, 17.0, 16.7, 17.2, 17.0, 16.9, 17.0, 17.1, 16.8, 16.9, 16.6, 16.7, 17.0, 16.7, 16.7, 17.0, 17.1, 17.0, 17.3, 17.2, 17.0, 17.2, 17.0, 17.1, 17.0, 17.0, 16.9, 17.2, 17.0, 16.9, 16.7, 17.1, 17.1, 16.8, 17.2, 17.3, 17.1, 17.0, 17.1, 17.3, 17.0, 17.1, 17.3, 17.1, 17.0, 17.1, 16.9, 17.2, 16.9, 17.0, 17.1, 17.2, 17.1, 17.1, 17.0, 17.0, 17.2, 17.0, 16.9, 17.7, 18.0, 18.3, 18.8, 19.0, 21.6, 19.9, 19.8, 19.8, 19.7, 19.6, 19.7, 19.9, 19.7, 19.6, 19.8, 20.1, 19.7, 19.8, 19.3, 19.7, 19.6, 19.5, 19.7, 19.4, 19.4, 19.5, 19.3, 19.9, 19.6, ],
-  "Java FileWriter": [51.7, 47.0, 46.8, 46.9, 46.8, 46.8, 46.7, 46.4, 46.6, 46.4, 45.2, 45.5, 45.9, 45.2, 45.4, 45.2, 45.1, 44.9, 45.0, 44.9, 45.6, 45.2, 46.7, 57.8, 55.7, 65.3, 54.0, 48.6, 51.4, 50.9, 49.3, 47.6, 46.5, 45.2, 44.8, 44.6, 44.1, 44.5, 44.2, 44.3, 44.1, 44.3, 44.2, 44.3, 44.3, 44.3, 43.8, 44.2, 44.2, 44.2, 45.1, 44.3, 44.5, 44.2, 44.4, 43.9, 44.7, 44.7, 44.4, 44.4, 43.9, 44.6, 44.3, 32.1, 31.7, 31.9, 32.1, 31.5, 31.4, 31.5, 31.6, 31.5, 31.6, 31.4, 32.1, 34.0, 34.0, 32.5, 32.7, 32.2, 34.4, 33.6, 33.3, 32.9, 33.3, 33.3, 36.7, 45.3, 82.2, 85.4, 48.2, 37.3, 35.2, 39.1, 34.1, 37.6, 37.3, 34.8, 33.8, 33.2, ],
-  "Java Files.write": [26.8, 33.4, 28.7, 27.4, 27.3, 29.0, 29.7, 33.1, 30.3, 33.4, 31.5, 34.0, 29.5, 27.2, 28.3, 33.6, 29.4, 27.5, 28.9, 29.7, 29.9, 35.0, 29.7, 27.6, 26.4, 27.8, 33.2, 29.8, 27.5, 26.1, 27.4, 30.3, 29.7, 35.3, 31.8, 27.5, 27.2, 29.6, 28.2, 26.9, 27.8, 27.4, 30.7, 29.1, 31.3, 29.6, 27.6, 26.0, 25.9, 25.2, 25.5, 25.0, 24.6, 24.4, 24.9, 24.6, 24.3, 24.4, 24.5, 24.5, 24.9, 24.7, 24.5, 24.6, 24.5, 24.7, 24.5, 25.7, 26.3, 25.6, 25.4, 25.2, 24.8, 24.5, 24.8, 24.7, 24.9, 24.4, 25.1, 24.4, 24.7, 24.5, 25.1, 24.6, 24.8, 24.4, 24.3, 24.6, 24.6, 24.4, 24.9, 24.5, 24.8, 24.8, 24.7, 24.6, 24.6, 24.4, 24.8, 24.8, ],
-  },
-  },
-  }
-
   {
     "File writing": {
 
