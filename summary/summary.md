@@ -12,6 +12,7 @@ The async library assumes some implementation of green threads / fibers / corout
 
 
 The main goals of the library are
+
 1. direct style,
 2. structured concurrency, and
 3. possibility of cancellation,
@@ -26,6 +27,7 @@ Large part of it is already implemented and available as preview features in JVM
 In order to utilize the new semantics one has to invoke the JVM with additional VM parameter `--enable-preview`.
 
 The core semantic changes of project Loom are
+
 1. Introduction of virtual threads (`Thread.startVirtualThread`), and
 2. making most non-blocking operations blocking instead.
 
@@ -64,6 +66,7 @@ trait Listener[-T] extends (T => Boolean)
 ```
 
 Each listener has to obey the following contract:
+
 1. either consume the value and signal it by returning `true` as quickly as possible, or
 2. determine that it is not interested in this value and return `false` as quickly as possible.
 
@@ -72,6 +75,7 @@ This mechanism was invented so that filers and other readers which can condition
 ### `Async` trait
 
 Instances of trait `Async` provide
+
 1. a concrete implementation of `await(Async.Source[T]): T`,
 2. an `ExecutionContext`, and
 3. a completion group previously called cancellation group (details in the `README.md`).
@@ -146,6 +150,7 @@ Async.blocking:
 ```
 
 To obtain the result of a future `f`'s execution one can either
+
 1. `Async.await(f)`, which awaits the future's completion and returns a `Try[T]`
 2. `f.result`, which does the same thing, or
 3. `f.value` which is the same as `f.result.get`.
@@ -197,6 +202,7 @@ class Task[+T](val body: Async ?=> T):
 Task is a template for making runnable futures and is therefore referentially transparent. `run` method instantiates the future and starts executing it immediately.
 
 Tasks can be optionally given a schedule which describes how a task is to be repeated.
+
 * `Task(g).schedule(TaskSchedule.Every(100)).run` will run every 100 milliseconds
 * `Task(g).schedule(TaskSchedule.RepeatUntilSuccess()).run` will run until `g` succeeds
 * `Task(g).schedule(TaskSchedule.RepeatUntilFailure()).run` will run until `g` fails
@@ -251,10 +257,12 @@ trait BufferedChannel[T] extends Channel[T]
 ```
 
 `SyncChannel`, sometimes called a rendez-vous channel has the following semantics:
+
 * `send` to an unclosed channel blocks until a reader willing to accept this value (which is indicated by the reader's listener returning `true` after sampling the value) is found and this reader reads the value.
 * reading is done via the `canRead` async source of potential values (wrapped in a `Try`). Note that only reading is represented as an async source, sending is a blocking operations that is implemented similarly to how `await` is implemented.
 
 `BufferedChannel(size: Int)` is a version of a channel with an internal value buffer (represented internally as an array with positive `size`). It has the following semantics:
+
 * `send` if the buffer is not full appends the value to the buffer and returns immediately.
 * `send` if the buffer is full sleeps until some buffer slot is freed, then writes the value there and immediately returns.
 * reading is done via the `canRead` async source that awaits the buffer being nonempty and the reader accepting the first value in the buffer. Because readers can refuse a value, it is possible that many readers await on `canRead` while the buffer is non-empty if all of them refused the first value in the buffer. At no point a reader is allowed to sample/read anything but the first entry in the buffer.
@@ -365,12 +373,14 @@ We check how many such operations can be performed in a second.
 
 ![](ch1.png)
 
-| OS      | Thread/Future | Operations per second | Overhead vs the other operation on the same OS |
-|---------|---------------|-----------------------|------------------------------------------------|
-| Linux   | Thread        | 292647                | 3.40x                                          |
-| Linux   | Future        | 86032                 | 0.29x                                          |
-| Windows | Thread        | 108826                | 4.12x                                          |
-| Windows | Future |  26402                | 0.24x                                          |
+In the following table overhead means the overhead versus the other operation on the same OS.
+
+| OS      | Thread/Future | Operations per second | Overhead |
+|---------|---------------|-----------------------|----------|
+| Linux   | Thread        | 292647                | 3.40x    |
+| Linux   | Future        | 86032                 | 0.29x    |
+| Windows | Thread        | 108826                | 4.12x    |
+| Windows | Future |  26402                | 0.24x    |
 
 As expected, futures do include overhead compared to just using virtual threads. On Linux it's 3.4 and on Windows 4.12 times as expensive (just in the creation/instrumentation/deletion aspect).
 It's worth noting that future/thread creation is around 3 times slower on Windows than on Linux.
@@ -378,6 +388,7 @@ It's worth noting that future/thread creation is around 3 times slower on Window
 #### Async.race
 
 The second benchmarked primitive is `Async.race`. Racing three futures is compared to two other operations.
+
 1. First it is compared to just awaiting the future we know will be the first to finish.
 2. Second, it is compared to replacing futures with virtual threads which upon completion set an atomic boolean to true. The awaiting thread spin locks on the boolean.
 
@@ -443,16 +454,18 @@ In the scenario where there is one sender thread and one receiver thread, we can
     }
 ```
 There are two threads, the sender `t1` and the receiver `t2`. They have a shared variable for the communicated value and a shared atomic boolean lock, state of which signifies whether it is time for writing or reading from the shared value.
-Threads synchronize by spin locking on the shared boolean and writing/reading the shared variable.
+Threads synchronize by spin locking on the shared boolean and writing/reading the shared variable. 
 
-| OS      | Method               | Operations per second | Overhead vs ideal on the same OS |
-|---------|----------------------| -- |----------------------------------|
-| Linux   | Ideal implementation | 8691652 | -                                |
-| Linux   | SyncChannel          | 319371 | 27.21x                           |
-| Linux   | BufferedChannel(1)   | 308286 | 28.19x                           |
-| Windows | Ideal implementation | 6859438 | -                                |
-| Windows | SyncChannel          | 59713 | 114.87x                          |
-| Windows | BufferedChannel(1)   | 55949 | 122.60x                          |
+In the following table overhead is taken versus the ideal implementation on the same OS.
+
+| OS      | Method               | Operations per second | Overhead |
+|---------|----------------------| -- |----------|
+| Linux   | Ideal implementation | 8691652 | -        |
+| Linux   | SyncChannel          | 319371 | 27.21x   |
+| Linux   | BufferedChannel(1)   | 308286 | 28.19x   |
+| Windows | Ideal implementation | 6859438 | -        |
+| Windows | SyncChannel          | 59713 | 114.87x  |
+| Windows | BufferedChannel(1)   | 55949 | 122.60x  |
 
 Compared to an ideal implementation, the overhead of channels on Linux is around 27 times and on Windows between 114 and 122 times.
 Such high overhead is expected, as the ideal code uses no functions, no lambdas, no additional threads or any instrumentation beyond two primitive memory cells, it is easy to imagine that for every primitive operation of the ideal code, 30 primitive operations in the channel version are performed.
