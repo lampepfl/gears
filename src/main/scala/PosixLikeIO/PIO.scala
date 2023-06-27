@@ -134,10 +134,6 @@ class SocketUDP() {
   }
 }
 
-class SocketTCP() {
-
-}
-
 object PIOHelper {
   def withFile[T](path: String, options: StandardOpenOption*)(f: File => T): T =
     val file = File(path).open(options*)
@@ -157,6 +153,3 @@ object PIOHelper {
     s.close()
     ret
 }
-
-
-@main def main(): Unit = ()
