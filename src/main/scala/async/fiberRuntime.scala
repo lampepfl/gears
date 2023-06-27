@@ -2,20 +2,21 @@ package fiberRuntime
 
 object util:
   inline val logging = false
-  inline def log(inline msg: String) =
+  inline def log(inline msg: String): Unit =
     if logging then println(msg)
 
   private val rand = new java.util.Random
 
-  def sleepABit() =
-    Thread.sleep(rand.nextInt(100))
+  def sleepABit(): Unit =
+//    Thread.sleep(rand.nextInt(100))
+    ()
 
 
   val threadName = new ThreadLocal[String]
 end util
 import util.*
 
-/** A delimited contination, which can be invoked with `resume` */
+/** A delimited continuation, which can be invoked with `resume` */
 class Suspension:
   private var hasResumed = false
   def resume(): Unit = synchronized:
@@ -37,7 +38,7 @@ def suspend[T, R](body: Suspension => Unit): Unit =
 object boundary:
   final class Label[-T]()
 
-  def setName(name: String) =
+  def setName(name: String): Unit =
     log(s"started $name, ${Thread.currentThread.getId()}")
     sleepABit()
     threadName.set(name)
