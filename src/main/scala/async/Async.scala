@@ -54,7 +54,7 @@ object Async:
   def group[T](body: Async ?=> T)(using async: Async): T =
     withNewCompletionGroup(CompletionGroup())(body)
 
-  def withCompletionHandler[T](handler: Cancellable => Async => Unit)(body: Async ?=> T)(using async: Async): T =
+  def withCompletionHandler[T](handler: Cancellable => Async ?=> Unit)(body: Async ?=> T)(using async: Async): T =
     val combined = (c: Cancellable) => (async: Async) ?=>
       handler(c)
       async.group.handleCompletion(c)

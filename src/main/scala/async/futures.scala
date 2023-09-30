@@ -164,7 +164,6 @@ object Future:
 
     private val executor_thread: Thread = Thread.startVirtualThread: () =>
       async:
-        link()
         complete(Try({
           try
             val r = body
@@ -175,6 +174,8 @@ object Future:
             case _: CancellationException => throw cancellationException
         }))
         signalCompletion()
+
+    link()
 
   end RunnableFuture
 
