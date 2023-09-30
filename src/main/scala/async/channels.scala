@@ -11,7 +11,6 @@ import Async.{Listener, await}
 
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger}
-import javax.management.ListenerNotFoundException
 import scala.util.control.Breaks.{break, breakable}
 import java.util.concurrent.locks.{Condition, Lock}
 

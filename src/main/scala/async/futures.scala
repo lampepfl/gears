@@ -142,11 +142,11 @@ object Future:
 
       try body(using FutureAsync(ac.group)(using ac.scheduler))
       finally log(s"finished ${threadName.get()} ${Thread.currentThread.getId()}")
-    /** With continuations, this becomes:
+      /** With continuations, this becomes:
 
-      boundary [Unit]:
-        body(using FutureAsync())
-     */
+        boundary [Unit]:
+          body(using FutureAsync())
+      */
     end async
 
     /**    This is how the code looks without the integration with project Loom

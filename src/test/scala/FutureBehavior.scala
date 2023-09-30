@@ -110,10 +110,10 @@ class FutureBehavior extends munit.FunSuite {
 
   test("altC of multiple futures") {
     Async.blocking:
-      var touched = 0
-      alt(Future { Thread.sleep(100); touched += 1 }, Future { Thread.sleep(100); touched += 1 }, Future { 5 }).result
+      var touched = java.util.concurrent.atomic.AtomicInteger(0)
+      alt(Future { Thread.sleep(100); touched.incrementAndGet() }, Future { Thread.sleep(100); touched.incrementAndGet() }, Future { 5 }).result
       Thread.sleep(200)
-      assertEquals(touched, 2)
+      assertEquals(touched.get(), 2)
     Async.blocking:
       var touched = 0
       altC(Future { Thread.sleep(100); touched += 1 }, Future { Thread.sleep(100); touched += 1 }, Future { 5 }).result
