@@ -10,7 +10,7 @@ class SourceBehavior extends munit.FunSuite {
   given ExecutionContext = ExecutionContext.global
 
   test("onComplete register after completion runs immediately") {
-    var itRan = false
+    @volatile var itRan = false
     Async.blocking:
       val f = Future.now(Success(10))
       f.onComplete({ _ =>
@@ -21,7 +21,7 @@ class SourceBehavior extends munit.FunSuite {
   }
 
   test("poll is asynchronous") {
-    var itRan = false
+    @volatile var itRan = false
     Async.blocking:
       val f = Future{Async.current.sleep(50); 10}
       f.poll({_ => itRan = true; true})
@@ -29,7 +29,7 @@ class SourceBehavior extends munit.FunSuite {
   }
 
   test("onComplete is asynchronous") {
-    var itRan = false
+    @volatile var itRan = false
     Async.blocking:
       val f = Future {
         Async.current.sleep(50); 10
@@ -39,7 +39,7 @@ class SourceBehavior extends munit.FunSuite {
   }
 
   test("await is synchronous") {
-    var itRan = false
+    @volatile var itRan = false
     Async.blocking:
       val f = Future {
         Async.current.sleep(250);
@@ -47,6 +47,7 @@ class SourceBehavior extends munit.FunSuite {
       }
       f.onComplete({ _ => itRan = true; true })
       Async.await(f)
+      Thread.sleep(100) // onComplete of await and manual may be scheduled
       assertEquals(itRan, true)
   }
 
@@ -91,8 +92,8 @@ class SourceBehavior extends munit.FunSuite {
 
   test("onComplete() fires") {
     Async.blocking:
-      var aRan = false
-      var bRan = false
+      @volatile var aRan = false
+      @volatile var bRan = false
       val f = Future{
         Async.current.sleep(100)
         1
@@ -102,14 +103,15 @@ class SourceBehavior extends munit.FunSuite {
       assertEquals(aRan, false)
       assertEquals(bRan, false)
       Async.await(f)
+      Thread.sleep(100) // onComplete of await and manual may be scheduled
       assertEquals(aRan, true)
       assertEquals(bRan, true)
   }
 
   test("dropped onComplete() listener does not fire") {
     Async.blocking:
-      var aRan = false
-      var bRan = false
+      @volatile var aRan = false
+      @volatile var bRan = false
       val f = Future {
         Async.current.sleep(100)
         1
@@ -121,6 +123,7 @@ class SourceBehavior extends munit.FunSuite {
       assertEquals(bRan, false)
       f.dropListener(l)
       Async.await(f)
+      Thread.sleep(100) // onComplete of await and manual may be scheduled
       assertEquals(aRan, false)
       assertEquals(bRan, true)
   }
@@ -142,8 +145,8 @@ class SourceBehavior extends munit.FunSuite {
 
   test("all listeners in chain fire") {
     Async.blocking:
-      var aRan = false
-      var bRan = false
+      @volatile var aRan = false
+      @volatile var bRan = false
       val f: Future[Int] = Future {
         Async.current.sleep(50)
         10
@@ -154,12 +157,13 @@ class SourceBehavior extends munit.FunSuite {
       assertEquals(aRan, false)
       assertEquals(bRan, false)
       Async.await(f)
+      Thread.sleep(100) // onComplete of await and manual may be scheduled
       assertEquals(aRan, true)
       assertEquals(bRan, true)
   }
 
   test("either") {
-    var touched = false
+    @volatile var touched = false
     Async.blocking:
       val f1 = Future{ Async.current.sleep(300); touched = true; 10 }
       val f2 = Future{ Async.current.sleep(50); 40 }
