@@ -1,7 +1,8 @@
 package concurrent
 import java.util.concurrent.atomic.AtomicBoolean
 import scala.collection.mutable
-import scala.concurrent.ExecutionContext
+import async.AsyncFoundations.*
+import async.AsyncFoundations
 
 /** A context that allows to suspend waiting for asynchronous data sources
  */
@@ -10,8 +11,8 @@ trait Async:
   /** Wait for completion of async source `src` and return the result */
   def await[T](src: Async.Source[T]): T
 
-  /** The execution context for this Async */
-  def scheduler: ExecutionContext
+  /** Wait a given time */
+  def sleep(millis: Long): Unit
 
   /** The cancellation group for this Async */
   def group: CompletionGroup
@@ -21,29 +22,27 @@ trait Async:
 
 object Async:
 
-  /** An implementation of Async that blocks the running thread when waiting */
-  private class Blocking(val group: CompletionGroup)(using val scheduler: ExecutionContext) extends Async:
-
-    def await[T](src: Source[T]): T =
+  private class Blocking(val group: CompletionGroup)(using label: Label[Unit]) extends Async:
+    /** Wait for completion of async source `src` and return the result */
+    override def await[T](src: Async.Source[T]): T =
       src.poll().getOrElse:
-        var result: Option[T] = None
-        src.onComplete: x =>
-          synchronized:
-            result = Some(x)
-            notify()
+        suspend[T, Unit](s => src.onComplete: t =>
+          s.resumeAsync(t)
           true
-        synchronized:
-          while result.isEmpty do wait()
-          result.get
+        )
 
-    def withGroup(group: CompletionGroup) = Blocking(group)
-  end Blocking
+    override def sleep(millis: Long): Unit =
+      AsyncFoundations.sleep(millis) // cannot be interrupted
+
+    /** An Async of the same kind as this one, with a new cancellation group */
+    override def withGroup(group: CompletionGroup): Async = Blocking(group)
 
   /** Execute asynchronous computation `body` on currently running thread.
    *  The thread will suspend when the computation waits.
    */
-  def blocking[T](body: Async ?=> T)(using ExecutionContext): T =
-    body(using Blocking(CompletionGroup.Unlinked))
+  def blocking[T](body: Async ?=> T): T =
+    blockingBoundary:
+      body(using Blocking(CompletionGroup.Unlinked))
 
   /** The currently executing Async context */
   inline def current(using async: Async): Async = async

@@ -1,5 +1,7 @@
 package concurrent
 import scala.collection.mutable
+import concurrent.Future.Promise
+import scala.util.Success
 
 /** A group of cancellable objects that are completed together.
  *  Cancelling the group means cancelling all its uncompleted members.
@@ -8,12 +10,15 @@ import scala.collection.mutable
  */
 class CompletionGroup(val handleCompletion: Cancellable => Async ?=> Unit = _.unlink()) extends Cancellable:
   private val members: mutable.Set[Cancellable] = mutable.Set()
+  private var cancelWait: Option[Promise[Unit]] = None
 
   /** Cancel all members and clear the members set */
   def cancel()(using Async): Unit =
+    synchronized(members.toArray).foreach(_.cancel())
     synchronized:
-      members.toArray.foreach(_.cancel())
-      while members.nonEmpty do wait()
+      if members.nonEmpty && cancelWait.isEmpty then
+        cancelWait = Some(Promise())
+    cancelWait.foreach(_.future.value)
     signalCompletion()
 
   /** Add given member to the members set */
@@ -23,7 +28,8 @@ class CompletionGroup(val handleCompletion: Cancellable => Async ?=> Unit = _.un
   /** Remove given member from the members set if it is an element */
   def drop(member: Cancellable): Unit = synchronized:
     members -= member
-    if members.isEmpty then notifyAll()
+    if members.isEmpty && cancelWait.isDefined then
+      cancelWait.get.complete(Success(()))
 
 object CompletionGroup:
 

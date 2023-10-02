@@ -29,7 +29,7 @@ trait Cancellable:
 
   /** Signal completion of this cancellable to its group. */
   def signalCompletion()(using async: Async): this.type =
-    async.group.handleCompletion(this)
+    this.group.handleCompletion(this)
     this
 
 

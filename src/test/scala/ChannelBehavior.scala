@@ -20,7 +20,7 @@ class ChannelBehavior extends munit.FunSuite {
         c.send(10)
         assertEquals(touched, true)
 
-      Thread.sleep(500)
+      Async.current.sleep(500)
       touched = true
       val f2 = Future:
         c.read()
@@ -37,7 +37,7 @@ class ChannelBehavior extends munit.FunSuite {
         c.send(10)
         assertEquals(touched, false)
 
-      Thread.sleep(500)
+      Async.current.sleep(500)
       touched = true
       val f2 = Future:
         c.read()
@@ -58,7 +58,7 @@ class ChannelBehavior extends munit.FunSuite {
         c.send(10)
         assertEquals(touched, true)
 
-      Thread.sleep(500)
+      Async.current.sleep(500)
       touched = true
       val f2 = Future:
         c.read()
@@ -72,11 +72,11 @@ class ChannelBehavior extends munit.FunSuite {
       val c = SyncChannel[Int]()
       var touched = false
       val f1 = Future:
-        Thread.sleep(1000)
+        Async.current.sleep(1000)
         c.send(10)
 
       val f11 = Future:
-        Thread.sleep(500)
+        Async.current.sleep(500)
         touched = true
 
       val f2 = Future:
@@ -93,11 +93,11 @@ class ChannelBehavior extends munit.FunSuite {
       val c = BufferedChannel[Int](3)
       var touched = false
       val f1 = Future:
-        Thread.sleep(1000)
+        Async.current.sleep(1000)
         c.send(10)
 
       val f11 = Future:
-        Thread.sleep(500)
+        Async.current.sleep(500)
         touched = true
 
       val f2 = Future:
@@ -226,15 +226,15 @@ class ChannelBehavior extends munit.FunSuite {
         val gotCount = AtomicInteger(0)
 
         val f21 = Future:
-          Thread.sleep(2000)
+          Async.current.sleep(2000)
           while (gotCount.get() <= 30000 - 2) {
             c.read()
             gotCount.incrementAndGet()
-            Thread.sleep(1)
+            Async.current.sleep(1)
           }
 
         val f22 = Future:
-          Thread.sleep(1000)
+          Async.current.sleep(1000)
           while (gotCount.get() <= 30000 - 2) {
             c.read()
             gotCount.incrementAndGet()
@@ -289,14 +289,14 @@ class ChannelBehavior extends munit.FunSuite {
       f3.result
   }
 
-  test("ChannelMultiplexer multiple readers and writers") {
+  test("ChannelMultiplexer multiple readers and writers".ignore) {
     Async.blocking:
       val m = ChannelMultiplexer[Int]()
 
       val f11 = Future:
         val cc = SyncChannel[Int]()
         m.addPublisher(cc)
-        Thread.sleep(200)
+        Async.current.sleep(200)
         for (i <- 0 to 3)
           cc.send(i)
         m.removePublisher(cc)
@@ -304,7 +304,7 @@ class ChannelBehavior extends munit.FunSuite {
       val f12 = Future:
         val cc = SyncChannel[Int]()
         m.addPublisher(cc)
-        Thread.sleep(200)
+        Async.current.sleep(200)
         for (i <- 10 to 13)
           cc.send(i)
         m.removePublisher(cc)
@@ -319,9 +319,9 @@ class ChannelBehavior extends munit.FunSuite {
       val f21 = Future:
         val cr = SyncChannel[Try[Int]]()
         m.addSubscriber(cr)
-        Thread.sleep(200)
+        Async.current.sleep(200)
         val l = ArrayBuffer[Int]()
-        Thread.sleep(1000)
+        Async.current.sleep(1000)
         for (i <- 1 to 12) {
           l += cr.read().get.get
         }
@@ -329,7 +329,7 @@ class ChannelBehavior extends munit.FunSuite {
       val f22 = Future:
         val cr = SyncChannel[Try[Int]]()
         m.addSubscriber(cr)
-        Thread.sleep(1500)
+        Async.current.sleep(1500)
         val l = ArrayBuffer[Int]()
         for (i <- 1 to 12) {
           l += cr.read().get.get

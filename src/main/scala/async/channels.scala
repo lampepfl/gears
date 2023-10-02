@@ -1,9 +1,6 @@
 package concurrent
 import scala.collection.mutable
 import mutable.{ArrayBuffer, ListBuffer}
-import fiberRuntime.boundary
-import boundary.Label
-import fiberRuntime.suspend
 
 import scala.concurrent.ExecutionContext
 import scala.util.{Failure, Success, Try}
@@ -13,6 +10,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger}
 import scala.util.control.Breaks.{break, breakable}
 import java.util.concurrent.locks.{Condition, Lock}
+import async.AsyncFoundations
 
 /** The part of a channel one can send values to. Blocking behavior depends on the implementation.
  *  Note that while sending is a special (potentially) blocking operation similar to await, reading is
@@ -284,7 +282,7 @@ object ChannelMultiplexer:
     private val publishers = ArrayBuffer[ReadableChannel[T]]()
     private val subscribers = ArrayBuffer[SendableChannel[Try[T]]]()
     private val infoChannel: BufferedChannel[Message] = BufferedChannel[Message](1)
-    private val executor: Thread = Thread.startVirtualThread { () =>
+    AsyncFoundations.execute { () =>
       var shouldTerminate = false
       var publishersCopy: List[ReadableChannel[T]] = null
       var subscribersCopy: List[SendableChannel[Try[T]]] = null

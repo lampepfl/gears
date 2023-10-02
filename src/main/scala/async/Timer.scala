@@ -7,6 +7,7 @@ import java.util.concurrent.TimeoutException
 import scala.collection.mutable
 import scala.concurrent.{ExecutionContext, TimeoutException}
 import scala.util.{Failure, Success, Try}
+import async.{AsyncFoundations, WaitSuspension}
 
 type TimerRang = Boolean
 
@@ -14,9 +15,9 @@ type TimerRang = Boolean
  *  Can be used only once per instance.
  */
 class StartableTimer(val millis: Long) extends Async.OriginalSource[TimerRang], Cancellable {
-  private enum TimerState(val thread: Option[Thread]):
+  private enum TimerState(val thread: Option[WaitSuspension]):
     case Ready extends TimerState(None)
-    case Ticking(val t: Thread) extends TimerState(Some(t))
+    case Ticking(val t: WaitSuspension) extends TimerState(Some(t))
     case RangAlready extends TimerState(None)
     case Cancelled extends TimerState(None)
 
@@ -30,8 +31,8 @@ class StartableTimer(val millis: Long) extends Async.OriginalSource[TimerRang], 
         case TimerState.RangAlready => throw new IllegalStateException("Timers cannot be started after they rang already.")
         case TimerState.Ticking(_) => throw new IllegalStateException("Timers cannot be started once they have already been started.")
         case TimerState.Ready =>
-          state = TimerState.Ticking(Thread.startVirtualThread(() => {
-              Thread.sleep(millis)
+          AsyncFoundations.execute(() => {
+              AsyncFoundations.sleep(millis, k => state = TimerState.Ticking(k))
               var toNotify = List[TimerRang => Boolean]()
               synchronized:
                 toNotify = waiting.toList
@@ -42,13 +43,13 @@ class StartableTimer(val millis: Long) extends Async.OriginalSource[TimerRang], 
                   case _ =>
                     toNotify = List()
               for listener <- toNotify do listener(true)
-          }))
+          })
 
     def cancel()(using Async): Unit =
       state match
         case TimerState.Cancelled | TimerState.Ready | TimerState.RangAlready => ()
-        case TimerState.Ticking(t: Thread) =>
-          t.interrupt()
+        case TimerState.Ticking(t: WaitSuspension) =>
+          t.resumeAsync(Failure(new InterruptedException()))
           val toNotify = synchronized:
             val ws = waiting.toList
             waiting.clear()
@@ -109,6 +110,6 @@ def timeoutCancellableFuture[T](millis: Long, f: Future[T]): Future[T] =
         touched = true)
     Async.await(t)
     assert(!touched)
-    Thread.sleep(2000)
+    Async.current.sleep(2000)
     assert(!touched)
 

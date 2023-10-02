@@ -18,7 +18,7 @@ import scala.concurrent.ExecutionContext
         val messageReceived = String(got.getData.slice(0, got.getLength), "UTF-8")
         val responseMessage = (messageReceived.toInt + 1).toString.getBytes
         serverSocket.send(ByteBuffer.wrap(responseMessage), got.getAddress.toString.substring(1), got.getPort)
-        Thread.sleep(50)
+        Async.current.sleep(50)
 
     def client(value: Int): Future[Unit] =
       Future:

@@ -1,8 +1,12 @@
-import scala.concurrent.ExecutionContext
 import concurrent.{Async, Future}
+import async.AsyncFoundations
+import scala.util.boundary
+import boundary.break
+import scala.concurrent.duration.{Duration, DurationInt}
+import java.util.concurrent.CancellationException
 
 class CancellationBehavior extends munit.FunSuite:
-  given ExecutionContext = ExecutionContext.global
+  override def munitTimeout: Duration = 5.seconds
 
   enum State:
     case Ready
@@ -14,40 +18,54 @@ class CancellationBehavior extends munit.FunSuite:
   private class Info(var state: State = State.Ready):
     def assertCancelled() =
       Thread.sleep(100)
-      assertEquals(state, State.Cancelled)
+      synchronized:
+        assertEquals(state, State.Cancelled)
     def assertRunning(): Future[?] =
       Thread.sleep(100)
-      state match
-        case State.Running(f) => f
-        case _ => fail("future not running")
+      synchronized:
+        state match
+          case State.Running(f) => f
+          case _ => fail(s"future should be running, is $state")
     def assertCompleted() =
       Thread.sleep(100)
-      assertEquals(state, State.Completed)
+      synchronized:
+        assertEquals(state, State.Completed)
     def run() =
-      state match
-        case State.Ready =>
-            state = State.RunningEarly
-        case State.Initialized(f) =>
-            state = State.Running(f)
-        case _ => fail("running failed")
+      synchronized:
+        state match
+          case State.Ready =>
+              state = State.RunningEarly
+          case State.Initialized(f) =>
+              state = State.Running(f)
+          case _ => fail(s"running failed, state is $state")
     def initialize(f: Future[?]) =
-      state match
-        case State.Ready =>
-            state = State.Initialized(f)
-        case State.RunningEarly =>
-            state = State.Running(f)
-        case _ => fail("initializing failed")
+      synchronized:
+        state match
+          case State.Ready =>
+              state = State.Initialized(f)
+          case State.RunningEarly =>
+              state = State.Running(f)
+          case _ => fail(s"initializing failed, state is $state")
 
   private def startFuture(info: Info, body: Async ?=> Unit = {})(using Async) =
     val f = Future:
       info.run()
       try
         body
-        Thread.sleep(60 * 1000)
+        Async.current.sleep(10 * 1000)
         info.state = State.Completed
       catch
-        case _: InterruptedException => info.state = State.Cancelled
+        case _: InterruptedException | _: CancellationException =>
+          info.state = State.Cancelled
     info.initialize(f)
+
+  test("no cancel"):
+    var x = 0
+    Async.blocking:
+      Future:
+        x = 1
+      Thread.sleep(400)
+    assertEquals(x, 1)
 
   test("link no group"):
     val info = Info()
@@ -58,19 +76,15 @@ class CancellationBehavior extends munit.FunSuite:
     val fut = info.assertRunning()
     Async.blocking:
         fut.cancel()
+    info.assertCancelled()
 
-  /* add sleep in futures to ensure timing problem
-    private val executor_thread: Thread = Thread.startVirtualThread: () =>
-      async:
-        Thread.sleep(500)
-  */
   test("link group"):
     val info = Info()
     Async.blocking:
       Async.group:
         startFuture(info)
         info.assertRunning()
-    info.assertCancelled()
+      info.assertCancelled()
 
   test("nested link group"):
     val (info1, info2) = (Info(), Info())

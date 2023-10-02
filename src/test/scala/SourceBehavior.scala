@@ -23,7 +23,7 @@ class SourceBehavior extends munit.FunSuite {
   test("poll is asynchronous") {
     var itRan = false
     Async.blocking:
-      val f = Future{Thread.sleep(50); 10}
+      val f = Future{Async.current.sleep(50); 10}
       f.poll({_ => itRan = true; true})
       assertEquals(itRan, false)
   }
@@ -32,7 +32,7 @@ class SourceBehavior extends munit.FunSuite {
     var itRan = false
     Async.blocking:
       val f = Future {
-        Thread.sleep(50); 10
+        Async.current.sleep(50); 10
       }
       f.onComplete({ _ => itRan = true; true })
       assertEquals(itRan, false)
@@ -42,7 +42,7 @@ class SourceBehavior extends munit.FunSuite {
     var itRan = false
     Async.blocking:
       val f = Future {
-        Thread.sleep(250);
+        Async.current.sleep(250);
         10
       }
       f.onComplete({ _ => itRan = true; true })
@@ -54,11 +54,11 @@ class SourceBehavior extends munit.FunSuite {
     Async.blocking:
       val timeBefore = System.currentTimeMillis()
       val f = Future {
-        Thread.sleep(50);
+        Async.current.sleep(50);
         Future {
-          Thread.sleep(70)
+          Async.current.sleep(70)
           Future {
-            Thread.sleep(20)
+            Async.current.sleep(20)
             10
           }.value
         }.value
@@ -71,7 +71,7 @@ class SourceBehavior extends munit.FunSuite {
     val timeBefore = System.currentTimeMillis()
     Async.blocking:
       val f = Future {
-        Future { Thread.sleep(300) }
+        Future { Async.current.sleep(300) }
         1
       }.value
     val timeAfter = System.currentTimeMillis()
@@ -81,7 +81,7 @@ class SourceBehavior extends munit.FunSuite {
   test("poll()") {
     Async.blocking:
       val f: Future[Int] = Future {
-        Thread.sleep(100)
+        Async.current.sleep(100)
         1
       }
       assertEquals(f.poll(), None)
@@ -94,7 +94,7 @@ class SourceBehavior extends munit.FunSuite {
       var aRan = false
       var bRan = false
       val f = Future{
-        Thread.sleep(100)
+        Async.current.sleep(100)
         1
       }
       f.onComplete({_ => aRan = true; true})
@@ -111,7 +111,7 @@ class SourceBehavior extends munit.FunSuite {
       var aRan = false
       var bRan = false
       val f = Future {
-        Thread.sleep(100)
+        Async.current.sleep(100)
         1
       }
       val l: concurrent.Async.Listener[Try[Int]] = { _ => aRan = true; true }
@@ -145,7 +145,7 @@ class SourceBehavior extends munit.FunSuite {
       var aRan = false
       var bRan = false
       val f: Future[Int] = Future {
-        Thread.sleep(50)
+        Async.current.sleep(50)
         10
       }
       val g = f.filter({ _ => true })
@@ -161,11 +161,11 @@ class SourceBehavior extends munit.FunSuite {
   test("either") {
     var touched = false
     Async.blocking:
-      val f1 = Future{ Thread.sleep(300); touched = true; 10 }
-      val f2 = Future{ Thread.sleep(50); 40 }
+      val f1 = Future{ Async.current.sleep(300); touched = true; 10 }
+      val f2 = Future{ Async.current.sleep(50); 40 }
       val g = Async.await(either(f1, f2))
       assertEquals(g, Right(Success(40)))
-      Thread.sleep(350)
+      Async.current.sleep(350)
       assertEquals(touched, true)
   }
 }

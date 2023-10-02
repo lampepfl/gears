@@ -97,35 +97,20 @@ class SocketUDP() {
   def send(data: ByteBuffer, address: String, port: Int): Future[Unit] =
     assert(socket.isDefined)
 
-    val p = Promise[Unit]()
-    Thread.startVirtualThread: () =>
-      val packet: DatagramPacket = new DatagramPacket(data.array(), data.limit(), InetAddress.getByName(address), port)
-
-      try {
+    Async.blocking:
+      Future:
+        val packet: DatagramPacket = new DatagramPacket(data.array(), data.limit(), InetAddress.getByName(address), port)
         socket.get.send(packet)
-        p.complete(Success(null))
-      } catch {
-        case e: java.io.IOException => p.complete(Failure(e))
-      }
-
-      p.complete(null)
-    p.future
 
   def receive(): Future[DatagramPacket] =
     assert(socket.isDefined)
 
-    val p = Promise[DatagramPacket]()
-    Thread.startVirtualThread: () =>
-      val buffer = Array.fill[Byte](10 * 1024)(0)
-      val packet: DatagramPacket = DatagramPacket(buffer, 10 * 1024)
-      try {
+    Async.blocking:
+      Future[DatagramPacket]:
+        val buffer = Array.fill[Byte](10 * 1024)(0)
+        val packet: DatagramPacket = DatagramPacket(buffer, 10 * 1024)
         socket.get.receive(packet)
-        p.complete(Success(packet))
-      } catch {
-        case e: java.io.IOException => p.complete(Failure(e))
-      }
-
-    p.future
+        packet
 
   override def finalize(): Unit = {
     super.finalize()

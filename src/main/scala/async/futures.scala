@@ -4,15 +4,15 @@ import concurrent.TaskSchedule.ExponentialBackoff
 
 import scala.collection.mutable
 import mutable.ListBuffer
-import fiberRuntime.util.*
-import fiberRuntime.boundary
+import async.Suspension
+import async.AsyncFoundations
+import async.AsyncFoundations.*
 
 import scala.compiletime.uninitialized
 import scala.util.{Failure, Success, Try}
 import scala.annotation.unchecked.uncheckedVariance
 import java.util.concurrent.CancellationException
 import scala.annotation.tailrec
-import scala.concurrent.{ExecutionContext, blocking}
 import scala.util
 
 private val cancellationException = CancellationException()
@@ -62,9 +62,8 @@ object Future:
 
     // Cancellable method implementations
 
-    def cancel()(using Async): Unit = synchronized:
+    def cancel()(using Async): Unit =
       cancelRequest = true
-      notify() // wake up future in case it is waiting on an async source
 
     // Future method implementations
 
@@ -99,81 +98,72 @@ object Future:
    */
   private class RunnableFuture[+T](body: Async ?=> T)(using ac: Async) extends CoreFuture[T]:
 
+    private var awaited: Option[Suspension[Try[Nothing], Unit]] = None
+
     private def checkCancellation(): Unit =
       if cancelRequest then throw cancellationException
 
     /** a handler for Async */
-    private def async(body: Async ?=> Unit): Unit =
-      class FutureAsync(val group: CompletionGroup)(using val scheduler: ExecutionContext) extends Async:
+    private def async(body: Async ?=> Unit)(using Label[Unit]): Unit =
+      class FutureAsync(val group: CompletionGroup)(using label: Label[Unit]) extends Async:
 
         /** Await a source first by polling it, and, if that fails, by suspending
          *  in a onComplete call.
          */
-        def await[U](src: Async.Source[U]): U =
+        override def await[U](src: Async.Source[U]): U =
           checkCancellation()
           src.poll().getOrElse:
-            sleepABit()
-            log(s"suspending ${threadName.get()}")
-            var result: Option[U] = None
-            src.onComplete: x =>
-              synchronized:
-                result = Some(x)
-                notify()
-              true
-            sleepABit()
-            synchronized:
-              log(s"suspended ${threadName.get()}")
-              while result.isEmpty do
-                wait()
+            suspend[Try[U], Unit](k =>
+              RunnableFuture.this.synchronized:
                 checkCancellation()
-              result.get
+                awaited = Some(k)
+              src.onComplete: x =>
+                val resumeNow = RunnableFuture.this.synchronized:
+                  if awaited.isDefined then
+                    awaited = None
+                    true
+                  else false
+                if resumeNow then
+                  k.resumeAsync(Try:
+                    checkCancellation()
+                    x
+                  )
+                true
+            ).get
 
-        /** With full continuations, the try block can be written more simply as follows
-           (ignoring cancellation for now):
+        override def sleep(millis: Long): Unit =
+          checkCancellation()
+          AsyncFoundations.sleep(millis, k =>
+            RunnableFuture.this.synchronized:
+              checkCancellation()
+              awaited = Some(k)
+          )
 
-          suspend[T, Unit]: k =>
-            src.onComplete: x =>
-              scheduler.schedule: () =>
-                k.resume(x)
-            true
-        */
+        override def withGroup(group: CompletionGroup) = FutureAsync(group)
 
-        def withGroup(group: CompletionGroup) = FutureAsync(group)
-
-      try body(using FutureAsync(ac.group)(using ac.scheduler))
-      finally log(s"finished ${threadName.get()} ${Thread.currentThread.getId()}")
-      /** With continuations, this becomes:
-
-        boundary [Unit]:
-          body(using FutureAsync())
-      */
+      body(using FutureAsync(ac.group))
     end async
 
-    /**    This is how the code looks without the integration with project Loom
-    ac.scheduler.execute: () =>
-      async:
-        link()
-        Async.group:
-          complete(Try(body))
-        signalCompletion()
-    */
+    execute(() => blockingBoundary[Unit](async:
+      complete(Try({
+        try
+          val r = body
+          checkCancellation()
+          r
+        catch
+          case _: InterruptedException => throw cancellationException
+          case _: CancellationException => throw cancellationException
+      }))
+      signalCompletion()
+    ))
 
     override def cancel()(using Async): Unit =
-      executor_thread.interrupt()
       super.cancel()
-
-    private val executor_thread: Thread = Thread.startVirtualThread: () =>
-      async:
-        complete(Try({
-          try
-            val r = body
-            checkCancellation()
-            r
-          catch
-            case _: InterruptedException => throw cancellationException
-            case _: CancellationException => throw cancellationException
-        }))
-        signalCompletion()
+      RunnableFuture.this.synchronized:
+        val awaited1 = awaited
+        awaited = None
+        awaited1
+      .foreach(_.resumeAsync(Failure(cancellationException)))
 
     link()
 
@@ -285,7 +275,7 @@ class Task[+T](val body: Async ?=> T):
   /** Start a future computed from the `body` of this task */
   def run(using Async) = Future(body)
 
-  def schedule(s: TaskSchedule): Task[T] =
+  def schedule(s: TaskSchedule)(using async: Async): Task[T] =
     s match {
       case TaskSchedule.Every(millis, maxRepetitions) =>
         assert(millis >= 1)
@@ -297,7 +287,7 @@ class Task[+T](val body: Async ?=> T):
           if (maxRepetitions == 1) ret
           else {
             while (maxRepetitions == 0 || repetitions < maxRepetitions) {
-              Thread.sleep(millis)
+              async.sleep(millis)
               ret = body
               repetitions += 1
             }
@@ -316,7 +306,7 @@ class Task[+T](val body: Async ?=> T):
           else {
             var timeToSleep = millis
             while (maxRepetitions == 0 || repetitions < maxRepetitions) {
-              Thread.sleep(timeToSleep)
+              async.sleep(timeToSleep)
               timeToSleep *= exponentialBase
               ret = body
               repetitions += 1
@@ -335,7 +325,7 @@ class Task[+T](val body: Async ?=> T):
           repetitions += 1
           if (maxRepetitions == 1) ret
           else {
-            Thread.sleep(millis)
+            async.sleep(millis)
             ret = body
             repetitions += 1
             if (maxRepetitions == 2) ret
@@ -344,7 +334,7 @@ class Task[+T](val body: Async ?=> T):
                 val aOld = a
                 a = b
                 b = aOld + b
-                Thread.sleep(b * millis)
+                async.sleep(b * millis)
                 ret = body
                 repetitions += 1
               }
@@ -359,7 +349,7 @@ class Task[+T](val body: Async ?=> T):
           @tailrec
           def helper(repetitions: Long = 0): T =
             if (repetitions > 0 && millis > 0)
-              Thread.sleep(millis)
+              async.sleep(millis)
             val ret: T = body
             ret match {
               case Failure(_) => ret
@@ -375,7 +365,7 @@ class Task[+T](val body: Async ?=> T):
           @tailrec
           def helper(repetitions: Long = 0): T =
             if (repetitions > 0 && millis > 0)
-              Thread.sleep(millis)
+              async.sleep(millis)
             val ret: T = body
             ret match {
               case Success(_) => ret
@@ -429,8 +419,8 @@ def alt[T](futures: Future[T]*)(using Async): Future[T] =
 def altC[T](futures: Future[T]*)(using Async): Future[T] =
   altAndAltCImplementation(true, futures*)
 
-def uninterruptible[T](body: Async ?=> T)(using Async)(implicit e: ExecutionContext) =
-  Async.blocking:
+def uninterruptible[T](body: Async ?=> T)(using Async) =
+  val fut = Async.blocking:
     val f = Future(body)
 
     def forceJoin(): Unit =
@@ -446,3 +436,5 @@ def uninterruptible[T](body: Async ?=> T)(using Async)(implicit e: ExecutionCont
       }
 
     forceJoin()
+    f
+  Async.await(fut)
