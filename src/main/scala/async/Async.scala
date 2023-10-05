@@ -59,10 +59,13 @@ object Async:
     withNewCompletionGroup(CompletionGroup(combined))(body)
 
   private def withNewCompletionGroup[T](group: CompletionGroup)(body: Async ?=> T)(using async: Async): T =
-    try body(using async.withGroup(group.link()))
+    awaitingGroup(body)(using async.withGroup(group.link()))
+
+  private[async] def awaitingGroup[T](body: Async ?=> T)(using async: Async): T =
+    try body
     finally
-      group.cancel()
-      group.waitCompletion()
+      async.group.cancel()
+      async.group.waitCompletion()
 
   /** A function `T => Boolean` whose lineage is recorded by its implementing
    *  classes. The Listener function accepts values of type `T` and returns

@@ -140,7 +140,7 @@ object Future:
 
         override def withGroup(group: CompletionGroup) = FutureAsync(group)
 
-      body(using FutureAsync(ac.group))
+      Async.awaitingGroup(body)(using FutureAsync(CompletionGroup().link()))
     end async
 
     execute(() => blockingBoundary[Unit](async:

@@ -199,7 +199,7 @@ class FutureBehavior extends munit.FunSuite {
         Future {
           Async.current.sleep(200)
           zombieModifiedThis = true
-        }
+        }.unlink()
         10
       }
       assertEquals(f.value, 10)

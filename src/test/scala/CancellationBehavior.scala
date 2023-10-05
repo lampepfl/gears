@@ -80,6 +80,7 @@ class CancellationBehavior extends munit.FunSuite:
                 startFuture(info2, promise2.complete(Success(())))
                 Async.await(promise2.future)
             info2.assertCancelled()
+            Future.now(Success(())).value // check cancellation
             promise1.complete(Success(()))
         })
         Async.await(promise1.future)
