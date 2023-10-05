@@ -3,23 +3,37 @@ package gears.async
 import scala.annotation.unchecked.uncheckedVariance
 import scala.util.Try
 import scala.util.Success
+import java.util.concurrent.locks.ReentrantLock
+import java.util.concurrent.locks.Condition
 
 trait VThreadSuspendFoundations extends SuspendFoundations:
 
   final class VThreadLabel[R]():
     private var result: Option[R] = None
+    private val lock = ReentrantLock()
+    private val cond = lock.newCondition()
 
-    private[VThreadSuspendFoundations] def clearResult() = synchronized:
+    private[VThreadSuspendFoundations] def clearResult() =
+      lock.lock()
       result = None
+      lock.unlock()
 
-    private[VThreadSuspendFoundations] def setResult(data: R) = synchronized:
-      result = Some(data)
-      notifyAll()
+    private[VThreadSuspendFoundations] def setResult(data: R) =
+      lock.lock()
+      try
+        result = Some(data)
+        cond.signalAll()
+      finally
+        lock.unlock()
 
-    private[VThreadSuspendFoundations] def waitResult(): R = synchronized:
-      if result.isEmpty then
-        wait()
-      result.get
+    private[VThreadSuspendFoundations] def waitResult(): R =
+      lock.lock()
+      try
+        if result.isEmpty then
+          cond.await()
+        result.get
+      finally
+        lock.unlock()
 
   type Label[R] = VThreadLabel[R]
 
@@ -27,16 +41,26 @@ trait VThreadSuspendFoundations extends SuspendFoundations:
   //  inside boundary: waiting on suspension
   final class VThreadSuspension[-T, +R](using l: Label[R]) extends Suspension[T, R]:
     private var nextInput: Option[T] = None
+    private val lock = ReentrantLock()
+    private val cond = lock.newCondition()
 
-    private[VThreadSuspendFoundations] def setInput(data: T) = synchronized:
-      nextInput = Some(data)
-      notifyAll()
+    private[VThreadSuspendFoundations] def setInput(data: T) =
+      lock.lock()
+      try
+        nextInput = Some(data)
+        cond.signalAll()
+      finally
+        lock.unlock()
 
     // variance is safe because the only caller created the object
-    private[VThreadSuspendFoundations] def waitInput(): T @uncheckedVariance = synchronized:
-      if nextInput.isEmpty then
-        wait()
-      nextInput.get
+    private[VThreadSuspendFoundations] def waitInput(): T @uncheckedVariance =
+      lock.lock()
+      try
+        if nextInput.isEmpty then
+          cond.await()
+        nextInput.get
+      finally
+        lock.unlock()
 
     // normal resume only tells other thread to run again -> resumeAsync may redirect here
     override def resume(arg: T): R =
