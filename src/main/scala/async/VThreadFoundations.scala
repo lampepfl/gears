@@ -1,4 +1,4 @@
-package async
+package gears.async
 
 import scala.annotation.unchecked.uncheckedVariance
 import scala.util.Try

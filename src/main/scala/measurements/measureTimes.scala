@@ -1,7 +1,7 @@
 package measurements
 
 import PosixLikeIO.PIOHelper
-import concurrent.{Async, BufferedChannel, ChannelMultiplexer, Future, SyncChannel}
+import gears.async.{Async, BufferedChannel, ChannelMultiplexer, Future, SyncChannel}
 
 import java.io.{FileReader, FileWriter}
 import java.nio.file.{Files, NoSuchFileException, Paths, StandardOpenOption}

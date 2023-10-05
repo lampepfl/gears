@@ -1,5 +1,5 @@
-import concurrent.{Async, BufferedChannel, ChannelClosedException, ChannelMultiplexer, Future, SyncChannel, Task, TaskSchedule, alt, altC}
-import concurrent.Future.{*:, zip}
+import gears.async.{Async, BufferedChannel, ChannelClosedException, ChannelMultiplexer, Future, SyncChannel, Task, TaskSchedule, alt, altC}
+import Future.{*:, zip}
 
 import java.util.concurrent.CancellationException
 import scala.collection.mutable
@@ -258,7 +258,10 @@ class ChannelBehavior extends munit.FunSuite {
       val c = SyncChannel[Int]()
       m.addPublisher(c)
 
+      val start = java.util.concurrent.CountDownLatch(2)
+
       val f1 = Future:
+        start.await()
         c.send(1)
         c.send(2)
         c.send(3)
@@ -267,6 +270,7 @@ class ChannelBehavior extends munit.FunSuite {
       val f2 = Future:
         val cr = SyncChannel[Try[Int]]()
         m.addSubscriber(cr)
+        start.countDown()
         val l = ArrayBuffer[Int]()
         l += cr.read().get.get
         l += cr.read().get.get
@@ -277,13 +281,13 @@ class ChannelBehavior extends munit.FunSuite {
       val f3 = Future:
         val cr = BufferedChannel[Try[Int]]()
         m.addSubscriber(cr)
+        start.countDown()
         val l = ArrayBuffer[Int]()
         l += cr.read().get.get
         l += cr.read().get.get
         l += cr.read().get.get
         l += cr.read().get.get
         assertEquals(l, ArrayBuffer[Int](1, 2, 3, 4))
-
 
       f2.result
       f3.result

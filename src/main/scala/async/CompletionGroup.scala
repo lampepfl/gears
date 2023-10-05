@@ -1,6 +1,6 @@
-package concurrent
+package gears.async
 import scala.collection.mutable
-import concurrent.Future.Promise
+import Future.Promise
 import scala.util.Success
 
 /** A group of cancellable objects that are completed together.
@@ -8,17 +8,19 @@ import scala.util.Success
  *  @param  handleCompletion  a function that gets applied to every member
  *                            when it is completed or cancelled
  */
-class CompletionGroup(val handleCompletion: Cancellable => Async ?=> Unit = _.unlink()) extends Cancellable:
+class CompletionGroup(val handleCompletion: Cancellable => Async ?=> Unit = _ => {}) extends Cancellable:
   private val members: mutable.Set[Cancellable] = mutable.Set()
   private var cancelWait: Option[Promise[Unit]] = None
 
   /** Cancel all members and clear the members set */
-  def cancel()(using Async): Unit =
+  def cancel(): Unit =
     synchronized(members.toArray).foreach(_.cancel())
+
+  private[async] def waitCompletion()(using Async): Unit =
     synchronized:
       if members.nonEmpty && cancelWait.isEmpty then
         cancelWait = Some(Promise())
-    cancelWait.foreach(_.future.value)
+    cancelWait.foreach(cWait => Async.await(cWait.future))
     signalCompletion()
 
   /** Add given member to the members set */
@@ -38,7 +40,7 @@ object CompletionGroup:
    *  called on this group.
    */
   object Unlinked extends CompletionGroup:
-    override def cancel()(using Async): Unit = ()
+    override def cancel(): Unit = ()
     override def add(member: Cancellable): Unit = ()
     override def drop(member: Cancellable): Unit = ()
   end Unlinked

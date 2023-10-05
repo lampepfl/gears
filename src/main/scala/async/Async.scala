@@ -1,8 +1,7 @@
-package concurrent
+package gears.async
 import java.util.concurrent.atomic.AtomicBoolean
 import scala.collection.mutable
-import async.AsyncFoundations.*
-import async.AsyncFoundations
+import AsyncFoundations.*
 
 /** A context that allows to suspend waiting for asynchronous data sources
  */
@@ -61,7 +60,9 @@ object Async:
 
   private def withNewCompletionGroup[T](group: CompletionGroup)(body: Async ?=> T)(using async: Async): T =
     try body(using async.withGroup(group.link()))
-    finally group.cancel()
+    finally
+      group.cancel()
+      group.waitCompletion()
 
   /** A function `T => Boolean` whose lineage is recorded by its implementing
    *  classes. The Listener function accepts values of type `T` and returns
@@ -71,6 +72,7 @@ object Async:
 
   /** A listener for values that are processed by the given source `src` and
    *  that are demanded by the continuation listener `continue`.
+   *  This class is necessary to identify listeners registered to upstream sources (for removal).
    */
   abstract case class ForwardingListener[T](src: Source[?], continue: Listener[?]) extends Listener[T]
 
@@ -98,7 +100,7 @@ object Async:
 
     /** Signal that listener `k` is dead (i.e. will always return `false` from now on).
      *  This permits original, (i.e. non-derived) sources like futures or channels
-     *  to drop the  listener from their waiting sets.
+     *  to drop the listener from their waiting sets.
      */
     def dropListener(k: Listener[T]): Unit
 

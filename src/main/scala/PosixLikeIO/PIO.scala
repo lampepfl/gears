@@ -1,7 +1,7 @@
 package PosixLikeIO
 
-import concurrent.Future.Promise
-import concurrent.{Async, Future}
+import gears.async.{Async, Future}
+import Future.Promise
 
 import java.net.{DatagramPacket, DatagramSocket, InetAddress, InetSocketAddress, ServerSocket, Socket}
 import java.nio.ByteBuffer

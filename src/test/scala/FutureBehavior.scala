@@ -1,5 +1,5 @@
-import concurrent.{Async, Future, Task, TaskSchedule, alt, altC, uninterruptible}
-import concurrent.Future.{*:, Promise, zip}
+import gears.async.{Async, Future, Task, TaskSchedule, alt, altC, uninterruptible}
+import gears.async.Future.{*:, Promise, zip}
 
 import java.util.concurrent.CancellationException
 import scala.collection.mutable

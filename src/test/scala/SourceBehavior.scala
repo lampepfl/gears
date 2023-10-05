@@ -1,5 +1,5 @@
-import concurrent.{Async, Future}
-import concurrent.Async.{Listener, either}
+import gears.async.{Async, Future}
+import Async.{Listener, either}
 
 import java.util.concurrent.CancellationException
 import scala.concurrent.ExecutionContext
@@ -116,7 +116,7 @@ class SourceBehavior extends munit.FunSuite {
         Async.current.sleep(100)
         1
       }
-      val l: concurrent.Async.Listener[Try[Int]] = { _ => aRan = true; true }
+      val l: Async.Listener[Try[Int]] = { _ => aRan = true; true }
       f.onComplete(l)
       f.onComplete({ _ => bRan = true; true })
       assertEquals(aRan, false)
@@ -145,21 +145,20 @@ class SourceBehavior extends munit.FunSuite {
 
   test("all listeners in chain fire") {
     Async.blocking:
-      @volatile var aRan = false
-      @volatile var bRan = false
+      @volatile var aRan = Future.Promise[Unit]()
+      @volatile var bRan = Future.Promise[Unit]()
       val f: Future[Int] = Future {
         Async.current.sleep(50)
         10
       }
       val g = f.filter({ _ => true })
-      f.onComplete({ _ => aRan = true; true})
-      g.onComplete({ _ => bRan = true; true})
-      assertEquals(aRan, false)
-      assertEquals(bRan, false)
+      f.onComplete({ _ => aRan.complete(Success(())); true})
+      g.onComplete({ _ => bRan.complete(Success(())); true})
+      assertEquals(aRan.future.poll(), None)
+      assertEquals(bRan.future.poll(), None)
       Async.await(f)
       Thread.sleep(100) // onComplete of await and manual may be scheduled
-      assertEquals(aRan, true)
-      assertEquals(bRan, true)
+      aRan.future.zip(bRan.future).alt(Future(Async.current.sleep(600))).value
   }
 
   test("either") {

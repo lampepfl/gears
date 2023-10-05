@@ -1,5 +1,5 @@
-import concurrent.{Async, Future, Task, TaskSchedule, alt}
-import concurrent.Future.{*:, zip}
+import gears.async.{Async, Future, Task, TaskSchedule, alt}
+import Future.{*:, zip}
 
 import scala.concurrent.ExecutionContext
 import scala.util.{Failure, Success, Try}

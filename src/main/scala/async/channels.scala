@@ -1,4 +1,4 @@
-package concurrent
+package gears.async
 import scala.collection.mutable
 import mutable.{ArrayBuffer, ListBuffer}
 
@@ -6,11 +6,8 @@ import scala.concurrent.ExecutionContext
 import scala.util.{Failure, Success, Try}
 import Async.{Listener, await}
 
-import java.util.concurrent.CountDownLatch
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger}
 import scala.util.control.Breaks.{break, breakable}
-import java.util.concurrent.locks.{Condition, Lock}
-import async.AsyncFoundations
 
 /** The part of a channel one can send values to. Blocking behavior depends on the implementation.
  *  Note that while sending is a special (potentially) blocking operation similar to await, reading is

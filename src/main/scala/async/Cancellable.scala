@@ -1,4 +1,4 @@
-package concurrent
+package gears.async
 
 /** A trait for cancellable entities that can be grouped */
 trait Cancellable:
@@ -6,7 +6,7 @@ trait Cancellable:
   private var group: CompletionGroup = CompletionGroup.Unlinked
 
   /** Issue a cancel request */
-  def cancel()(using Async): Unit
+  def cancel(): Unit
 
   /** Add this cancellable to the given group after removing
    *  it from the previous group in which it was.
@@ -28,8 +28,9 @@ trait Cancellable:
     link(CompletionGroup.Unlinked)
 
   /** Signal completion of this cancellable to its group. */
-  def signalCompletion()(using async: Async): this.type =
+  def signalCompletion()(using Async): this.type =
     this.group.handleCompletion(this)
+    this.unlink()
     this
 
 

@@ -1,13 +1,11 @@
-package concurrent
+package gears.async
 
-import concurrent.Future.Promise
-import concurrent.{Async, Cancellable, Future}
+import Future.Promise
 
 import java.util.concurrent.TimeoutException
 import scala.collection.mutable
-import scala.concurrent.{ExecutionContext, TimeoutException}
+import scala.concurrent.TimeoutException
 import scala.util.{Failure, Success, Try}
-import async.{AsyncFoundations, WaitSuspension}
 
 type TimerRang = Boolean
 
@@ -45,7 +43,7 @@ class StartableTimer(val millis: Long) extends Async.OriginalSource[TimerRang], 
               for listener <- toNotify do listener(true)
           })
 
-    def cancel()(using Async): Unit =
+    def cancel(): Unit =
       state match
         case TimerState.Cancelled | TimerState.Ready | TimerState.RangAlready => ()
         case TimerState.Ticking(t: WaitSuspension) =>
@@ -78,7 +76,6 @@ class Timer(millis: Long) extends StartableTimer(millis) {
 
 
 @main def TimerSleep1Second(): Unit =
-  given ExecutionContext = ExecutionContext.global
   Async.blocking:
         println("start of 1 second")
         assert(Async.await(Timer(1000)))
@@ -86,7 +83,6 @@ class Timer(millis: Long) extends StartableTimer(millis) {
 
 
 def timeoutCancellableFuture[T](millis: Long, f: Future[T]): Future[T] =
-  given ExecutionContext = ExecutionContext.global
   val p = Promise[T]()
   val t = Timer(millis)
   Async.blocking:
@@ -102,7 +98,6 @@ def timeoutCancellableFuture[T](millis: Long, f: Future[T]): Future[T] =
 
 
 @main def testTimeoutFuture(): Unit =
-  given ExecutionContext = ExecutionContext.global
   var touched = false
   Async.blocking:
     val t = timeoutCancellableFuture(250, Future:

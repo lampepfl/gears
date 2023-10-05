@@ -1,12 +1,10 @@
-package concurrent
+package gears.async
 
-import concurrent.TaskSchedule.ExponentialBackoff
+import TaskSchedule.ExponentialBackoff
 
 import scala.collection.mutable
 import mutable.ListBuffer
-import async.Suspension
-import async.AsyncFoundations
-import async.AsyncFoundations.*
+import AsyncFoundations.*
 
 import scala.compiletime.uninitialized
 import scala.util.{Failure, Success, Try}
@@ -14,6 +12,7 @@ import scala.annotation.unchecked.uncheckedVariance
 import java.util.concurrent.CancellationException
 import scala.annotation.tailrec
 import scala.util
+import gears.async.Async.Listener
 
 private val cancellationException = CancellationException()
 
@@ -32,7 +31,7 @@ trait Future[+T] extends Async.OriginalSource[Try[T]], Cancellable:
   /** Eventually stop computation of this future and fail with
    *  a `Cancellation` exception.
    */
-  def cancel()(using Async): Unit
+  def cancel(): Unit
 
 object Future:
 
@@ -62,7 +61,7 @@ object Future:
 
     // Cancellable method implementations
 
-    def cancel()(using Async): Unit =
+    def cancel(): Unit =
       cancelRequest = true
 
     // Future method implementations
@@ -157,7 +156,7 @@ object Future:
       signalCompletion()
     ))
 
-    override def cancel()(using Async): Unit =
+    override def cancel(): Unit =
       super.cancel()
       RunnableFuture.this.synchronized:
         val awaited1 = awaited
