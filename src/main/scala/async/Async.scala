@@ -1,11 +1,10 @@
 package gears.async
 import java.util.concurrent.atomic.AtomicBoolean
 import scala.collection.mutable
-import AsyncFoundations.*
 
 /** A context that allows to suspend waiting for asynchronous data sources
  */
-trait Async:
+trait Async(using val support: AsyncSupport, val scheduler: support.Scheduler):
 
   /** Wait for completion of async source `src` and return the result */
   def await[T](src: Async.Source[T]): T
@@ -21,17 +20,17 @@ trait Async:
 
 object Async:
 
-  private class Blocking(val group: CompletionGroup)(using label: Label[Unit]) extends Async:
+  private class Blocking(val group: CompletionGroup)(using support: AsyncSupport, label: support.Label[Unit], scheduler: support.Scheduler) extends Async(using support, scheduler):
     /** Wait for completion of async source `src` and return the result */
     override def await[T](src: Async.Source[T]): T =
       src.poll().getOrElse:
-        suspend[T, Unit](s => src.onComplete: t =>
+        support.suspend[T, Unit](s => src.onComplete: t =>
           s.resumeAsync(t)
           true
         )
 
     override def sleep(millis: Long): Unit =
-      AsyncFoundations.sleep(millis) // cannot be interrupted
+      Thread.sleep(millis) // TODO
 
     /** An Async of the same kind as this one, with a new cancellation group */
     override def withGroup(group: CompletionGroup): Async = Blocking(group)
@@ -39,8 +38,8 @@ object Async:
   /** Execute asynchronous computation `body` on currently running thread.
    *  The thread will suspend when the computation waits.
    */
-  def blocking[T](body: Async ?=> T): T =
-    blockingBoundary:
+  def blocking[T](body: Async ?=> T)(using support: AsyncSupport, scheduler: support.Scheduler): T =
+    support.blockingBoundary:
       body(using Blocking(CompletionGroup.Unlinked))
 
   /** The currently executing Async context */

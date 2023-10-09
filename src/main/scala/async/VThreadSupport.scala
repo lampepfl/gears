@@ -1,24 +1,26 @@
 package gears.async
 
 import scala.annotation.unchecked.uncheckedVariance
-import scala.util.Try
-import scala.util.Success
 import java.util.concurrent.locks.ReentrantLock
 import java.util.concurrent.locks.Condition
 
-trait VThreadSuspendFoundations extends SuspendFoundations:
+given VThreadSupport.type = VThreadSupport
+given VThreadSupport.Scheduler = VThreadSupport.scheduler
+
+trait VThreadSuspendSupport extends SuspendSupport with VThreadSchedulerSupport:
+  self: VThreadSupport.type =>
 
   final class VThreadLabel[R]():
     private var result: Option[R] = None
     private val lock = ReentrantLock()
     private val cond = lock.newCondition()
 
-    private[VThreadSuspendFoundations] def clearResult() =
+    private[VThreadSuspendSupport] def clearResult() =
       lock.lock()
       result = None
       lock.unlock()
 
-    private[VThreadSuspendFoundations] def setResult(data: R) =
+    private[VThreadSuspendSupport] def setResult(data: R) =
       lock.lock()
       try
         result = Some(data)
@@ -26,10 +28,10 @@ trait VThreadSuspendFoundations extends SuspendFoundations:
       finally
         lock.unlock()
 
-    private[VThreadSuspendFoundations] def waitResult(): R =
+    private[VThreadSuspendSupport] def waitResult(): R =
       lock.lock()
       try
-        if result.isEmpty then
+        while result.isEmpty do
           cond.await()
         result.get
       finally
@@ -44,7 +46,7 @@ trait VThreadSuspendFoundations extends SuspendFoundations:
     private val lock = ReentrantLock()
     private val cond = lock.newCondition()
 
-    private[VThreadSuspendFoundations] def setInput(data: T) =
+    private[VThreadSuspendSupport] def setInput(data: T) =
       lock.lock()
       try
         nextInput = Some(data)
@@ -53,10 +55,10 @@ trait VThreadSuspendFoundations extends SuspendFoundations:
         lock.unlock()
 
     // variance is safe because the only caller created the object
-    private[VThreadSuspendFoundations] def waitInput(): T @uncheckedVariance =
+    private[VThreadSuspendSupport] def waitInput(): T @uncheckedVariance =
       lock.lock()
       try
-        if nextInput.isEmpty then
+        while nextInput.isEmpty do
           cond.await()
         nextInput.get
       finally
@@ -68,7 +70,7 @@ trait VThreadSuspendFoundations extends SuspendFoundations:
       setInput(arg)
       l.waitResult()
 
-    override def resumeAsync(arg: T): Unit =
+    override private[async] def resumeAsync(arg: T)(using Scheduler): Unit =
       l.clearResult()
       setInput(arg)
 
@@ -80,7 +82,7 @@ trait VThreadSuspendFoundations extends SuspendFoundations:
 
     label.waitResult()
 
-  override def blockingBoundary[R](body: (Label[Unit]) ?=> R): R =
+  override private[async] def blockingBoundary[R](body: (Label[Unit]) ?=> R)(using Scheduler): R =
     val label = VThreadLabel[Unit]()
     body(using label)
 
@@ -90,21 +92,10 @@ trait VThreadSuspendFoundations extends SuspendFoundations:
     l.setResult(res)
     sus.waitInput()
 
-trait VThreadSchedulerFoundations extends SchedulerFoundations:
-  override def execute(run: Runnable): Unit = Thread.startVirtualThread(run)
+trait VThreadSchedulerSupport extends SchedulerSupport:
+  opaque type Scheduler = Unit
+  override def execute(run: Runnable)(using Scheduler): Unit = Thread.startVirtualThread(run)
+  def scheduler: this.Scheduler = ()
 
-  def sleep(millis: Long, cancelHandler: WaitSuspension => Unit = _ => {}): Unit =
-    val thread = Thread.currentThread()
-    @volatile var result: Try[Unit] = Success(())
-    cancelHandler(new WaitSuspension:
-      override def resume(arg: Try[Unit]): Unit =
-        result = arg
-        thread.interrupt()
-      override def resumeAsync(arg: Try[Unit]): Unit = resume(arg)
-    )
-    Thread.sleep(millis)
-    result.get
-
-object VThreadFoundations extends AsyncFoundations
-                          with VThreadSchedulerFoundations
-                          with VThreadSuspendFoundations
+object VThreadSupport extends AsyncSupport
+                          with VThreadSuspendSupport // extends VThreadSchedulerSupport

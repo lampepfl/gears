@@ -1,6 +1,6 @@
 package PosixLikeIO.examples
 
-import gears.async.{Async, Future}
+import gears.async.{Async, Future, given}
 import PosixLikeIO.{PIOHelper, SocketUDP}
 
 import java.net.DatagramPacket

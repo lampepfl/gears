@@ -13,9 +13,9 @@ type TimerRang = Boolean
  *  Can be used only once per instance.
  */
 class StartableTimer(val millis: Long) extends Async.OriginalSource[TimerRang], Cancellable {
-  private enum TimerState(val thread: Option[WaitSuspension]):
+  private enum TimerState(val future: Option[Future[Unit]]):
     case Ready extends TimerState(None)
-    case Ticking(val t: WaitSuspension) extends TimerState(Some(t))
+    case Ticking(val f: Future[Unit]) extends TimerState(Some(f))
     case RangAlready extends TimerState(None)
     case Cancelled extends TimerState(None)
 
@@ -29,8 +29,9 @@ class StartableTimer(val millis: Long) extends Async.OriginalSource[TimerRang], 
         case TimerState.RangAlready => throw new IllegalStateException("Timers cannot be started after they rang already.")
         case TimerState.Ticking(_) => throw new IllegalStateException("Timers cannot be started once they have already been started.")
         case TimerState.Ready =>
-          AsyncFoundations.execute(() => {
-              AsyncFoundations.sleep(millis, k => state = TimerState.Ticking(k))
+          Async.blocking:
+            val f = Future:
+              Async.current.sleep(millis)
               var toNotify = List[TimerRang => Boolean]()
               synchronized:
                 toNotify = waiting.toList
@@ -41,13 +42,13 @@ class StartableTimer(val millis: Long) extends Async.OriginalSource[TimerRang], 
                   case _ =>
                     toNotify = List()
               for listener <- toNotify do listener(true)
-          })
+            state = TimerState.Ticking(f)
 
     def cancel(): Unit =
       state match
         case TimerState.Cancelled | TimerState.Ready | TimerState.RangAlready => ()
-        case TimerState.Ticking(t: WaitSuspension) =>
-          t.resumeAsync(Failure(new InterruptedException()))
+        case TimerState.Ticking(f: Future[Unit]) =>
+          f.cancel()
           val toNotify = synchronized:
             val ws = waiting.toList
             waiting.clear()

@@ -1,4 +1,4 @@
-import gears.async.{Async, Future}
+import gears.async.{Async, Future, given}
 import Async.{Listener, either}
 
 import java.util.concurrent.CancellationException

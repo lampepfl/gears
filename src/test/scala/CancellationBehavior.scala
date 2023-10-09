@@ -1,4 +1,4 @@
-import gears.async.{Async, Future, AsyncFoundations}
+import gears.async.{Async, Future, AsyncSupport, given}
 import scala.util.boundary
 import boundary.break
 import scala.concurrent.duration.{Duration, DurationInt}

@@ -2,11 +2,9 @@ package gears.async
 import scala.collection.mutable
 import mutable.{ArrayBuffer, ListBuffer}
 
-import scala.concurrent.ExecutionContext
 import scala.util.{Failure, Success, Try}
 import Async.{Listener, await}
 
-import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger}
 import scala.util.control.Breaks.{break, breakable}
 
 /** The part of a channel one can send values to. Blocking behavior depends on the implementation.
@@ -269,17 +267,16 @@ end ChannelMultiplexer
 
 
 object ChannelMultiplexer:
-  given ExecutionContext = ExecutionContext.global
-
   private enum Message:
     case Quit, Refresh
 
-  def apply[T]()(using Async): ChannelMultiplexer[T] = new ChannelMultiplexer[T]:
+  def apply[T]()(using ac: Async): ChannelMultiplexer[T] = new ChannelMultiplexer[T]:
+    given ac.support.Scheduler = ac.scheduler
     private var isClosed = false
     private val publishers = ArrayBuffer[ReadableChannel[T]]()
     private val subscribers = ArrayBuffer[SendableChannel[Try[T]]]()
     private val infoChannel: BufferedChannel[Message] = BufferedChannel[Message](1)
-    AsyncFoundations.execute { () =>
+    ac.support.execute { () =>
       var shouldTerminate = false
       var publishersCopy: List[ReadableChannel[T]] = null
       var subscribersCopy: List[SendableChannel[Try[T]]] = null
@@ -345,7 +342,6 @@ end ChannelMultiplexer
 
 
 @main def channelsMultipleSendersOneReader(): Unit =
-  given ExecutionContext = ExecutionContext.global
   Async.blocking:
     var aa = false
     var ab = false

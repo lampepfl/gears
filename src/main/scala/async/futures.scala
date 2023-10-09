@@ -4,7 +4,6 @@ import TaskSchedule.ExponentialBackoff
 
 import scala.collection.mutable
 import mutable.ListBuffer
-import AsyncFoundations.*
 
 import scala.compiletime.uninitialized
 import scala.util.{Failure, Success, Try}
@@ -97,14 +96,14 @@ object Future:
    */
   private class RunnableFuture[+T](body: Async ?=> T)(using ac: Async) extends CoreFuture[T]:
 
-    private var awaited: Option[Suspension[Try[Nothing], Unit]] = None
+    private var awaited: Option[ac.support.Suspension[Try[Nothing], Unit]] = None
 
     private def checkCancellation(): Unit =
       if cancelRequest then throw cancellationException
 
     /** a handler for Async */
-    private def async(body: Async ?=> Unit)(using Label[Unit]): Unit =
-      class FutureAsync(val group: CompletionGroup)(using label: Label[Unit]) extends Async:
+    private def async(body: Async ?=> Unit)(using ac.support.Label[Unit]): Unit =
+      class FutureAsync(val group: CompletionGroup)(using label: ac.support.Label[Unit]) extends Async(using ac.support, ac.scheduler):
 
         /** Await a source first by polling it, and, if that fails, by suspending
          *  in a onComplete call.
@@ -112,7 +111,7 @@ object Future:
         override def await[U](src: Async.Source[U]): U =
           checkCancellation()
           src.poll().getOrElse:
-            suspend[Try[U], Unit](k =>
+            ac.support.suspend[Try[U], Unit](k =>
               RunnableFuture.this.synchronized:
                 checkCancellation()
                 awaited = Some(k)
@@ -130,20 +129,26 @@ object Future:
                 true
             ).get
 
-        override def sleep(millis: Long): Unit =
-          checkCancellation()
-          AsyncFoundations.sleep(millis, k =>
-            RunnableFuture.this.synchronized:
-              checkCancellation()
-              awaited = Some(k)
-          )
+        override def sleep(millis: Long): Unit = // TODO
+          val th = Thread.currentThread()
+          RunnableFuture.this.synchronized:
+            checkCancellation()
+            awaited = Some(new FutureAsync.this.support.Suspension[Try[Nothing], Unit]{
+              def resume(arg: util.Try[Nothing]): Unit = th.interrupt()
+
+              private[async] def resumeAsync(arg: util.Try[Nothing])(using FutureAsync.this.support.Scheduler): Unit = resume(arg)
+            }.asInstanceOf[ac.support.Suspension[Try[Nothing], Unit]])
+            // cast is safe b/c FutureAsync.this.support == ac.support
+          try Thread.sleep(millis)
+          catch
+            case _: InterruptedException => throw cancellationException
 
         override def withGroup(group: CompletionGroup) = FutureAsync(group)
 
       Async.awaitingGroup(body)(using FutureAsync(CompletionGroup().link()))
     end async
 
-    execute(() => blockingBoundary[Unit](async:
+    ac.support.execute(() => ac.support.blockingBoundary[Unit](async:
       complete(Try({
         try
           val r = body
@@ -418,8 +423,8 @@ def alt[T](futures: Future[T]*)(using Async): Future[T] =
 def altC[T](futures: Future[T]*)(using Async): Future[T] =
   altAndAltCImplementation(true, futures*)
 
-def uninterruptible[T](body: Async ?=> T)(using Async) =
-  val fut = Async.blocking:
+def uninterruptible[T](body: Async ?=> T)(using ac: Async) =
+  val fut = Async.blocking{
     val f = Future(body)
 
     def forceJoin(): Unit =
@@ -436,4 +441,5 @@ def uninterruptible[T](body: Async ?=> T)(using Async) =
 
     forceJoin()
     f
+    }(using ac.support, ac.scheduler)
   Async.await(fut)

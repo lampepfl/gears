@@ -1,6 +1,6 @@
 package PosixLikeIO.examples
 
-import gears.async.Async
+import gears.async.{Async, given}
 import PosixLikeIO.PIOHelper
 
 import java.nio.ByteBuffer
