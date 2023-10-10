@@ -10,11 +10,17 @@ import scala.util.Success
  */
 class CompletionGroup(val handleCompletion: Cancellable => Async ?=> Unit = _ => {}) extends Cancellable:
   private val members: mutable.Set[Cancellable] = mutable.Set()
+  private var canceled: Boolean = false
   private var cancelWait: Option[Promise[Unit]] = None
 
-  /** Cancel all members and clear the members set */
+  /** Cancel all members */
   def cancel(): Unit =
-    synchronized(members.toArray).foreach(_.cancel())
+    synchronized:
+      if canceled then Seq.empty
+      else
+        canceled = true
+        members.toSeq
+    .foreach(_.cancel())
 
   private[async] def waitCompletion()(using Async): Unit =
     synchronized:
@@ -23,9 +29,12 @@ class CompletionGroup(val handleCompletion: Cancellable => Async ?=> Unit = _ =>
     cancelWait.foreach(cWait => Async.await(cWait.future))
     signalCompletion()
 
-  /** Add given member to the members set */
-  def add(member: Cancellable): Unit = synchronized:
-    members += member
+  /** Add given member to the members set. If the group has already been cancelled, cancels that member immediately. */
+  def add(member: Cancellable): Unit =
+    val alreadyCancelled = synchronized:
+      members += member
+      canceled
+    if alreadyCancelled then member.cancel()
 
   /** Remove given member from the members set if it is an element */
   def drop(member: Cancellable): Unit = synchronized:
