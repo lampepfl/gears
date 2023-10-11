@@ -1,4 +1,5 @@
 import gears.async.{Async, Future, AsyncSupport, uninterruptible, given}
+import gears.async.AsyncOperations.*
 import scala.util.boundary
 import boundary.break
 import scala.concurrent.duration.{Duration, DurationInt}
@@ -42,7 +43,7 @@ class CancellationBehavior extends munit.FunSuite:
       info.run()
       try
         body
-        Async.current.sleep(10 * 1000)
+        sleep(10 * 1000)
         info.state = State.Completed
       catch
         case e: (InterruptedException | CancellationException) =>
@@ -77,7 +78,7 @@ class CancellationBehavior extends munit.FunSuite:
     Async.blocking:
       Async.group:
         Future:
-          Async.current.sleep(400)
+          sleep(400)
           x = 1
     assertEquals(x, 0)
 
@@ -113,7 +114,7 @@ class CancellationBehavior extends munit.FunSuite:
     Async.blocking:
       val f = Future:
         uninterruptible:
-          Async.current.sleep(500)
+          sleep(500)
           x1 = 1
         x2 = 1
       Async.group:

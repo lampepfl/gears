@@ -20,4 +20,4 @@ trait SchedulerSupport:
 
 trait AsyncSupport extends SuspendSupport with SchedulerSupport
 object AsyncSupport:
-    def apply()(using ac: AsyncSupport) = ac
+    inline def apply()(using ac: AsyncSupport) = ac

@@ -9,9 +9,6 @@ trait Async(using val support: AsyncSupport, val scheduler: support.Scheduler):
   /** Wait for completion of async source `src` and return the result */
   def await[T](src: Async.Source[T]): T
 
-  /** Wait a given time */
-  def sleep(millis: Long): Unit
-
   /** The cancellation group for this Async */
   def group: CompletionGroup
 
@@ -28,9 +25,6 @@ object Async:
           s.resumeAsync(t)
           true
         )
-
-    override def sleep(millis: Long): Unit =
-      Thread.sleep(millis) // TODO
 
     /** An Async of the same kind as this one, with a new cancellation group */
     override def withGroup(group: CompletionGroup): Async = Blocking(group)

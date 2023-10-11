@@ -1,6 +1,7 @@
 package PosixLikeIO.examples
 
 import gears.async.{Async, Future, given}
+import gears.async.AsyncOperations.*
 import PosixLikeIO.{PIOHelper, SocketUDP}
 
 import java.net.DatagramPacket
@@ -18,7 +19,7 @@ import scala.concurrent.ExecutionContext
         val messageReceived = String(got.getData.slice(0, got.getLength), "UTF-8")
         val responseMessage = (messageReceived.toInt + 1).toString.getBytes
         serverSocket.send(ByteBuffer.wrap(responseMessage), got.getAddress.toString.substring(1), got.getPort)
-        Async.current.sleep(50)
+        sleep(50)
 
     def client(value: Int): Future[Unit] =
       Future:

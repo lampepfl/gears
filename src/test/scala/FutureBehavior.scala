@@ -1,5 +1,6 @@
 import gears.async.{Async, Future, Task, TaskSchedule, alt, altC, uninterruptible, given}
 import gears.async.Future.{*:, Promise, zip}
+import gears.async.AsyncOperations.*
 
 import java.util.concurrent.CancellationException
 import scala.collection.mutable
@@ -69,7 +70,7 @@ class FutureBehavior extends munit.FunSuite {
   test("Constant future with timeout") {
     Async.blocking:
       val f = Future {
-        Async.current.sleep(50)
+        sleep(50)
         55
       }
       assertEquals(f.value, 55)
@@ -92,33 +93,33 @@ class FutureBehavior extends munit.FunSuite {
     Async.blocking:
       var touched = 0
       Future {
-        Async.current.sleep(200)
+        sleep(200)
         touched += 1
       }.alt(Future {
         10
       }).result
-      Async.current.sleep(300)
+      sleep(300)
       assertEquals(touched, 1)
     Async.blocking:
       var touched = 0
       Future {
-        Async.current.sleep(200)
+        sleep(200)
         touched += 1
       }.altC(Future { 10 }).result
-      Async.current.sleep(300)
+      sleep(300)
       assertEquals(touched, 0)
   }
 
   test("altC of multiple futures") {
     Async.blocking:
       var touched = java.util.concurrent.atomic.AtomicInteger(0)
-      alt(Future { Async.current.sleep(100); touched.incrementAndGet() }, Future { Async.current.sleep(100); touched.incrementAndGet() }, Future { 5 }).result
-      Async.current.sleep(200)
+      alt(Future { sleep(100); touched.incrementAndGet() }, Future { sleep(100); touched.incrementAndGet() }, Future { 5 }).result
+      sleep(200)
       assertEquals(touched.get(), 2)
     Async.blocking:
       var touched = 0
-      altC(Future { Async.current.sleep(100); touched += 1 }, Future { Async.current.sleep(100); touched += 1 }, Future { 5 }).result
-      Async.current.sleep(200)
+      altC(Future { sleep(100); touched += 1 }, Future { sleep(100); touched += 1 }, Future { 5 }).result
+      sleep(200)
       assertEquals(touched, 0)
   }
 
@@ -168,11 +169,11 @@ class FutureBehavior extends munit.FunSuite {
   test("futures can be nested") {
     Async.blocking:
       val z = Future{
-        Async.current.sleep(Random.between(0, 15L))
+        sleep(Random.between(0, 15L))
         Future{
-          Async.current.sleep(Random.between(0, 15L))
+          sleep(Random.between(0, 15L))
           Future{
-            Async.current.sleep(Random.between(0, 15L))
+            sleep(Random.between(0, 15L))
             10
           }.value
         }.value
@@ -183,7 +184,7 @@ class FutureBehavior extends munit.FunSuite {
   test("future are cancelled via .interrupt() and not checking the flag in async") {
     Async.blocking:
       val f = Future {
-        Async.current.sleep(150L)
+        sleep(150L)
         10
       }
       f.cancel()
@@ -197,7 +198,7 @@ class FutureBehavior extends munit.FunSuite {
     Async.blocking:
       val f = Future {
         Future {
-          Async.current.sleep(200)
+          sleep(200)
           zombieModifiedThis = true
         }.unlink()
         10
@@ -221,7 +222,7 @@ class FutureBehavior extends munit.FunSuite {
 
   test("zip on tuples with EmptyTuple") {
     Async.blocking:
-      val z1 = Future{ Async.current.sleep(500); 10} *: Future {Async.current.sleep(10); 222} *: Future{Async.current.sleep(150); 333} *: Future{EmptyTuple}
+      val z1 = Future{ sleep(500); 10} *: Future {sleep(10); 222} *: Future{sleep(150); 333} *: Future{EmptyTuple}
       assertEquals(
         z1.value, (10, 222, 333))
   }
@@ -241,13 +242,13 @@ class FutureBehavior extends munit.FunSuite {
         val e3 = AssertionError(311)
         assertEquals(
           (Future {
-            Async.current.sleep(Random.between(200, 300));
+            sleep(Random.between(200, 300));
             throw e1
           } *:  Future {
-              Async.current.sleep(Random.between(200, 300));
+              sleep(Random.between(200, 300));
               throw e2
             } *: Future {
-              Async.current.sleep(Random.between(50, 100));
+              sleep(Random.between(50, 100));
               throw e3
             } *: Future{EmptyTuple}).result, Failure(e3))
   }
@@ -255,11 +256,11 @@ class FutureBehavior extends munit.FunSuite {
   test("cancelled futures return the same constant CancellationException with no stack attached") {
     Async.blocking:
       val futures = List(
-        Future{Async.current.sleep(100); 1},
-        Future{Async.current.sleep(100); 1},
-        Future{Async.current.sleep(100); 1},
-        Future{Async.current.sleep(100); 1},
-        Future{Async.current.sleep(100); 1}
+        Future{sleep(100); 1},
+        Future{sleep(100); 1},
+        Future{sleep(100); 1},
+        Future{sleep(100); 1},
+        Future{sleep(100); 1}
       )
       futures.foreach(_.cancel())
       val exceptionSet = mutable.Set[Throwable]()
@@ -289,11 +290,11 @@ class FutureBehavior extends munit.FunSuite {
       var touched = false
       val f = Future {
         uninterruptible {
-          Async.current.sleep(300)
+          sleep(300)
           touched = true
         }
       }
-      Async.current.sleep(50)
+      sleep(50)
       f.cancel()
       f.result
       assertEquals(touched, true)
@@ -319,12 +320,12 @@ class FutureBehavior extends munit.FunSuite {
       var touched2 = false
       val f1 = Future {
         uninterruptible {
-          Async.current.sleep(400)
+          sleep(400)
           touched1 = true
         }
         touched2 = true
       }
-      Async.current.sleep(50)
+      sleep(50)
       f1.cancel()
       f1.result
       assertEquals(touched1, true)
@@ -336,13 +337,13 @@ class FutureBehavior extends munit.FunSuite {
       for (i <- 1 to 20)
         assertEquals(
           alt(Future {
-            Async.current.sleep(Random.between(200, 300)); 10000 * i + 111
+            sleep(Random.between(200, 300)); 10000 * i + 111
           },
             Future {
-              Async.current.sleep(Random.between(200, 300)); 10000 * i + 222
+              sleep(Random.between(200, 300)); 10000 * i + 222
             },
             Future {
-              Async.current.sleep(Random.between(30, 50)); 10000 * i + 333
+              sleep(Random.between(30, 50)); 10000 * i + 333
             }
           ).result, Success(10000 * i + 333))
   }
@@ -356,15 +357,15 @@ class FutureBehavior extends munit.FunSuite {
 
         assertEquals(
           alt(Future {
-            Async.current.sleep(Random.between(0, 250));
+            sleep(Random.between(0, 250));
             throw e1
           },
             Future {
-              Async.current.sleep(Random.between(500, 1000));
+              sleep(Random.between(500, 1000));
               throw e2
             },
             Future {
-              Async.current.sleep(Random.between(0, 250));
+              sleep(Random.between(0, 250));
               throw e3
             }).result, Failure(e2))
   }

@@ -1,6 +1,7 @@
 package gears.async
 
 import Future.Promise
+import AsyncOperations.sleep
 
 import java.util.concurrent.TimeoutException
 import scala.collection.mutable
@@ -31,7 +32,7 @@ class StartableTimer(val millis: Long) extends Async.OriginalSource[TimerRang], 
         case TimerState.Ready =>
           Async.blocking:
             val f = Future:
-              Async.current.sleep(millis)
+              sleep(millis)
               var toNotify = List[TimerRang => Boolean]()
               synchronized:
                 toNotify = waiting.toList
@@ -106,6 +107,6 @@ def timeoutCancellableFuture[T](millis: Long, f: Future[T]): Future[T] =
         touched = true)
     Async.await(t)
     assert(!touched)
-    Async.current.sleep(2000)
+    sleep(2000)
     assert(!touched)
 
