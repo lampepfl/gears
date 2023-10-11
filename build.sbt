@@ -3,7 +3,8 @@ val scala3Version = "3.3.0"
 lazy val root = project
   .in(file("."))
   .settings(
-    name := "Scala 3 Async Prototype",
+    name := "Gears",
+    organization := "ch.epfl.lamp",
     version := "0.1.0-SNAPSHOT",
     scalaVersion := scala3Version,
     javaOptions += "--enable-preview --version 19",
