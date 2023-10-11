@@ -250,7 +250,7 @@ class ListenerBehavior extends munit.FunSuite:
     Async.race(source1).onComplete(NumberedTestListener(false, false, 1))
     val wrapped = source1.listener.get
 
-    Thread.startVirtualThread: () =>
+    Thread.ofPlatform().start: () =>
       val result = wrapped.lock.lockSelf(source1).asInstanceOf[Listener.PartialLock]
       wrapped.releaseLock(result)
     .join()

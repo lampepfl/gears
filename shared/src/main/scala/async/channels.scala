@@ -344,34 +344,35 @@ object ChannelMultiplexer:
 end ChannelMultiplexer
 
 
-@main def channelsMultipleSendersOneReader(): Unit =
-  Async.blocking:
-    var aa = false
-    var ab = false
-    var ac = false
-    var b = false
-    val c = SyncChannel[Int]()
-    val f13 = Future:
-      for (i <- 1 to 10000)
-        c.send(i)
-      ac = true
-    val f11 = Future:
-      for (i <- 1 to 10000)
-        c.send(i)
-      aa = true
-    val f12 = Future:
-      for (i <- 1 to 10000)
-          c.send(i)
-      ab = true
-    val f2 = Future:
-      var r = 0
-      for (i <- 1 to 30000)
-        c.read()
-        r += 1
-      b = true
+// TODO: make this work
+// @main def channelsMultipleSendersOneReader(): Unit =
+//   Async.blocking:
+//     var aa = false
+//     var ab = false
+//     var ac = false
+//     var b = false
+//     val c = SyncChannel[Int]()
+//     val f13 = Future:
+//       for (i <- 1 to 10000)
+//         c.send(i)
+//       ac = true
+//     val f11 = Future:
+//       for (i <- 1 to 10000)
+//         c.send(i)
+//       aa = true
+//     val f12 = Future:
+//       for (i <- 1 to 10000)
+//           c.send(i)
+//       ab = true
+//     val f2 = Future:
+//       var r = 0
+//       for (i <- 1 to 30000)
+//         c.read()
+//         r += 1
+//       b = true
 
-    f11.result
-    f2.result
-    f12.result
-    f13.result
-    println("all done? " + (aa && ab && ac && b))
+//     f11.result
+//     f2.result
+//     f12.result
+//     f13.result
+//     println("all done? " + (aa && ab && ac && b))
