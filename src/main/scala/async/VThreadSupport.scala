@@ -4,23 +4,31 @@ import scala.annotation.unchecked.uncheckedVariance
 import java.util.concurrent.locks.ReentrantLock
 import java.util.concurrent.locks.Condition
 
+given VThreadScheduler.type = VThreadScheduler
 given VThreadSupport.type = VThreadSupport
-given VThreadSupport.Scheduler = VThreadSupport.scheduler
 
-trait VThreadSuspendSupport extends SuspendSupport with VThreadSchedulerSupport:
-  self: VThreadSupport.type =>
+object VThreadScheduler extends Scheduler:
+  override def execute(body: Runnable): Unit = Thread.startVirtualThread(body)
 
-  final class VThreadLabel[R]():
+  override def schedule(delayMillis: Long, body: Runnable): Cancellable =
+    val th = Thread.startVirtualThread: () =>
+      Thread.sleep(delayMillis)
+      body.run()
+    () => th.interrupt()
+
+object VThreadSupport extends AsyncSupport:
+
+  private final class VThreadLabel[R]():
     private var result: Option[R] = None
     private val lock = ReentrantLock()
     private val cond = lock.newCondition()
 
-    private[VThreadSuspendSupport] def clearResult() =
+    private[VThreadSupport] def clearResult() =
       lock.lock()
       result = None
       lock.unlock()
 
-    private[VThreadSuspendSupport] def setResult(data: R) =
+    private[VThreadSupport] def setResult(data: R) =
       lock.lock()
       try
         result = Some(data)
@@ -28,7 +36,7 @@ trait VThreadSuspendSupport extends SuspendSupport with VThreadSchedulerSupport:
       finally
         lock.unlock()
 
-    private[VThreadSuspendSupport] def waitResult(): R =
+    private[VThreadSupport] def waitResult(): R =
       lock.lock()
       try
         while result.isEmpty do
@@ -37,16 +45,16 @@ trait VThreadSuspendSupport extends SuspendSupport with VThreadSchedulerSupport:
       finally
         lock.unlock()
 
-  type Label[R] = VThreadLabel[R]
+  opaque type Label[R] = VThreadLabel[R]
 
   // outside boundary: waiting on label
   //  inside boundary: waiting on suspension
-  final class VThreadSuspension[-T, +R](using l: Label[R]) extends Suspension[T, R]:
+  private final class VThreadSuspension[-T, +R](using l: Label[R]) extends Suspension[T, R]:
     private var nextInput: Option[T] = None
     private val lock = ReentrantLock()
     private val cond = lock.newCondition()
 
-    private[VThreadSuspendSupport] def setInput(data: T) =
+    private[VThreadSupport] def setInput(data: T) =
       lock.lock()
       try
         nextInput = Some(data)
@@ -55,7 +63,7 @@ trait VThreadSuspendSupport extends SuspendSupport with VThreadSchedulerSupport:
         lock.unlock()
 
     // variance is safe because the only caller created the object
-    private[VThreadSuspendSupport] def waitInput(): T @uncheckedVariance =
+    private[VThreadSupport] def waitInput(): T @uncheckedVariance =
       lock.lock()
       try
         while nextInput.isEmpty do
@@ -82,20 +90,13 @@ trait VThreadSuspendSupport extends SuspendSupport with VThreadSchedulerSupport:
 
     label.waitResult()
 
-  override private[async] def blockingBoundary[R](body: (Label[Unit]) ?=> R)(using Scheduler): R =
-    val label = VThreadLabel[Unit]()
-    body(using label)
+  override def scheduleBoundary(body: (Label[Unit]) ?=> Unit)(using Scheduler): Unit =
+    Thread.startVirtualThread: () =>
+      val label = VThreadLabel[Unit]()
+      body(using label)
 
   override def suspend[T, R](body: Suspension[T, R] => R)(using l: Label[R]): T =
     val sus = new VThreadSuspension[T, R]()
     val res = body(sus)
     l.setResult(res)
     sus.waitInput()
-
-trait VThreadSchedulerSupport extends SchedulerSupport:
-  opaque type Scheduler = Unit
-  override def execute(run: Runnable)(using Scheduler): Unit = Thread.startVirtualThread(run)
-  def scheduler: this.Scheduler = ()
-
-object VThreadSupport extends AsyncSupport
-                          with VThreadSuspendSupport // extends VThreadSchedulerSupport

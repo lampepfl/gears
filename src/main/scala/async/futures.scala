@@ -151,7 +151,7 @@ object Future:
       this.innerGroup.cancel()
 
     link()
-    ac.support.execute(() => ac.support.blockingBoundary[Unit]:
+    ac.support.scheduleBoundary:
       Async.awaitingGroup(complete(Try({
           try
             val r = body
@@ -162,7 +162,6 @@ object Future:
             case _: CancellationException => throw cancellationException
         })))(using FutureAsync(innerGroup))
       signalCompletion()(using ac)
-    )
 
   end RunnableFuture
 

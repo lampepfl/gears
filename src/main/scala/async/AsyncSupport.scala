@@ -1,23 +1,23 @@
 package gears.async
 
-trait SuspendSupport:
-    this: AsyncSupport =>
+trait Scheduler:
+    def execute(body: Runnable): Unit
+    def schedule(delayMillis: Long, body: Runnable): Cancellable
+
+trait AsyncSupport:
     type Label[R]
 
     trait Suspension[-T, +R]:
         def resume(arg: T): R
-        private[async] def resumeAsync(arg: T)(using Scheduler): Unit
+        private[async] def resumeAsync(arg: T)(using sched: Scheduler): Unit =
+            sched.execute(() => resume(arg))
 
     def boundary[R](body: Label[R] ?=> R): R
-    private[async] def blockingBoundary[R](body: Label[Unit] ?=> R)(using Scheduler): R
+    private[async] def scheduleBoundary(body: Label[Unit] ?=> Unit)(using sched: Scheduler): Unit =
+        sched.execute(() => boundary(body))
+
     /** Should return immediately if resume is called from within body */
     def suspend[T, R](body: Suspension[T, R] => R)(using Label[R]): T
 
-trait SchedulerSupport:
-    type Scheduler
-
-    def execute(run: Runnable)(using Scheduler): Unit
-
-trait AsyncSupport extends SuspendSupport with SchedulerSupport
 object AsyncSupport:
     inline def apply()(using ac: AsyncSupport) = ac

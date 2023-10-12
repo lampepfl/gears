@@ -271,12 +271,11 @@ object ChannelMultiplexer:
     case Quit, Refresh
 
   def apply[T]()(using ac: Async): ChannelMultiplexer[T] = new ChannelMultiplexer[T]:
-    given ac.support.Scheduler = ac.scheduler
     private var isClosed = false
     private val publishers = ArrayBuffer[ReadableChannel[T]]()
     private val subscribers = ArrayBuffer[SendableChannel[Try[T]]]()
     private val infoChannel: BufferedChannel[Message] = BufferedChannel[Message](1)
-    ac.support.execute { () =>
+    ac.scheduler.execute { () =>
       var shouldTerminate = false
       var publishersCopy: List[ReadableChannel[T]] = null
       var subscribersCopy: List[SendableChannel[Try[T]]] = null
