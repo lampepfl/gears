@@ -1,23 +1,32 @@
 package gears.async
 
-trait Scheduler:
-    def execute(body: Runnable): Unit
-    def schedule(delayMillis: Long, body: Runnable): Cancellable
+import java.time.Duration
 
-trait AsyncSupport:
+trait Suspension[-T, +R]:
+    def resume(arg: T): R
+
+trait SuspendSupport:
     type Label[R]
-
-    trait Suspension[-T, +R]:
-        def resume(arg: T): R
-        private[async] def resumeAsync(arg: T)(using sched: Scheduler): Unit =
-            sched.execute(() => resume(arg))
+    type Suspension[-T, +R] <: gears.async.Suspension[T, R]
 
     def boundary[R](body: Label[R] ?=> R): R
-    private[async] def scheduleBoundary(body: Label[Unit] ?=> Unit)(using sched: Scheduler): Unit =
-        sched.execute(() => boundary(body))
 
     /** Should return immediately if resume is called from within body */
     def suspend[T, R](body: Suspension[T, R] => R)(using Label[R]): T
+
+/** Extends [[Suspend]] with "asynchronous" boundary/resume functions, in the presence of a [[Scheduler]] */
+trait AsyncSupport extends SuspendSupport:
+    type Scheduler <: gears.async.Scheduler
+
+    private[async] def resumeAsync[T, R](suspension: Suspension[T, R])(arg: T)(using s: Scheduler): Unit =
+        s.execute(() => suspension.resume(arg))
+
+    private[async] def scheduleBoundary(body: Label[Unit] ?=> Unit)(using s: Scheduler): Unit =
+        s.execute(() => boundary(body))
+
+trait Scheduler:
+    def execute(body: Runnable): Unit
+    def schedule(delay: Duration, body: Runnable): Cancellable
 
 object AsyncSupport:
     inline def apply()(using ac: AsyncSupport) = ac

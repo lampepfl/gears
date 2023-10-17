@@ -4,7 +4,7 @@ import scala.collection.mutable
 
 /** A context that allows to suspend waiting for asynchronous data sources
  */
-trait Async(using val support: AsyncSupport, val scheduler: Scheduler):
+trait Async(using val support: AsyncSupport, val scheduler: support.Scheduler):
 
   /** Wait for completion of async source `src` and return the result */
   def await[T](src: Async.Source[T]): T
@@ -17,7 +17,7 @@ trait Async(using val support: AsyncSupport, val scheduler: Scheduler):
 
 object Async:
 
-  private class Blocking(val group: CompletionGroup)(using support: AsyncSupport, scheduler: Scheduler) extends Async(using support, scheduler):
+  private class Blocking(val group: CompletionGroup)(using support: AsyncSupport, scheduler: support.Scheduler) extends Async(using support, scheduler):
     private val lock = java.util.concurrent.locks.ReentrantLock()
     private val condVar = lock.newCondition()
 
@@ -45,7 +45,7 @@ object Async:
   /** Execute asynchronous computation `body` on currently running thread.
    *  The thread will suspend when the computation waits.
    */
-  def blocking[T](body: Async ?=> T)(using support: AsyncSupport, scheduler: Scheduler): T =
+  def blocking[T](body: Async ?=> T)(using support: AsyncSupport, scheduler: support.Scheduler): T =
     body(using Blocking(CompletionGroup.Unlinked))
 
   /** The currently executing Async context */

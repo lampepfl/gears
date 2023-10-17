@@ -2,7 +2,7 @@ package gears.async
 
 import scala.annotation.unchecked.uncheckedVariance
 import java.util.concurrent.locks.ReentrantLock
-import java.util.concurrent.locks.Condition
+import java.time.Duration
 
 given VThreadScheduler.type = VThreadScheduler
 given VThreadSupport.type = VThreadSupport
@@ -10,13 +10,15 @@ given VThreadSupport.type = VThreadSupport
 object VThreadScheduler extends Scheduler:
   override def execute(body: Runnable): Unit = Thread.startVirtualThread(body)
 
-  override def schedule(delayMillis: Long, body: Runnable): Cancellable =
+  override def schedule(delay: Duration, body: Runnable): Cancellable =
     val th = Thread.startVirtualThread: () =>
-      Thread.sleep(delayMillis)
+      Thread.sleep(delay)
       body.run()
     () => th.interrupt()
 
 object VThreadSupport extends AsyncSupport:
+
+  type Scheduler = VThreadScheduler.type
 
   private final class VThreadLabel[R]():
     private var result: Option[R] = None
@@ -45,11 +47,11 @@ object VThreadSupport extends AsyncSupport:
       finally
         lock.unlock()
 
-  opaque type Label[R] = VThreadLabel[R]
+  override opaque type Label[R] = VThreadLabel[R]
 
   // outside boundary: waiting on label
   //  inside boundary: waiting on suspension
-  private final class VThreadSuspension[-T, +R](using l: Label[R]) extends Suspension[T, R]:
+  private final class VThreadSuspension[-T, +R](using private[VThreadSupport] val l: Label[R] @uncheckedVariance) extends gears.async.Suspension[T, R]:
     private var nextInput: Option[T] = None
     private val lock = ReentrantLock()
     private val cond = lock.newCondition()
@@ -78,9 +80,7 @@ object VThreadSupport extends AsyncSupport:
       setInput(arg)
       l.waitResult()
 
-    override private[async] def resumeAsync(arg: T)(using Scheduler): Unit =
-      l.clearResult()
-      setInput(arg)
+  override opaque type Suspension[-T, +R] <: gears.async.Suspension[T, R] = VThreadSuspension[T, R]
 
   override def boundary[R](body: (Label[R]) ?=> R): R =
     val label = VThreadLabel[R]()
@@ -89,6 +89,10 @@ object VThreadSupport extends AsyncSupport:
       label.setResult(result)
 
     label.waitResult()
+
+  override private[async] def resumeAsync[T, R](suspension: Suspension[T, R])(arg: T)(using Scheduler): Unit =
+      suspension.l.clearResult()
+      suspension.setInput(arg)
 
   override def scheduleBoundary(body: (Label[Unit]) ?=> Unit)(using Scheduler): Unit =
     Thread.startVirtualThread: () =>

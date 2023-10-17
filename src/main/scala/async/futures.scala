@@ -122,7 +122,7 @@ object Future:
             val completedBefore = complete()
             if !completedBefore then
               src.dropListener(listener)
-              suspension.resumeAsync(Failure(cancellationException))
+              ac.support.resumeAsync(suspension)(Failure(cancellationException))
 
         checkCancellation()
         src.poll().getOrElse:
@@ -131,7 +131,7 @@ object Future:
             val listener: Listener[U] = x =>
               val completedBefore = cancellable.complete()
               if !completedBefore then
-                k.resumeAsync(Try:
+                ac.support.resumeAsync(k)(Try:
                   checkCancellation()
                   x
                 )
