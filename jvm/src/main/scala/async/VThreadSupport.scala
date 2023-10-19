@@ -13,8 +13,8 @@ object VThreadScheduler extends Scheduler:
   override def schedule(delay: FiniteDuration, body: Runnable): Cancellable =
     val th = Thread.startVirtualThread: () =>
       Thread.sleep(delay.toMillis)
-      body.run()
-    () => th.interrupt() // TODO this may interrupt the body after sleeping
+      execute(body)
+    () => th.interrupt()
 
 object VThreadSupport extends AsyncSupport:
 

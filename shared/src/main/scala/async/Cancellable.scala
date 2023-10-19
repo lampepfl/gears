@@ -11,7 +11,7 @@ trait Cancellable:
   /** Add this cancellable to the given group after removing
    *  it from the previous group in which it was.
    */
-  def link(group: CompletionGroup): this.type =
+  def link(group: CompletionGroup): this.type = synchronized:
     this.group.drop(this)
     this.group = group
     this.group.add(this)

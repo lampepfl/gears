@@ -136,8 +136,8 @@ object Future:
                 ac.support.resumeAsync(k)(Success(x))
             cancellable.suspension = k
             cancellable.listener = listener
-            src.onComplete(listener)
             cancellable.link(group) // may resume + remove listener immediately
+            src.onComplete(listener)
           )
           cancellable.unlink()
           res.get
