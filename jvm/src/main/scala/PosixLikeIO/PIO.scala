@@ -1,6 +1,7 @@
 package PosixLikeIO
 
 import gears.async.{Async, Future, given}
+import gears.async.default.given
 import Future.Promise
 
 import java.net.{DatagramPacket, DatagramSocket, InetAddress, InetSocketAddress, ServerSocket, Socket}

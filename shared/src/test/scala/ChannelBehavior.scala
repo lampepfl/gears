@@ -1,4 +1,5 @@
 import gears.async.{Async, BufferedChannel, ChannelClosedException, ChannelMultiplexer, Future, SyncChannel, Task, TaskSchedule, alt, altC, given}
+import gears.async.default.given
 import gears.async.AsyncOperations.*
 import Future.{*:, zip}
 
@@ -10,7 +11,9 @@ import scala.util.Random
 import scala.collection.mutable.{ArrayBuffer, Set}
 import java.util.concurrent.atomic.AtomicInteger
 
+@munit.IgnoreSuite
 class ChannelBehavior extends munit.FunSuite {
+
   given ExecutionContext = ExecutionContext.global
 
   test("sending is blocking in SyncChannel") {

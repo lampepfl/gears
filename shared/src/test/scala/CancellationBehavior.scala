@@ -1,5 +1,6 @@
 import gears.async.{Async, Future, AsyncSupport, uninterruptible, given}
 import gears.async.AsyncOperations.*
+import gears.async.default.given
 import scala.util.boundary
 import boundary.break
 import scala.concurrent.duration.{Duration, DurationInt}

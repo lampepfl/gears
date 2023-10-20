@@ -1,6 +1,7 @@
 import gears.async.{Async, Future, Listener, given}
 import Async.either
 import gears.async.AsyncOperations.*
+import gears.async.default.given
 
 import java.util.concurrent.CancellationException
 import scala.concurrent.ExecutionContext

@@ -3,7 +3,7 @@ import gears.async.Future
 import gears.async.Future.Promise
 import gears.async.Async
 import gears.async.Listener
-import gears.async.given
+import gears.async.default.given
 import scala.util.Success
 import java.util.concurrent.atomic.AtomicBoolean
 import gears.async.listeners.lockBoth
