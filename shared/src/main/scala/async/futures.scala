@@ -263,164 +263,165 @@ enum TaskSchedule:
  *  Composing tasks can be referentially transparent.
  *  Tasks can be also ran on a specified schedule.
  */
-class Task[+T](val body: Async ?=> T):
+// class Task[+T](val body: Async ?=> T):
 
-  /** Start a future computed from the `body` of this task */
-  def run(using Async) = Future(body)
+//   /** Start a future computed from the `body` of this task */
+//   def run(using Async) = Future(body)
 
-  def schedule(s: TaskSchedule)(using async: Async): Task[T] =
-    s match {
-      case TaskSchedule.Every(millis, maxRepetitions) =>
-        assert(millis >= 1)
-        assert(maxRepetitions >= 0)
-        Task {
-          var repetitions = 0
-          var ret: T = body
-          repetitions += 1
-          if (maxRepetitions == 1) ret
-          else {
-            while (maxRepetitions == 0 || repetitions < maxRepetitions) {
-              sleep(millis)
-              ret = body
-              repetitions += 1
-            }
-            ret
-          }
-        }
-      case TaskSchedule.ExponentialBackoff(millis, exponentialBase, maxRepetitions) =>
-        assert(millis >= 1)
-        assert(exponentialBase >= 2)
-        assert(maxRepetitions >= 0)
-        Task {
-          var repetitions = 0
-          var ret: T = body
-          repetitions += 1
-          if (maxRepetitions == 1) ret
-          else {
-            var timeToSleep = millis
-            while (maxRepetitions == 0 || repetitions < maxRepetitions) {
-              sleep(timeToSleep)
-              timeToSleep *= exponentialBase
-              ret = body
-              repetitions += 1
-            }
-            ret
-          }
-        }
-      case TaskSchedule.FibonacciBackoff(millis, maxRepetitions) =>
-        assert(millis >= 1)
-        assert(maxRepetitions >= 0)
-        Task {
-          var repetitions = 0
-          var a: Long = 0
-          var b: Long = 1
-          var ret: T = body
-          repetitions += 1
-          if (maxRepetitions == 1) ret
-          else {
-            sleep(millis)
-            ret = body
-            repetitions += 1
-            if (maxRepetitions == 2) ret
-            else {
-              while (maxRepetitions == 0 || repetitions < maxRepetitions) {
-                val aOld = a
-                a = b
-                b = aOld + b
-                sleep(b * millis)
-                ret = body
-                repetitions += 1
-              }
-              ret
-            }
-          }
-        }
-      case TaskSchedule.RepeatUntilFailure(millis, maxRepetitions) =>
-        assert(millis >= 0)
-        assert(maxRepetitions >= 0)
-        Task {
-          @tailrec
-          def helper(repetitions: Long = 0): T =
-            if (repetitions > 0 && millis > 0)
-              sleep(millis)
-            val ret: T = body
-            ret match {
-              case Failure(_) => ret
-              case _ if (repetitions+1) == maxRepetitions && maxRepetitions != 0 => ret
-              case _ => helper(repetitions + 2)
-            }
-          helper()
-        }
-      case TaskSchedule.RepeatUntilSuccess(millis, maxRepetitions) =>
-        assert(millis >= 0)
-        assert(maxRepetitions >= 0)
-        Task {
-          @tailrec
-          def helper(repetitions: Long = 0): T =
-            if (repetitions > 0 && millis > 0)
-              sleep(millis)
-            val ret: T = body
-            ret match {
-              case Success(_) => ret
-              case _ if (repetitions + 1) == maxRepetitions && maxRepetitions != 0 => ret
-              case _ => helper(repetitions + 2)
-            }
-          helper()
-        }
-    }
+//   def schedule(s: TaskSchedule)(using async: Async): Task[T] =
+//     s match {
+//       case TaskSchedule.Every(millis, maxRepetitions) =>
+//         assert(millis >= 1)
+//         assert(maxRepetitions >= 0)
+//         Task {
+//           var repetitions = 0
+//           var ret: T = body
+//           repetitions += 1
+//           if (maxRepetitions == 1) ret
+//           else {
+//             while (maxRepetitions == 0 || repetitions < maxRepetitions) {
+//               sleep(millis)
+//               ret = body
+//               repetitions += 1
+//             }
+//             ret
+//           }
+//         }
+//       case TaskSchedule.ExponentialBackoff(millis, exponentialBase, maxRepetitions) =>
+//         assert(millis >= 1)
+//         assert(exponentialBase >= 2)
+//         assert(maxRepetitions >= 0)
+//         Task {
+//           var repetitions = 0
+//           var ret: T = body
+//           repetitions += 1
+//           if (maxRepetitions == 1) ret
+//           else {
+//             var timeToSleep = millis
+//             while (maxRepetitions == 0 || repetitions < maxRepetitions) {
+//               sleep(timeToSleep)
+//               timeToSleep *= exponentialBase
+//               ret = body
+//               repetitions += 1
+//             }
+//             ret
+//           }
+//         }
+//       case TaskSchedule.FibonacciBackoff(millis, maxRepetitions) =>
+//         assert(millis >= 1)
+//         assert(maxRepetitions >= 0)
+//         Task {
+//           var repetitions = 0
+//           var a: Long = 0
+//           var b: Long = 1
+//           var ret: T = body
+//           repetitions += 1
+//           if (maxRepetitions == 1) ret
+//           else {
+//             sleep(millis)
+//             ret = body
+//             repetitions += 1
+//             if (maxRepetitions == 2) ret
+//             else {
+//               while (maxRepetitions == 0 || repetitions < maxRepetitions) {
+//                 val aOld = a
+//                 a = b
+//                 b = aOld + b
+//                 sleep(b * millis)
+//                 ret = body
+//                 repetitions += 1
+//               }
+//               ret
+//             }
+//           }
+//         }
+//       case TaskSchedule.RepeatUntilFailure(millis, maxRepetitions) =>
+//         assert(millis >= 0)
+//         assert(maxRepetitions >= 0)
+//         Task {
+//           @tailrec
+//           def helper(repetitions: Long = 0): T =
+//             if (repetitions > 0 && millis > 0)
+//               sleep(millis)
+//             val ret: T = body
+//             ret match {
+//               case Failure(_) => ret
+//               case _ if (repetitions+1) == maxRepetitions && maxRepetitions != 0 => ret
+//               case _ => helper(repetitions + 2)
+//             }
+//           helper()
+//         }
+//       case TaskSchedule.RepeatUntilSuccess(millis, maxRepetitions) =>
+//         assert(millis >= 0)
+//         assert(maxRepetitions >= 0)
+//         Task {
+//           @tailrec
+//           def helper(repetitions: Long = 0): T =
+//             if (repetitions > 0 && millis > 0)
+//               sleep(millis)
+//             val ret: T = body
+//             ret match {
+//               case Success(_) => ret
+//               case _ if (repetitions + 1) == maxRepetitions && maxRepetitions != 0 => ret
+//               case _ => helper(repetitions + 2)
+//             }
+//           helper()
+//         }
+//     }
 
-end Task
+// end Task
 
-private def altAndAltCImplementation[T](shouldCancel: Boolean, futures: Future[T]*)(using Async): Future[T] = Future[T]:
-  val fs: Seq[Future[(Try[T], Int)]] = futures.zipWithIndex.map({ (f, i) =>
-    Future:
-      try
-        (Success(f.value), i)
-      catch case e => (Failure(e), i)
-  })
+// private def altAndAltCImplementation[T](shouldCancel: Boolean, futures: Future[T]*)(using Async): Future[T] = Future[T]:
+//   val fs: Seq[Future[(Try[T], Int)]] = futures.zipWithIndex.map({ (f, i) =>
+//     Future:
+//       try
+//         (Success(f.value), i)
+//       catch case e => (Failure(e), i)
+//   })
 
-  @tailrec
-  def helper(failed: Int, fs: Seq[(Future[(Try[T], Int)], Int)]): Try[T] =
-    Async.await(Async.race( fs.map(_._1)* )) match
-      case Success((Success(x), i)) =>
-        if (shouldCancel) {
-          for ((f, j) <- futures.zipWithIndex) {
-            if (j != i) f.cancel()
-          }
-        }
-        Success(x)
-      case Success((Failure(e), i)) =>
-        if (failed + 1 == futures.length)
-          Failure(e)
-        else
-          helper(failed + 1, fs.filter({ case (_, j) => j != i }))
-      case _ => assert(false)
+//   @tailrec
+//   def helper(failed: Int, fs: Seq[(Future[(Try[T], Int)], Int)]): Try[T] =
+//     Async.await(Async.race( fs.map(_._1)* )) match
+//       case Success((Success(x), i)) =>
+//         if (shouldCancel) {
+//           for ((f, j) <- futures.zipWithIndex) {
+//             if (j != i) f.cancel()
+//           }
+//         }
+//         Success(x)
+//       case Success((Failure(e), i)) =>
+//         if (failed + 1 == futures.length)
+//           Failure(e)
+//         else
+//           helper(failed + 1, fs.filter({ case (_, j) => j != i }))
+//       case _ => assert(false)
 
-  helper(0, fs.zipWithIndex).get
+//   helper(0, fs.zipWithIndex).get
 
-/** `alt` defined for multiple futures, not only two.
- * If either task succeeds, succeed with the success that was returned first.
- * Otherwise, fail with the failure that was returned last.
- */
-def alt[T](futures: Future[T]*)(using Async): Future[T] =
-  altAndAltCImplementation(false, futures*)
+// /** `alt` defined for multiple futures, not only two.
+//  * If either task succeeds, succeed with the success that was returned first.
+//  * Otherwise, fail with the failure that was returned last.
+//  */
+// def alt[T](futures: Future[T]*)(using Async): Future[T] =
+//   altAndAltCImplementation(false, futures*)
 
-/** `altC` defined for multiple futures, not only two.
- * If either task succeeds, succeed with the success that was returned first and cancel all other tasks.
- * Otherwise, fail with the failure that was returned last.
- */
-def altC[T](futures: Future[T]*)(using Async): Future[T] =
-  altAndAltCImplementation(true, futures*)
+// /** `altC` defined for multiple futures, not only two.
+//  * If either task succeeds, succeed with the success that was returned first and cancel all other tasks.
+//  * Otherwise, fail with the failure that was returned last.
+//  */
+// def altC[T](futures: Future[T]*)(using Async): Future[T] =
+//   altAndAltCImplementation(true, futures*)
 
-def uninterruptible[T](body: Async ?=> T)(using ac: Async) =
+def uninterruptible[T](body: Async ?=> T)(using ac: Async): T =
   val tracker = Cancellable.Tracking().link()
 
-  try
+  val r = try
     val group = CompletionGroup()
     Async.withNewCompletionGroup(group)(body)
   finally tracker.unlink()
 
   if tracker.isCancelled then throw new CancellationException()
+  r
 
 def cancellationScope[T](cancel: Cancellable)(fn: => T)(using a: Async): T =
   cancel.link()

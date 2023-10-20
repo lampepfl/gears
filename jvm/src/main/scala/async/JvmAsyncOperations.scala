@@ -1,7 +1,5 @@
 package gears.async
 
-given JvmAsyncOperations.type = JvmAsyncOperations
-
 object JvmAsyncOperations extends AsyncOperations:
 
     private def jvmInterruptible[T](fn: => T)(using Async): T =

@@ -32,7 +32,7 @@ class CompletionGroup(val handleCompletion: Cancellable => Async ?=> Unit = _ =>
   /** Add given member to the members set. If the group has already been cancelled, cancels that member immediately. */
   def add(member: Cancellable): Unit =
     val alreadyCancelled = synchronized:
-      members += member
+      members += member // Add this member no matter what since we'll wait for it still
       canceled
     if alreadyCancelled then member.cancel()
 
