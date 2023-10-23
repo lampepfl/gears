@@ -14,7 +14,7 @@ object VThreadScheduler extends Scheduler:
     val th = Thread.startVirtualThread: () =>
       Thread.sleep(delay)
       body.run()
-    () => th.interrupt()
+    () => th.interrupt() // TODO this may interrupt the body after sleeping
 
 object VThreadSupport extends AsyncSupport:
 

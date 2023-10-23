@@ -46,12 +46,12 @@ object Future:
     @volatile protected var hasCompleted: Boolean = false
     protected var cancelRequest = false
     private var result: Try[T] = uninitialized // guaranteed to be set if hasCompleted = true
-    private val waiting: mutable.Set[Try[T] => Boolean] = mutable.Set()
+    private val waiting: mutable.Set[Async.Listener[Try[T]]] = mutable.Set()
 
     // Async.Source method implementations
 
     def poll(k: Async.Listener[Try[T]]): Boolean =
-      hasCompleted && k(result)
+      hasCompleted && k.completeNow(result)
 
     def addListener(k: Async.Listener[Try[T]]): Unit = synchronized:
       waiting += k
@@ -88,7 +88,7 @@ object Future:
           val ws = waiting.toList
           waiting.clear()
           ws
-      for listener <- toNotify do listener(result)
+      for listener <- toNotify do listener.completeNow(result)
 
   end CoreFuture
 
@@ -128,14 +128,13 @@ object Future:
         src.poll().getOrElse:
           val cancellable = CancelSuspension()
           val res = ac.support.suspend[Try[U], Unit](k =>
-            val listener: Listener[U] = x =>
+            val listener = Async.acceptingListener[U]: x =>
               val completedBefore = cancellable.complete()
               if !completedBefore then
                 ac.support.resumeAsync(k)(Try:
                   checkCancellation()
                   x
                 )
-              true
             cancellable.suspension = k
             cancellable.listener = listener
             src.onComplete(listener)

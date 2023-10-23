@@ -1,6 +1,8 @@
 package gears.async
 import java.util.concurrent.atomic.AtomicBoolean
 import scala.collection.mutable
+import java.util.concurrent.locks.ReentrantLock
+import java.util.concurrent.atomic.AtomicLong
 
 /** A context that allows to suspend waiting for asynchronous data sources
  */
@@ -25,13 +27,12 @@ object Async:
     override def await[T](src: Async.Source[T]): T =
       src.poll().getOrElse:
         var result: Option[T] = None
-        src.onComplete: t =>
+        src onComplete Async.acceptingListener: t =>
           lock.lock()
           try
             result = Some(t)
             condVar.signalAll()
           finally lock.unlock()
-          true
 
         lock.lock()
         try
@@ -72,11 +73,48 @@ object Async:
       async.group.cancel()
       async.group.waitCompletion()
 
-  /** A function `T => Boolean` whose lineage is recorded by its implementing
-   *  classes. The Listener function accepts values of type `T` and returns
-   *  `true` iff the value was consumed by an async block.
+  trait ListenerLock[-T]:
+    /** Release the lock without completing. May be due to a failure or the
+     *  unability to actually provide the element proposed to filteredLock.
+     */
+    def release(): Unit
+
+    /** Complete and release this lock successfully. The data is guaranteed to
+     *  be the same object that was passed to filteredLock before.
+     */
+    def complete(data: T): Unit
+
+  /** An atomic listener that may manage an internal lock to guarantee atomic completion
    */
-  trait Listener[-T] extends (T => Boolean)
+  trait Listener[-T]:
+    /** Try to lock the listener blockingly. It is already passed the data it
+     *  may receive later and decides whether it wants to handle this element
+     *  and is able to (by locking and checking whether it is not completed yet).
+     *  If the element can be handled, return the acquired lock, None otherwise.
+     *  Callers must ensure that the lock is released quickly.
+     */
+    def filteredLock(data: T): Option[ListenerLock[T]]
+
+    /** Try to lock and complete directly. Returns true if the operation
+     *  succeeds, false if the element is not handled.
+     */
+    def completeNow(data: T): Boolean =
+      filteredLock(data).map(_.complete(data)).isDefined
+
+  def acceptingListener[T](consumer: T => Unit) =
+    val lock = new ListenerLock[T]:
+      override def release(): Unit = ()
+      override def complete(data: T): Unit = consumer(data)
+    new Listener[T]:
+      override def filteredLock(data: T): Option[ListenerLock[T]] = Some(lock)
+
+  private val listenerNumber = AtomicLong()
+  /** A listener that receives a number atomically. Used for deadlock prevention.
+   *  Note that numbered ForwardingListeners always have greater numbers than their
+   *  wrapped `continue`-Listener.
+   */
+  private[async] trait NumberedListener:
+    val number = listenerNumber.getAndIncrement()
 
   /** A listener for values that are processed by the given source `src` and
    *  that are demanded by the continuation listener `continue`.
@@ -115,7 +153,7 @@ object Async:
     /** Utility method for direct polling. */
     def poll(): Option[T] =
       var resultOpt: Option[T] = None
-      poll { x => resultOpt = Some(x); true }
+      poll(acceptingListener { x => resultOpt = Some(x) })
       resultOpt
 
   end Source
@@ -136,14 +174,23 @@ object Async:
   /** A source that transforms an original source in some way */
   abstract class DerivedSource[T, U](val original: Source[T]) extends Source[U]:
 
-    /** Handle a value `x` passed to the original source by possibly
-     *  invoking the continuation for this source.
+    /** Handle a lock request `x` received from the original source by possibly
+     *  requesting the upstream listener for this source.
      */
-    protected def listen(x: T, k: Listener[U]): Boolean
+    protected def filteredLock(x: T, k: Listener[U]): Option[ListenerLock[U]]
+
+    /** Handle a complete request for a previous lock from the original source by
+     *  passing on any operation (complete/release) to the upstream listener for this source.
+     */
+    protected def complete(x: T, k: ListenerLock[U]): Unit
 
     private def transform(k: Listener[U]): Listener[T] =
       new ForwardingListener[T](this, k):
-        def apply(x: T): Boolean = listen(x, k)
+        override def filteredLock(data: T): Option[ListenerLock[T]] =
+          DerivedSource.this.filteredLock(data, k).map: innerLock =>
+            new ListenerLock[T]:
+              override def release(): Unit = innerLock.release()
+              override def complete(data: T): Unit = DerivedSource.this.complete(data, innerLock)
 
     def poll(k: Listener[U]): Boolean =
       original.poll(transform(k))
@@ -159,12 +206,16 @@ object Async:
     /** Pass on data transformed by `f` */
     def map[U](f: T => U): Source[U]  =
       new DerivedSource[T, U](src):
-        def listen(x: T, k: Listener[U]) = k(f(x))
+        def filteredLock(x: T, k: Listener[U]): Option[ListenerLock[U]] =
+          k.filteredLock(f(x))
+        def complete(x: T, k: ListenerLock[U]): Unit = k.complete(f(x))
 
     /** Pass on only data matching the predicate `p` */
     def filter(p: T => Boolean): Source[T] =
       new DerivedSource[T, T](src):
-        def listen(x: T, k: Listener[T]) = p(x) && k(x)
+        def filteredLock(x: T, k: Listener[T]): Option[ListenerLock[T]] =
+          if p(x) then k.filteredLock(x) else None
+        def complete(x: T, k: ListenerLock[T]): Unit = k.complete(x)
 
   /** Pass first result from any of `sources` to the continuation */
   def race[T](sources: Source[T]*): Source[T] =
@@ -174,25 +225,47 @@ object Async:
         val it = sources.iterator
         var found = false
         while it.hasNext && !found do
-          it.next.poll: x =>
-            found = k(x)
-            found
+          it.next.poll(new Listener[T]:
+            def filteredLock(data: T): Option[ListenerLock[T]] =
+              k.filteredLock(data).map(lock => new ListenerLock[T]:
+                def release(): Unit = lock.release()
+                def complete(data: T): Unit =
+                  found = true
+                  lock.complete(data)
+              )
+          )
         found
 
       def onComplete(k: Listener[T]): Unit =
-        val listener = new ForwardingListener[T](this, k):
+        val listener = new ForwardingListener[T](this, k) with NumberedListener {
+          val baseLock = new ReentrantLock()
           var foundBefore = false
-          def continueIfFirst(x: T): Boolean = synchronized:
-            if foundBefore then false else { foundBefore = k(x); foundBefore }
-          def apply(x: T): Boolean =
-            val found = continueIfFirst(x)
-            if found then sources.foreach(_.dropListener(this))
-            found
+
+          def filteredLock(data: T): Option[ListenerLock[T]] =
+            if foundBefore then
+              None
+            else
+              k.filteredLock(data).flatMap: lock =>
+                baseLock.lock()
+                if foundBefore then
+                  baseLock.unlock()
+                  lock.release()
+                  None
+                else Some:
+                  new ListenerLock[T]:
+                    def release(): Unit =
+                      baseLock.unlock()
+                      lock.release()
+                    def complete(data: T): Unit =
+                      foundBefore = true
+                      baseLock.unlock()
+                      lock.complete(data)
+        }
         sources.foreach(_.onComplete(listener))
 
       def dropListener(k: Listener[T]): Unit =
         val listener = new ForwardingListener[T](this, k):
-          def apply(x: T): Boolean = ???
+          def filteredLock(data: T): Option[ListenerLock[T]] = ???
         // not to be called, we need the listener only for its
         // hashcode and equality test.
         sources.foreach(_.dropListener(listener))

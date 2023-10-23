@@ -14,10 +14,7 @@ class SourceBehavior extends munit.FunSuite {
     @volatile var itRan = false
     Async.blocking:
       val f = Future.now(Success(10))
-      f.onComplete({ _ =>
-        itRan = true;
-        true
-      })
+      f.onComplete(Async.acceptingListener { _ => itRan = true })
     assertEquals(itRan, true)
   }
 
@@ -25,7 +22,7 @@ class SourceBehavior extends munit.FunSuite {
     @volatile var itRan = false
     Async.blocking:
       val f = Future{sleep(50); 10}
-      f.poll({_ => itRan = true; true})
+      f.poll(Async.acceptingListener {_ => itRan = true})
       assertEquals(itRan, false)
   }
 
@@ -35,7 +32,7 @@ class SourceBehavior extends munit.FunSuite {
       val f = Future {
         sleep(50); 10
       }
-      f.onComplete({ _ => itRan = true; true })
+      f.onComplete(Async.acceptingListener { _ => itRan = true })
       assertEquals(itRan, false)
   }
 
@@ -46,7 +43,7 @@ class SourceBehavior extends munit.FunSuite {
         sleep(250);
         10
       }
-      f.onComplete({ _ => itRan = true; true })
+      f.onComplete(Async.acceptingListener { _ => itRan = true })
       Async.await(f)
       Thread.sleep(100) // onComplete of await and manual may be scheduled
       assertEquals(itRan, true)
@@ -99,8 +96,8 @@ class SourceBehavior extends munit.FunSuite {
         sleep(100)
         1
       }
-      f.onComplete({_ => aRan = true; true})
-      f.onComplete({_ => bRan = true; true})
+      f.onComplete(Async.acceptingListener {_ => aRan = true})
+      f.onComplete(Async.acceptingListener {_ => bRan = true})
       assertEquals(aRan, false)
       assertEquals(bRan, false)
       Async.await(f)
@@ -117,9 +114,9 @@ class SourceBehavior extends munit.FunSuite {
         sleep(100)
         1
       }
-      val l: Async.Listener[Try[Int]] = { _ => aRan = true; true }
+      val l: Async.Listener[Try[Int]] = Async.acceptingListener { _ => aRan = true }
       f.onComplete(l)
-      f.onComplete({ _ => bRan = true; true })
+      f.onComplete(Async.acceptingListener { _ => bRan = true })
       assertEquals(aRan, false)
       assertEquals(bRan, false)
       f.dropListener(l)
@@ -153,8 +150,8 @@ class SourceBehavior extends munit.FunSuite {
         10
       }
       val g = f.filter({ _ => true })
-      f.onComplete({ _ => aRan.complete(Success(())); true})
-      g.onComplete({ _ => bRan.complete(Success(())); true})
+      f.onComplete(Async.acceptingListener { _ => aRan.complete(Success(()))})
+      g.onComplete(Async.acceptingListener { _ => bRan.complete(Success(()))})
       assertEquals(aRan.future.poll(), None)
       assertEquals(bRan.future.poll(), None)
       Async.await(f)
