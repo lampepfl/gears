@@ -20,7 +20,7 @@ class StartableTimer(val millis: Long) extends Async.OriginalSource[TimerRang], 
     case RangAlready extends TimerState(None)
     case Cancelled extends TimerState(None)
 
-  private val waiting: mutable.Set[Async.Listener[TimerRang]] = mutable.Set()
+  private val waiting: mutable.Set[Listener[TimerRang]] = mutable.Set()
   @volatile private var state = TimerState.Ready
 
 
@@ -33,7 +33,7 @@ class StartableTimer(val millis: Long) extends Async.OriginalSource[TimerRang], 
           Async.blocking:
             val f = Future:
               sleep(millis)
-              var toNotify = List[Async.Listener[TimerRang]]()
+              var toNotify = List[Listener[TimerRang]]()
               synchronized:
                 toNotify = waiting.toList
                 waiting.clear()
@@ -57,16 +57,16 @@ class StartableTimer(val millis: Long) extends Async.OriginalSource[TimerRang], 
           for listener <- toNotify do listener.completeNow(false)
       state = TimerState.Cancelled
 
-    def poll(k: Async.Listener[TimerRang]): Boolean =
+    def poll(k: Listener[TimerRang]): Boolean =
       state match
         case TimerState.Ready | TimerState.Ticking(_) => false
         case TimerState.RangAlready => k.completeNow(true)
         case TimerState.Cancelled => k.completeNow(false)
 
-    def addListener(k: Async.Listener[TimerRang]): Unit = synchronized:
+    def addListener(k: Listener[TimerRang]): Unit = synchronized:
       waiting += k
 
-    def dropListener(k: Async.Listener[TimerRang]): Unit = synchronized:
+    def dropListener(k: Listener[TimerRang]): Unit = synchronized:
       waiting -= k
   }
 

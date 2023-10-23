@@ -1,7 +1,6 @@
 package gears.async
 
 import TaskSchedule.ExponentialBackoff
-import Async.Listener
 import AsyncOperations.sleep
 
 import scala.collection.mutable
@@ -46,17 +45,17 @@ object Future:
     @volatile protected var hasCompleted: Boolean = false
     protected var cancelRequest = false
     private var result: Try[T] = uninitialized // guaranteed to be set if hasCompleted = true
-    private val waiting: mutable.Set[Async.Listener[Try[T]]] = mutable.Set()
+    private val waiting: mutable.Set[Listener[Try[T]]] = mutable.Set()
 
     // Async.Source method implementations
 
-    def poll(k: Async.Listener[Try[T]]): Boolean =
+    def poll(k: Listener[Try[T]]): Boolean =
       hasCompleted && k.completeNow(result)
 
-    def addListener(k: Async.Listener[Try[T]]): Unit = synchronized:
+    def addListener(k: Listener[Try[T]]): Unit = synchronized:
       waiting += k
 
-    def dropListener(k: Async.Listener[Try[T]]): Unit = synchronized:
+    def dropListener(k: Listener[Try[T]]): Unit = synchronized:
       waiting -= k
 
     // Cancellable method implementations
@@ -128,7 +127,7 @@ object Future:
         src.poll().getOrElse:
           val cancellable = CancelSuspension()
           val res = ac.support.suspend[Try[U], Unit](k =>
-            val listener = Async.acceptingListener[U]: x =>
+            val listener = Listener.acceptingListener[U]: x =>
               val completedBefore = cancellable.complete()
               if !completedBefore then
                 ac.support.resumeAsync(k)(Try:

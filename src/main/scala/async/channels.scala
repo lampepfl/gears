@@ -3,7 +3,7 @@ import scala.collection.mutable
 import mutable.{ArrayBuffer, ListBuffer}
 
 import scala.util.{Failure, Success, Try}
-import Async.{Listener, await}
+import Async.await
 
 import scala.util.control.Breaks.{break, breakable}
 
