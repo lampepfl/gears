@@ -134,15 +134,15 @@ object Async:
      *  passing on any operation (complete/release) to the upstream listener for
      *  this source. The default behavior is to forward the release operation.
      */
-    protected def release(k: Listener.ListenerLock)(using ctx: Listener.LockContext): Unit =
-      ctx.release(k)
+    protected def release(k: Listener.ListenerLock)(using Listener.LockContext): Unit =
+      k.release()
 
     /** Handle a complete request for a previous lock from the original source by
      *  passing on any operation (complete/release) to the upstream listener for
      *  this source. The default behavior is to forward the complete operation.
      */
-    protected def complete(k: Listener.ListenerLock)(using ctx: Listener.LockContext): Unit =
-      ctx.complete(k)
+    protected def complete(k: Listener.ListenerLock)(using Listener.LockContext): Unit =
+      k.complete()
 
     private def transform(k: Listener[U]): Listener[T] =
       new Listener.ForwardingListener[T](this, k):
@@ -166,14 +166,14 @@ object Async:
     /** Pass on data transformed by `f` */
     def map[U](f: T => U): Source[U]  =
       new DerivedSource[T, U](src):
-        def filteredLock(x: T, k: Listener[U])(using ctx: Listener.LockContext): Option[Listener.ListenerLock] =
-          ctx.lock(k, f(x))
+        def filteredLock(x: T, k: Listener[U])(using Listener.LockContext): Option[Listener.ListenerLock] =
+          k.filteredLock(f(x))
 
     /** Pass on only data matching the predicate `p` */
     def filter(p: T => Boolean): Source[T] =
       new DerivedSource[T, T](src):
-        def filteredLock(x: T, k: Listener[T])(using ctx: Listener.LockContext): Option[Listener.ListenerLock] =
-          if p(x) then ctx.lock(k, x) else None
+        def filteredLock(x: T, k: Listener[T])(using Listener.LockContext): Option[Listener.ListenerLock] =
+          if p(x) then k.filteredLock(x) else None
 
   /** Pass first result from any of `sources` to the continuation */
   def race[T](sources: Source[T]*): Source[T] =
@@ -185,17 +185,17 @@ object Async:
         while it.hasNext && !found do
           it.next.poll(new Listener[T]:
             def filteredLock(data: T)(using ctx: Listener.LockContext): Option[Listener.ListenerLock] =
-              ctx.lock(k, data).map(lock => new Listener.ListenerLock:
-                def release()(using ctx: Listener.LockContext): Unit = ctx.release(lock)
+              k.filteredLock(data).map(lock => new Listener.ListenerLock:
+                def release()(using ctx: Listener.LockContext): Unit = lock.release()
                 def complete()(using ctx: Listener.LockContext): Unit =
                   found = true
-                  ctx.complete(lock)
+                  lock.complete()
               )
           )
         found
 
       def onComplete(k: Listener[T]): Unit =
-        val listener = new Listener.ForwardingListener[T](this, k) with Listener.NumberedListener {
+        val listener = new Listener.ForwardingListener[T](this, k) with Listener.NumberedListener { self =>
           val baseLock = new ReentrantLock()
           var foundBefore = false
 
@@ -203,21 +203,26 @@ object Async:
             if foundBefore then
               None
             else
-              ctx.lock(k, data).flatMap: lock =>
+              k.filteredLock(data).flatMap: lock =>
+                try ctx.beforeLock(this)
+                finally lock.release()
                 baseLock.lock()
                 if foundBefore then
                   baseLock.unlock()
-                  ctx.release(lock)
+                  ctx.afterUnlock(this)
+                  lock.release()
                   None
                 else Some:
                   new Listener.ListenerLock:
                     def release()(using ctx: Listener.LockContext): Unit =
                       baseLock.unlock()
-                      ctx.release(lock)
+                      ctx.afterUnlock(self)
+                      lock.release()
                     def complete()(using ctx: Listener.LockContext): Unit =
                       foundBefore = true
                       baseLock.unlock()
-                      ctx.complete(lock)
+                      ctx.afterUnlock(self)
+                      lock.complete()
         }
         sources.foreach(_.onComplete(listener))
 
