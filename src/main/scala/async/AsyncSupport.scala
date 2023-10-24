@@ -1,6 +1,6 @@
 package gears.async
 
-import java.time.Duration
+import scala.concurrent.duration._
 
 trait Suspension[-T, +R]:
     def resume(arg: T): R
@@ -26,7 +26,7 @@ trait AsyncSupport extends SuspendSupport:
 
 trait Scheduler:
     def execute(body: Runnable): Unit
-    def schedule(delay: Duration, body: Runnable): Cancellable
+    def schedule(delay: FiniteDuration, body: Runnable): Cancellable
 
 object AsyncSupport:
     inline def apply()(using ac: AsyncSupport) = ac

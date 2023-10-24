@@ -2,7 +2,7 @@ package gears.async
 
 import scala.annotation.unchecked.uncheckedVariance
 import java.util.concurrent.locks.ReentrantLock
-import java.time.Duration
+import scala.concurrent.duration.FiniteDuration
 
 given VThreadScheduler.type = VThreadScheduler
 given VThreadSupport.type = VThreadSupport
@@ -10,9 +10,9 @@ given VThreadSupport.type = VThreadSupport
 object VThreadScheduler extends Scheduler:
   override def execute(body: Runnable): Unit = Thread.startVirtualThread(body)
 
-  override def schedule(delay: Duration, body: Runnable): Cancellable =
+  override def schedule(delay: FiniteDuration, body: Runnable): Cancellable =
     val th = Thread.startVirtualThread: () =>
-      Thread.sleep(delay)
+      Thread.sleep(delay.toMillis)
       body.run()
     () => th.interrupt() // TODO this may interrupt the body after sleeping
 
