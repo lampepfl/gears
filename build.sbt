@@ -10,11 +10,15 @@ lazy val root =
     name := "Gears",
     organization := "ch.epfl.lamp",
     version := "0.1.0-SNAPSHOT",
-    libraryDependencies += "org.scalameta" %% "munit" % "0.7.29" % Test
+    testFrameworks += new TestFramework("munit.Framework")
   ))
   .jvmSettings(Seq(
-      javaOptions += "--version 21",
+    javaOptions += "--version 21",
+    libraryDependencies += "org.scalameta" %% "munit" % "1.0.0-M10" % Test
   ))
-
-lazy val rootJVM = root.jvm
-lazy val rootNative = root.native
+  .nativeSettings(Seq(
+    nativeConfig ~= { c =>
+      c.withMultithreadingSupport(true)
+    },
+      libraryDependencies += "org.scalameta" %%% "munit" % "1.0.0-M10+15-3940023e-SNAPSHOT" % Test
+  ))

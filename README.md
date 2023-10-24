@@ -1,6 +1,3 @@
-
-
-
 This is a proof of concept for a base library for asynchronous computing in direct style. The library needs either fibers or  virtual threads as a basis. It is at present highly experimental, incomplete and provisional. It is not yet extensively tested and not optimized at all.
 
 The concepts and code here should be regarded as a strawman, in the sense of "meant to be knocked down".

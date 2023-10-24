@@ -1,0 +1,7 @@
+[submodule "dependencies/scala-native"]
+	path = dependencies/scala-native
+	url = git@github.com:scala-native/scala-native.git
+[submodule "dependencies/munit"]
+	path = dependencies/munit
+	url = git@github.com:natsukagami/munit.git
+	branch = use-0.5-snapshot-sn
