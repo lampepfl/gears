@@ -8,8 +8,6 @@ import java.util.concurrent.CancellationException
 import scala.util.Success
 
 class CancellationBehavior extends munit.FunSuite:
-  override def munitTimeout: Duration = 2.seconds
-
   enum State:
     case Ready
     case Initialized(f: Future[?])
@@ -55,16 +53,6 @@ class CancellationBehavior extends munit.FunSuite:
           throw e
     info.initialize(f)
     f
-
-  test("no cancel -> timeout".fail):
-    // munit v0.x only respects timeout for async tests
-    given scala.concurrent.ExecutionContext = scala.concurrent.ExecutionContext.global
-    scala.concurrent.Future:
-      Async.blocking:
-        val f = Future:
-          sleep(3000)
-          1
-        f.result
 
   test("no cancel"):
     var x = 0

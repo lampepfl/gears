@@ -11,8 +11,7 @@ import scala.util.Random
 import scala.collection.mutable.{ArrayBuffer, Set}
 import java.util.concurrent.atomic.AtomicInteger
 
-@munit.IgnoreSuite
-class ChannelBehavior extends munit.FunSuite {
+abstract class ChannelBehavior extends munit.FunSuite {
 
   given ExecutionContext = ExecutionContext.global
 
