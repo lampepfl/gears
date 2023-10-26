@@ -13,8 +13,6 @@ import java.util.concurrent.CancellationException
 import scala.annotation.tailrec
 import scala.util
 
-private val cancellationException = CancellationException()
-
 /** A cancellable future that can suspend waiting for other asynchronous sources
  */
 trait Future[+T] extends Async.OriginalSource[Try[T]], Cancellable:
@@ -67,7 +65,7 @@ object Future:
 
     def result(using async: Async): Try[T] =
       val r = async.await(this)
-      if cancelRequest then Failure(cancellationException) else r
+      if cancelRequest then Failure(new CancellationException()) else r
 
     /** Complete future with result. If future was cancelled in the meantime,
      *  return a CancellationException failure instead.
@@ -99,7 +97,7 @@ object Future:
     private var innerGroup: CompletionGroup = CompletionGroup()
 
     private def checkCancellation(): Unit =
-      if cancelRequest then throw cancellationException
+      if cancelRequest then throw new CancellationException()
 
     private class FutureAsync(val group: CompletionGroup)(using label: ac.support.Label[Unit]) extends Async(using ac.support, ac.scheduler):
 
@@ -121,25 +119,24 @@ object Future:
             val completedBefore = complete()
             if !completedBefore then
               src.dropListener(listener)
-              ac.support.resumeAsync(suspension)(Failure(cancellationException))
+              ac.support.resumeAsync(suspension)(Failure(new CancellationException()))
 
-        checkCancellation()
+        if group.isCancelled then
+          throw new CancellationException()
+
         src.poll().getOrElse:
           val cancellable = CancelSuspension()
           val res = ac.support.suspend[Try[U], Unit](k =>
             val listener = Listener.acceptingListener[U]: x =>
               val completedBefore = cancellable.complete()
               if !completedBefore then
-                ac.support.resumeAsync(k)(Try:
-                  checkCancellation()
-                  x
-                )
+                ac.support.resumeAsync(k)(Success(x))
             cancellable.suspension = k
             cancellable.listener = listener
             src.onComplete(listener)
-            innerGroup.add(cancellable) // may resume + remove listener immediately
+            cancellable.link(group) // may resume + remove listener immediately
           )
-          innerGroup.drop(cancellable)
+          cancellable.unlink()
           res.get
 
       override def withGroup(group: CompletionGroup) = FutureAsync(group)
@@ -150,15 +147,14 @@ object Future:
 
     link()
     ac.support.scheduleBoundary:
-      Async.awaitingGroup(complete(Try({
-          try
-            val r = body
-            checkCancellation()
-            r
-          catch
-            case _: InterruptedException => throw cancellationException
-            case _: CancellationException => throw cancellationException
-        })))(using FutureAsync(innerGroup))
+      Async.withNewCompletionGroup(innerGroup)(complete(Try({
+        val r = body
+        checkCancellation()
+        r
+      }).recoverWith {
+        case _: InterruptedException | _: CancellationException =>
+          Failure(new CancellationException())
+      }))(using FutureAsync(CompletionGroup.Unlinked))
       signalCompletion()(using ac)
 
   end RunnableFuture
@@ -414,27 +410,16 @@ def altC[T](futures: Future[T]*)(using Async): Future[T] =
   altAndAltCImplementation(true, futures*)
 
 def uninterruptible[T](body: Async ?=> T)(using ac: Async) =
-  val fut = Async.blocking{
-    val f = Future(body)
+  val tracker = Cancellable.Tracking().link()
 
-    def forceJoin(): Unit =
-      try {
-        Async.await(f)
-      } catch {
-        case e: InterruptedException =>
-          forceJoin()
-          throw e
-        case e: CancellationException =>
-          forceJoin()
-          throw e
-      }
+  try
+    val group = CompletionGroup()
+    Async.withNewCompletionGroup(group)(body)
+  finally tracker.unlink()
 
-    forceJoin()
-    f
-    }(using ac.support, ac.scheduler)
-  Async.await(fut)
+  if tracker.isCancelled then throw new CancellationException()
 
 def cancellationScope[T](cancel: Cancellable)(fn: => T)(using a: Async): T =
-  a.group.add(cancel)
+  cancel.link()
   try fn
-  finally a.group.drop(cancel)
+  finally cancel.unlink()

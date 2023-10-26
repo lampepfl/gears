@@ -61,7 +61,7 @@ class CancellationBehavior extends munit.FunSuite:
     scala.concurrent.Future:
       Async.blocking:
         val f = Future:
-          Thread.sleep(2000)
+          sleep(3000)
           1
         f.result
 

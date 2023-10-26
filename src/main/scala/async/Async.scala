@@ -7,7 +7,6 @@ import java.util.concurrent.atomic.AtomicLong
 /** A context that allows to suspend waiting for asynchronous data sources
  */
 trait Async(using val support: AsyncSupport, val scheduler: support.Scheduler):
-
   /** Wait for completion of async source `src` and return the result */
   def await[T](src: Async.Source[T]): T
 
@@ -47,7 +46,7 @@ object Async:
    *  The thread will suspend when the computation waits.
    */
   def blocking[T](body: Async ?=> T)(using support: AsyncSupport, scheduler: support.Scheduler): T =
-    body(using Blocking(CompletionGroup.Unlinked))
+    group(body)(using Blocking(CompletionGroup.Unlinked))
 
   /** The currently executing Async context */
   inline def current(using async: Async): Async = async
@@ -56,22 +55,27 @@ object Async:
   inline def await[T](src: Source[T])(using async: Async): T = async.await(src)
 
   def group[T](body: Async ?=> T)(using async: Async): T =
-    withNewCompletionGroup(CompletionGroup())(body)
+    withNewCompletionGroup(CompletionGroup(async.group.handleCompletion).link())(body)
 
   def withCompletionHandler[T](handler: Cancellable => Async ?=> Unit)(body: Async ?=> T)(using async: Async): T =
     val combined = (c: Cancellable) => (async: Async) ?=>
       handler(c)
       async.group.handleCompletion(c)
-    withNewCompletionGroup(CompletionGroup(combined))(body)
+    withNewCompletionGroup(CompletionGroup(combined).link())(body)
 
-  private def withNewCompletionGroup[T](group: CompletionGroup)(body: Async ?=> T)(using async: Async): T =
-    awaitingGroup(body)(using async.withGroup(group.link()))
+  /** Runs a body within another completion group. When the body returns, the
+   *  group is cancelled and its completion awaited with the `Unlinked` group.
+   */
+  private[async] def withNewCompletionGroup[T](group: CompletionGroup)(body: Async ?=> T)(using async: Async): T =
+    val completionAsync =
+      if CompletionGroup.Unlinked == async.group
+      then async
+      else async.withGroup(CompletionGroup.Unlinked)
 
-  private[async] def awaitingGroup[T](body: Async ?=> T)(using async: Async): T =
-    try body
+    try body(using async.withGroup(group))
     finally
-      async.group.cancel()
-      async.group.waitCompletion()
+      group.cancel()
+      group.waitCompletion()(using completionAsync)
 
   /** An asynchronous data source. Sources can be persistent or ephemeral.
    *  A persistent source will always pass same data to calls of `poll and `onComplete`.

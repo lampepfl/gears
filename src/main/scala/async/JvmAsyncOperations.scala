@@ -9,7 +9,7 @@ object JvmAsyncOperations extends AsyncOperations:
         cancellationScope(() => th.interrupt()):
             try fn
             catch
-            case _: InterruptedException => throw java.util.concurrent.CancellationException()
+              case _: InterruptedException => throw new CancellationException()
 
     override def sleep(millis: Long)(using Async): Unit =
         jvmInterruptible(Thread.sleep(millis))

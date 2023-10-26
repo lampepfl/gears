@@ -8,7 +8,7 @@ import scala.util.Success
  *  @param  handleCompletion  a function that gets applied to every member
  *                            when it is completed or cancelled
  */
-class CompletionGroup(val handleCompletion: Cancellable => Async ?=> Unit = _ => {}) extends Cancellable:
+class CompletionGroup(val handleCompletion: Cancellable => Async ?=> Unit = _ => {}) extends Cancellable.Tracking:
   private val members: mutable.Set[Cancellable] = mutable.Set()
   private var canceled: Boolean = false
   private var cancelWait: Option[Promise[Unit]] = None
@@ -42,6 +42,8 @@ class CompletionGroup(val handleCompletion: Cancellable => Async ?=> Unit = _ =>
     if members.isEmpty && cancelWait.isDefined then
       cancelWait.get.complete(Success(()))
 
+  def isCancelled = canceled
+
 object CompletionGroup:
 
   /** A sentinel group of cancellables that are in fact not linked
@@ -50,6 +52,7 @@ object CompletionGroup:
    */
   object Unlinked extends CompletionGroup:
     override def cancel(): Unit = ()
+    override def waitCompletion()(using Async): Unit = ()
     override def add(member: Cancellable): Unit = ()
     override def drop(member: Cancellable): Unit = ()
   end Unlinked

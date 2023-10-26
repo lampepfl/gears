@@ -35,3 +35,17 @@ trait Cancellable:
 
 
 end Cancellable
+
+object Cancellable:
+  trait Tracking extends Cancellable:
+    def isCancelled: Boolean
+
+  object Tracking:
+    def apply() = new Tracking:
+      private var cancelled: Boolean = false
+
+      def cancel(): Unit =
+        cancelled = true
+
+      def isCancelled = cancelled
+end Cancellable

@@ -116,8 +116,8 @@ object Listener:
 
     val queue = mutable.PriorityQueue.from(
       locks.zipWithIndex.map: (lock, idx) =>
-        support.boundary[LockState[support.type]]: label ?=>
-          val ctx = MultiLockContext(support)(using label)
+        support.boundary[LockState[support.type]]:
+          val ctx = MultiLockContext[support.type](support)
           Try[LockState[support.type]]:
             lock.lock()(using ctx)
               .fold(LockState.Cancel(None))(x => LockState.Finish(idx, x))

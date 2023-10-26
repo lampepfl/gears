@@ -111,11 +111,25 @@ class FutureBehavior extends munit.FunSuite {
   }
 
   test("altC of multiple futures") {
-    Async.blocking:
+    Async.blocking {
       var touched = java.util.concurrent.atomic.AtomicInteger(0)
-      alt(Future { sleep(100); touched.incrementAndGet() }, Future { sleep(100); touched.incrementAndGet() }, Future { 5 }).result
+      alt(
+        Future {
+          sleep(100)
+          touched.incrementAndGet()
+        },
+        Future {
+          sleep(100)
+          touched.incrementAndGet()
+        },
+        Future {
+          5
+        }
+      )
+      .result
       sleep(200)
       assertEquals(touched.get(), 2)
+    }
     Async.blocking:
       var touched = 0
       altC(Future { sleep(100); touched += 1 }, Future { sleep(100); touched += 1 }, Future { 5 }).result
@@ -253,7 +267,7 @@ class FutureBehavior extends munit.FunSuite {
             } *: Future{EmptyTuple}).result, Failure(e3))
   }
 
-  test("cancelled futures return the same constant CancellationException with no stack attached") {
+  test("cancelled futures return the same constant CancellationException with no stack attached".ignore) {
     Async.blocking:
       val futures = List(
         Future{sleep(100); 1},
