@@ -54,7 +54,8 @@ object Future:
       else false
 
     def addListener(k: Listener[Try[T]]): Unit = synchronized:
-      waiting += k
+      if hasCompleted then k.completeNow(result, this)
+      else waiting += k
 
     def dropListener(k: Listener[Try[T]]): Unit = synchronized:
       waiting -= k
