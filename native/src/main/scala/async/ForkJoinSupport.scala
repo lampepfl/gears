@@ -68,6 +68,7 @@ class ExecutorWithSleepThread(val exec: ExecutionContext) extends ExecutionConte
   }
 
   val sleeperThread = Thread(() => sleepLoop())
+  sleeperThread.setDaemon(true)
   sleeperThread.start()
 }
 
