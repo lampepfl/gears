@@ -6,16 +6,15 @@ import scala.util.Try
 import scala.util.boundary, boundary.break
 
 object Listener:
-  trait ListenerLock:
+  trait ListenerLock[-T]:
     /** Release the lock without completing. May be due to a failure or the
-     *  unability to actually provide the element proposed to filteredLock.
+     *  unability to actually provide an element.
      */
-    def release()(using LockContext): Unit
+    def release(): Unit
 
     /** Complete and release this lock successfully.
-     * This tells the listener to handle the object obtained earlier.
      */
-    def complete()(using LockContext): Unit
+    def complete(data: T): Unit
 
   trait LockContext:
     /* Ask for locking confirmation before acquiring the listener's internal lock.
@@ -32,71 +31,53 @@ object Listener:
      */
     def beforeLock(listener: NumberedListener): Unit
 
-    /** Inform the context that the listener's internal lock is released. */
-    def afterUnlock(listener: NumberedListener): Unit
-
-  trait LockRequest:
-    def lock()(using LockContext): Option[ListenerLock]
-  object LockRequest:
-    /** Create a lock request for a listener with the given data.
-     *  It removes the types from the tuple and allows for untyped locking later.
-     */
-    def apply[T](listener: Listener[T], data: T) =
-      new LockRequest:
-        def lock()(using LockContext): Option[ListenerLock] =
-          listener.filteredLock(data)
-
   class InvalidLockOrderException(message: String) extends Exception(message)
   private class LockCancelException extends Exception
 
-  private class MultiLockContext[S <: SuspendSupport](val support: S)(using support.Label[LockState[S]]) extends LockContext:
+  private class MultiLockContext[-T](val support: SuspendSupport)(using support.Label[LockState[T]]) extends LockContext:
     var greatestLock: Long = -1
 
     def beforeLock(listener: NumberedListener): Unit =
       if greatestLock >= listener.number then
         throw new InvalidLockOrderException("this listener tree already holds a greater lock")
-      support.suspend[Option[Exception], LockState[S]](
-        LockState.Lock[S](listener, _)
+      support.suspend[Option[Exception], LockState[T]](
+        LockState.Lock[T](listener, _)
       ).foreach(throw _)
 
-    def afterUnlock(listener: NumberedListener): Unit = ()
-
-  private trait LockState[S <: SuspendSupport]:
+  private trait LockState[-T]:
     def priority: Int
 
   private object LockState:
-    class Lock[S <: SuspendSupport](
+    class Lock[-T](
       val listener: NumberedListener,
-      val suspension: Suspension[Option[Exception], LockState[S]]
-    ) extends LockState[S]:
+      val suspension: Suspension[Option[Exception], LockState[T]]
+    ) extends LockState:
       def priority: Int = 20
 
     object Lock:
-      def unapply[S <: SuspendSupport](lock: Lock[S]) =
+      def unapply[T](lock: Lock[T]) =
         (lock.listener, lock.suspension)
 
-    class Finish[S <: SuspendSupport](
-      val idx: Int,
-      val lock: ListenerLock
-    ) extends LockState[S]:
+    class Finish[-T](
+      val lock: ListenerLock[T]
+    ) extends LockState:
       def priority: Int = 10
 
     object Finish:
-      def unapply[S <: SuspendSupport](finish: Finish[S]) =
-        (finish.idx, finish.lock)
+      def unapply[T](finish: Finish[T]) =
+        Some(finish.lock)
 
-    class Cancel[S <: SuspendSupport](val exception: Option[Throwable]) extends LockState[S]:
+    class Cancel[-T](val exception: Option[Throwable]) extends LockState[T]:
       def priority: Int = 30
 
     object Cancel:
-      def unapply[S <: SuspendSupport](cancel: Cancel[S]) =
+      def unapply(cancel: Cancel[?]) =
         Some(cancel.exception)
 
-    def priorityOrdering[S <: SuspendSupport] =
-      Ordering.by[LockState[S], Int](_.priority).orElse(new Ordering[LockState[S]]:
-        def compare(x: LockState[S], y: LockState[S]): Int = (x, y) match
-          case (Finish(idx1, _), Finish(idx2, _)) =>
-            idx2 - idx1 // F(idx1) > F(idx2) iff idx1 < idx2
+    def priorityOrdering =
+      Ordering.by[LockState[?], Int](_.priority).orElse(new Ordering[LockState[?]]:
+        def compare(x: LockState[?], y: LockState[?]): Int = (x, y) match
+          case (Finish(_), Finish(_)) => 0
 
           case (Lock(l1, _), Lock(l2, _)) =>
             val value = (l2.number - l1.number).intValue // L(n1) > L(n2) iff n1 < n2
@@ -104,57 +85,71 @@ object Listener:
               throw new InvalidLockOrderException("same locking listener used multiple times")
             value
 
-          case (Cancel[S](ex1), Cancel[S](ex2)) =>
+          case (Cancel(ex1), Cancel(ex2)) =>
             def bVal(b: Boolean) = if b then 1 else 0
             // C(ex1) > C(ex2) if only ex1 present
             bVal(ex1.isDefined) - bVal(ex2.isDefined)
       )
 
-  /** Lock multiple Listeners (passed as LockRequests) preventing deadlocks */
-  def lockMulti(locks: LockRequest*)(using support: SuspendSupport): Option[Seq[ListenerLock]] =
-    if locks.isEmpty then return Some(Seq.empty)
+  /** Lock two Listeners preventing deadlocks. If locking of both succeeds, both locks
+   *  are returned as a tuple wrapped in a right. If one (the first) listener fails
+   *  (unable to lock), then this listener instance is returned in a Left.
+   */
+  def lockBoth[T, V](l1: Listener[T], l2: Listener[V])(using support: SuspendSupport): Either[Listener[?], (ListenerLock[T], ListenerLock[V])] =
+    def startLock[X](listener: Listener[X]) =
+      support.boundary[LockState[X]]:
+        val ctx = MultiLockContext[X](support)
+        Try[LockState[X]]:
+          listener.tryLock()(using ctx)
+            .fold(LockState.Cancel(None))(x => LockState.Finish(x))
+        .fold(ex => LockState.Cancel(Some(ex)), identity)
 
-    val queue = mutable.PriorityQueue.from(
-      locks.zipWithIndex.map: (lock, idx) =>
-        support.boundary[LockState[support.type]]:
-          val ctx = MultiLockContext[support.type](support)
-          Try[LockState[support.type]]:
-            lock.lock()(using ctx)
-              .fold(LockState.Cancel(None))(x => LockState.Finish(idx, x))
-          .fold(ex => LockState.Cancel(Some(ex)), identity)
-    )(using LockState.priorityOrdering)
+    var state1: LockState[?] = startLock(l1)
+    if (state1.isInstanceOf[LockState.Cancel[?]]) then
+      state1.asInstanceOf[LockState.Cancel[?]].exception.foreach(throw _)
+      return Left(l1)
+    var state2: LockState[?] = startLock(l2)
+    var permuted = false
 
-    while !queue.head.isInstanceOf[LockState.Finish[_]] do
-      queue.dequeue() match
-        case LockState.Lock(_, sus) =>
-          queue.enqueue(sus.resume(None))
-        case LockState.Cancel(exOpt) =>
-          def noCancel = (ex: Throwable) => !ex.isInstanceOf[LockCancelException]
-          var finalExOpt = exOpt.filter(noCancel)
-          queue.foreach:
-            case LockState.Lock(_, sus) => sus.resume(Some(LockCancelException()))
-            case LockState.Finish(_, lock) => lock.release()(using singleLockContext)
-            case LockState.Cancel(nextEx) =>
-              finalExOpt = finalExOpt.orElse(nextEx.filter(noCancel))
-          finalExOpt.foreach(throw _)
-          return None
-
-    Some(queue.dequeueAll.map(_.asInstanceOf[LockState.Finish[?]].lock))
+    while true do
+      if LockState.priorityOrdering.compare(state1, state2) < 0 then
+        val temp = state1
+        state1 = state2
+        state2 = temp
+        permuted = !permuted
+      (state1, state2) match
+        case (LockState.Cancel(ex1), LockState.Lock(_, suspension2)) =>
+          val result2 = suspension2.resume(Some(LockCancelException()))
+          ex1.foreach(throw _)
+          result2 match
+            case LockState.Cancel(ex2) => ex2.foreach(throw _)
+            case _ => ()
+          return Left(l1)
+        case (LockState.Cancel(ex1), LockState.Finish(lock2)) =>
+          lock2.release()
+          ex1.foreach(throw _)
+          return Left(l1)
+        case (LockState.Lock(_, suspension), _) =>
+          state1 = suspension.resume(None)
+        case (LockState.Finish(lock1), LockState.Finish(lock2)) =>
+          return (
+            if permuted then Right(lock2, lock1)
+            else Right(lock1, lock2)
+          ).asInstanceOf[Right[Listener[?], (ListenerLock[T], ListenerLock[V])]]
+    ??? // never reached
 
   given singleLockContext: LockContext with
     def beforeLock(listener: NumberedListener): Unit = ()
-    def afterUnlock(listener: NumberedListener): Unit = ()
 
   /** Create a listener that will always accept the element and pass it to the
    *  given consumer.
   */
   def acceptingListener[T](consumer: T => Unit) =
+    val lock = new ListenerLock[T]:
+      override def release(): Unit = ()
+      override def complete(data: T): Unit = consumer(data)
     new Listener[T]:
-      override def filteredLock(data: T)(using LockContext) =
-        Some(new ListenerLock:
-          override def release()(using LockContext): Unit = ()
-          override def complete()(using LockContext): Unit = consumer(data)
-        )
+      override def tryLock()(using LockContext) = Some(lock)
 
   /** A listener for values that are processed by the given source `src` and
    *  that are demanded by the continuation listener `continue`.
@@ -173,16 +168,15 @@ object Listener:
 /** An atomic listener that may manage an internal lock to guarantee atomic completion
  */
 trait Listener[-T]:
-  /** Try to lock the listener blockingly. It is already passed the data it
-   *  may receive later and decides whether it wants to handle this element
-   *  and is able to (by locking and checking whether it is not completed yet).
-   *  If the element can be handled, return the acquired lock, None otherwise.
+  /** Try to lock the listener blockingly.
+   *  If the listener can handle an element, return the acquired lock, None otherwise.
+   *  A listener is considered permanently fulfilled as soon as it returned None once.
    *  Callers must ensure that the lock is released quickly.
    */
-  def filteredLock(data: T)(using Listener.LockContext): Option[Listener.ListenerLock]
+  def tryLock()(using Listener.LockContext): Option[Listener.ListenerLock[T]]
 
   /** Try to lock and complete directly. Returns true if the operation
    *  succeeds, false if the element is not handled.
    */
   def completeNow(data: T): Boolean =
-      filteredLock(data).map(_.complete()).isDefined
+      tryLock().map(_.complete(data)).isDefined
