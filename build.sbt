@@ -1,4 +1,5 @@
 import sbtcrossproject.CrossPlugin.autoImport.{crossProject, CrossType}
+import scalanative.build._
 
 ThisBuild / scalaVersion := "3.3.1"
 
@@ -19,6 +20,7 @@ lazy val root =
   .nativeSettings(Seq(
     nativeConfig ~= { c =>
       c.withMultithreadingSupport(true)
+       .withGC(GC.boehm) // immix doesn't work yet
     },
       libraryDependencies += "org.scalameta" %%% "munit" % "1.0.0-M10+15-3940023e-SNAPSHOT" % Test
   ))
