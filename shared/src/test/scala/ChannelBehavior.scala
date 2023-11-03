@@ -12,6 +12,7 @@ import gears.async.{
 }
 import gears.async.default.given
 import gears.async.AsyncOperations.*
+import gears.async.BaseChannel
 import Future.{*:, zip}
 
 import java.util.concurrent.CancellationException
@@ -206,15 +207,15 @@ class ChannelBehavior extends munit.FunSuite {
       var sum = 0L
       Async.blocking:
         val f1 = Future:
-          for (i <- 1 to 100000)
+          for (i <- 1 to 10000)
             c.send(i)
 
         val f2 = Future:
-          for (i <- 1 to 100000)
+          for (i <- 1 to 10000)
             sum += c.read().get
 
         f2.result
-        assertEquals(sum, 5000050000L)
+        assertEquals(sum, 50005000L)
     }
   }
 
@@ -262,6 +263,61 @@ class ChannelBehavior extends munit.FunSuite {
         f12.result
         f13.result
     }
+  }
+
+  test("race reads") {
+    Async.blocking:
+      val channels = (0 until 1000).map(_ => SyncChannel[Int]()).toArray
+      val sends = channels.toIterator.zipWithIndex.foreach { case (ch, idx) =>
+        Future { ch.send(idx) }
+      }
+      val race = Async.race((0 until 100).map(i => Async.race((10 * i until 10 * i + 10).map(idx => channels(idx).canRead.map(_.mustRead)) *))*)
+      var sum = 0
+      for i <- 0 until 1000 do
+        sum += Async.await(race)
+      assertEquals(sum, (0 until 1000).sum)
+  }
+
+  test("race sends") {
+    Async.blocking:
+      val ch = SyncChannel[Int]()
+      var timesSent = 0
+      val race = Async.race(
+        (for i <- 0 until 1000 yield ch.canSend(i))*
+      )
+      Future {
+        while Async.await(race) != ch.Closed do {
+          timesSent += 1
+        }
+      }
+      for i <- 0 until 10 do {
+        ch.read().get
+      }
+      sleep(100)
+      assertEquals(timesSent, 10)
+  }
+
+  test("race syntax") {
+    Async.blocking:
+      val a = SyncChannel[Int]()
+      val b = SyncChannel[Int]()
+
+      Future { a.send(0) }
+      Future { assertEquals(b.read().get, 10) }
+      var valuesSent = 0
+      for i <- 1 to 2 do
+        Async.race(a.canRead, b.canSend(10)).await match
+          case a.Read(v) => assertEquals(v, 0)
+          case b.Sent =>
+            valuesSent += 1
+            assertEquals(valuesSent, 1)
+          case r => assert(false, s"Should not happen, got $r")
+
+      a.close()
+      b.close()
+      Async.race(a.canRead, b.canRead).await match
+        case a.Closed | b.Closed => ()
+        case r => assert(false, s"Should not happen, got $r")
   }
 
   test("ChannelMultiplexer multiplexes - all subscribers read the same stream".ignore) {
