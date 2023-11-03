@@ -112,6 +112,9 @@ object Async:
       poll(Listener.acceptingListener { (x, _) => resultOpt = Some(x) })
       resultOpt
 
+    /** Utility method for direct waiting with `Async`. */
+    def await(using Async) = Async.await(this)
+
   end Source
 
   /** An original source has a standard definition of `onComplete` in terms of `poll` and `addListener`. Implementations
