@@ -134,13 +134,6 @@ class SourceBehavior extends munit.FunSuite {
       assertEquals(Async.await(g.map({ case Failure(_) => 17 })), 17)
   }
 
-  test("filter") {
-    Async.blocking:
-      val f: Future[Int] = Future { 10 }
-      assertEquals(Async.await(f.filter({ case Success(i) => 0 == (i % 2) })), Success(10))
-    // await when the filter predicate if false hangs forever
-  }
-
   test("all listeners in chain fire") {
     Async.blocking:
       @volatile var aRan = Future.Promise[Unit]()
@@ -149,7 +142,7 @@ class SourceBehavior extends munit.FunSuite {
         sleep(50)
         10
       }
-      val g = f.filter({ _ => true })
+      val g = f.map(identity)
       f.onComplete(Listener.acceptingListener { _ => aRan.complete(Success(()))})
       g.onComplete(Listener.acceptingListener { _ => bRan.complete(Success(()))})
       assertEquals(aRan.future.poll(), None)

@@ -124,11 +124,11 @@ object Listener:
           result2 match
             case LockState.Cancel(ex2) => ex2.foreach(throw _)
             case _ => ()
-          return Left(l1)
+          return Left(if permuted then l2 else l1)
         case (LockState.Cancel(ex1), LockState.Finish(lock2)) =>
           lock2.release()
           ex1.foreach(throw _)
-          return Left(l1)
+          return Left(if permuted then l2 else l1)
         case (LockState.Lock(_, suspension), _) =>
           state1 = suspension.resume(None)
         case (LockState.Finish(lock1), LockState.Finish(lock2)) =>
