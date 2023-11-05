@@ -19,7 +19,7 @@ def measureIterations[T](action: () => T): Int =
 
   val t1 = Thread.startVirtualThread: () =>
     try {
-      while (true) {
+      while (!Thread.interrupted()) {
         action()
         val r = counter.getAndIncrement()
       }
