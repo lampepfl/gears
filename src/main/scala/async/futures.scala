@@ -48,7 +48,10 @@ object Future:
     // Async.Source method implementations
 
     def poll(k: Listener[Try[T]]): Boolean =
-      hasCompleted && k.completeNow(result)
+      if hasCompleted then
+        k.completeNow(result)
+        true
+      else false
 
     def addListener(k: Listener[Try[T]]): Unit = synchronized:
       waiting += k

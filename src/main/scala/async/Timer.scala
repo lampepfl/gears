@@ -60,8 +60,8 @@ class StartableTimer(val millis: Long) extends Async.OriginalSource[TimerRang], 
     def poll(k: Listener[TimerRang]): Boolean =
       state match
         case TimerState.Ready | TimerState.Ticking(_) => false
-        case TimerState.RangAlready => k.completeNow(true)
-        case TimerState.Cancelled => k.completeNow(false)
+        case TimerState.RangAlready => k.completeNow(true) ; true
+        case TimerState.Cancelled => k.completeNow(false) ; true
 
     def addListener(k: Listener[TimerRang]): Unit = synchronized:
       waiting += k

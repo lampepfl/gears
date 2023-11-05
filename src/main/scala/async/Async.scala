@@ -87,9 +87,11 @@ object Async:
    */
   trait Source[+T]:
 
-    /** If data is available at present, pass it to function `k`
-     *  and return the result of this call. Otherwise return false.
-     *  `k` returns true iff the data was consumed in an async block.
+    /** Check whether data is available at present and pass it to k if so.
+     *  If no element is available, does not lock k and returns false immediately.
+     *  If there is (or may be) data available, the listener is locked and if
+     *  it fails, true is returned to signal this source's general availability.
+     *  If locking k succeeds, only return true iff k's complete is called.
      *  Calls to `poll` are always synchronous.
      */
     def poll(k: Listener[T]): Boolean
@@ -185,16 +187,23 @@ object Async:
       def poll(k: Listener[T]): Boolean =
         val it = sources.iterator
         var found = false
-        while it.hasNext && !found do
-          it.next.poll(new Listener[T]:
-            def tryLock()(using ctx: Listener.LockContext): Option[Listener.ListenerLock[T]] =
-              k.tryLock().map(lock => new Listener.ListenerLock:
+
+        val listener = new Listener[T]:
+          def tryLock()(using ctx: Listener.LockContext): Option[Listener.ListenerLock[T]] =
+            k.tryLock() match
+              case None =>
+                found = true
+                None
+              case Some(lock) => Some(new Listener.ListenerLock{
                 def release(): Unit = lock.release()
                 def complete(data: T): Unit =
                   found = true
                   lock.complete(data)
-              )
-          )
+              })
+        end listener
+
+        while it.hasNext && !found do
+          it.next.poll(listener)
         found
 
       def onComplete(k: Listener[T]): Unit =

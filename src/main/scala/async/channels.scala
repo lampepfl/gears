@@ -83,8 +83,10 @@ object SyncChannel:
     val canRead = new Async.OriginalSource[Try[T]]:
       def poll(k: Listener[Try[T]]): Boolean =
         SyncChannel.this.synchronized:
-          if (isClosed) k.completeNow(Failure(channelClosedException))
-          else obj.isDefined && testListenerValuePair(k, obj.get)
+          if (isClosed)
+            k.completeNow(Failure(channelClosedException))
+            true
+          else obj.isDefined && testListenerValuePair(k, obj.get) // TODO returns false if k fails to lock
 
       def addListener(k: Listener[Try[T]]): Unit =
         SyncChannel.this.synchronized:
@@ -202,8 +204,10 @@ object BufferedChannel:
     val canRead = new Async.OriginalSource[Try[T]]:
       def poll(k: Listener[Try[T]]): Boolean =
         BufferedChannel.this.synchronized:
-          if (isClosed) k.completeNow(Failure(channelClosedException))
-          else flushListeners()
+          if (isClosed)
+            k.completeNow(Failure(channelClosedException))
+            true
+          else flushListeners() // TODO include k in flushing process
 
       def addListener(k: Listener[Try[T]]): Unit =
         BufferedChannel.this.synchronized:
