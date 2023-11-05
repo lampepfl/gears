@@ -207,28 +207,27 @@ object Async:
         found
 
       def onComplete(k: Listener[T]): Unit =
-        val listener = new Listener.ForwardingListener[T](this, k) with Listener.NumberedListener {
-          val baseLock = new ReentrantLock()
+        val listener = new Listener.ForwardingListener[T](this, k) with Listener.LockingListener { self =>
           var foundBefore = false
 
-          def tryLock()(using ctx: Listener.LockContext): Option[Listener.ListenerLock[T]] =
+          def tryLock()(using Listener.LockContext): Option[Listener.ListenerLock[T]] =
             if foundBefore then None
             else
               k.tryLock().flatMap: lock =>
-                try ctx.beforeLock(this)
+                try this.lock()
                 finally lock.release()
-                baseLock.lock()
+
                 if foundBefore then
-                  baseLock.unlock()
+                  self.unlock()
                   lock.release()
                   None
                 else Some(new Listener.ListenerLock[T] {
                   def release(): Unit =
-                    baseLock.unlock()
+                    self.unlock()
                     lock.release()
                   def complete(data: T): Unit =
                     foundBefore = true
-                    baseLock.unlock()
+                    self.unlock()
                     lock.complete(data)
                 })
         }

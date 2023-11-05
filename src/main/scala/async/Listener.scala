@@ -4,6 +4,7 @@ import java.util.concurrent.atomic.AtomicLong
 import scala.collection.mutable
 import scala.util.Try
 import scala.util.boundary, boundary.break
+import java.util.concurrent.Semaphore
 
 object Listener:
   trait ListenerLock[-T]:
@@ -29,7 +30,7 @@ object Listener:
      *
      * No further calls may be done after this method has thrown.
      */
-    def beforeLock(listener: NumberedListener): Unit
+    def beforeLock(listener: LockingListener): Unit
 
   class InvalidLockOrderException(message: String) extends Exception(message)
   private class LockCancelException extends Exception
@@ -37,7 +38,7 @@ object Listener:
   private class MultiLockContext[-T](val support: SuspendSupport)(using support.Label[LockState[T]]) extends LockContext:
     var greatestLock: Long = -1
 
-    def beforeLock(listener: NumberedListener): Unit =
+    def beforeLock(listener: LockingListener): Unit =
       if greatestLock >= listener.number then
         throw new InvalidLockOrderException("this listener tree already holds a greater lock")
       support.suspend[Option[Exception], LockState[T]](
@@ -49,7 +50,7 @@ object Listener:
 
   private object LockState:
     class Lock[-T](
-      val listener: NumberedListener,
+      val listener: LockingListener,
       val suspension: Suspension[Option[Exception], LockState[T]]
     ) extends LockState:
       def priority: Int = 20
@@ -139,7 +140,7 @@ object Listener:
     ??? // never reached
 
   given singleLockContext: LockContext with
-    def beforeLock(listener: NumberedListener): Unit = ()
+    def beforeLock(listener: LockingListener): Unit = ()
 
   /** Create a listener that will always accept the element and pass it to the
    *  given consumer.
@@ -158,12 +159,23 @@ object Listener:
   abstract case class ForwardingListener[T](src: Async.Source[?], continue: Listener[?]) extends Listener[T]
 
   private val listenerNumber = AtomicLong()
-  /** A listener that receives a number atomically. Used for deadlock prevention.
-   *  Note that numbered ForwardingListeners always have greater numbers than their
-   *  wrapped `continue`-Listener.
+  /** A listener that wraps an internal lock and that receives a number atomically
+   *  for deadlock prevention. Note that numbered ForwardingListeners always have
+   *  greater numbers than their wrapped `continue`-Listener.
    */
-  trait NumberedListener:
+  trait LockingListener:
     val number = listenerNumber.getAndIncrement()
+    private val lock0 = Semaphore(1)
+
+    /** Locks this listener's internal lock *if the LockContext permits it*.
+     *  May throw because of LockContext.
+     */
+    protected def lock()(using ctx: LockContext) =
+      ctx.beforeLock(this)
+      lock0.acquire()
+
+    protected def unlock() =
+      lock0.release()
 
 /** An atomic listener that may manage an internal lock to guarantee atomic completion
  */
