@@ -4,7 +4,8 @@ import java.util.concurrent.atomic.AtomicLong
 import scala.collection.mutable
 import scala.util.Try
 import scala.util.boundary, boundary.break
-import java.util.concurrent.Semaphore
+import java.util.concurrent.locks.ReentrantLock
+import scala.annotation.tailrec
 
 object Listener:
   trait ListenerLock[-T]:
@@ -18,143 +19,72 @@ object Listener:
      */
     def complete(data: T): Unit
 
-    def tapLock[U <: T](beforeRelease: => Unit, beforeComplete: U => Unit): ListenerLock[U] =
-      mapLock(beforeRelease, (baseLock, data) => {
-        beforeComplete(data)
+  trait PartialListenerLock[-T]:
+    def nextListener: LockingListener
+    def release(): Unit
+    def lock(): Option[Either[PartialListenerLock[T], ListenerLock[T]]]
+
+  extension[T] (lock: Either[PartialListenerLock[T], ListenerLock[T]])
+    def tapLock(afterRelease: => Unit, afterComplete: T => Unit): Either[PartialListenerLock[T], ListenerLock[T]] =
+      mapLock[T](afterRelease, (baseLock, data) => {
         baseLock.complete(data)
+        afterComplete(data)
       })
 
-    def mapLock[U](beforeRelease: => Unit, completeLock: (ListenerLock[T], U) => Unit): ListenerLock[U] =
-      new ListenerLock[U]:
-        def release(): Unit =
-          beforeRelease
-          self.release()
-        def complete(data: U): Unit = completeLock(self, data)
-
-  trait LockContext:
-    /* Ask for locking confirmation before acquiring the listener's internal lock.
-     * This may wait to lock other locks first. It may also fail (throw)
-     *  - because there is an error
-     *    (e.g., same listener twice or smaller number already locked)
-     *  - for an external reason
-     *    (e.g., another top-level LockRequest returned None)
-     *
-     * In case of a failure, the held locks (and sublocks) should be released
-     * and the exception should bubble up.
-     *
-     * No further calls may be done after this method has thrown.
-     */
-    def beforeLock(listener: LockingListener): Unit
+    def mapLock[U](afterRelease: => Unit, completeLock: (ListenerLock[T], U) => Unit): Either[PartialListenerLock[U], ListenerLock[U]] =
+      lock match
+        case Left(partial) => Left(new PartialListenerLock[U] {
+            def nextListener: LockingListener = partial.nextListener
+            def lock(): Option[Either[PartialListenerLock[U], ListenerLock[U]]] =
+              partial.lock().map(_.mapLock(afterRelease, completeLock))
+            def release(): Unit =
+              partial.release()
+              afterRelease
+        })
+        case Right(full) => Right(new ListenerLock[U] {
+          def release(): Unit =
+            full.release()
+            afterRelease
+          def complete(data: U): Unit = completeLock(full, data)
+        })
 
   class InvalidLockOrderException(message: String) extends Exception(message)
-  private class LockCancelException extends Exception
-
-  private class MultiLockContext[-T](val support: SuspendSupport)(using support.Label[LockState[T]]) extends LockContext:
-    var greatestLock: Long = -1
-
-    def beforeLock(listener: LockingListener): Unit =
-      if greatestLock >= listener.number then
-        throw new InvalidLockOrderException("this listener tree already holds a greater lock")
-      support.suspend[Option[Exception], LockState[T]](
-        LockState.Lock[T](listener, _)
-      ).foreach(throw _)
-
-  private trait LockState[-T]:
-    def priority: Int
-
-  private object LockState:
-    class Lock[-T](
-      val listener: LockingListener,
-      val suspension: Suspension[Option[Exception], LockState[T]]
-    ) extends LockState:
-      def priority: Int = 20
-
-    object Lock:
-      def unapply[T](lock: Lock[T]) =
-        (lock.listener, lock.suspension)
-
-    class Finish[-T](
-      val lock: ListenerLock[T]
-    ) extends LockState:
-      def priority: Int = 10
-
-    object Finish:
-      def unapply[T](finish: Finish[T]) =
-        Some(finish.lock)
-
-    class Cancel[-T](val exception: Option[Throwable]) extends LockState[T]:
-      def priority: Int = 30
-
-    object Cancel:
-      def unapply(cancel: Cancel[?]) =
-        Some(cancel.exception)
-
-    def priorityOrdering =
-      Ordering.by[LockState[?], Int](_.priority).orElse(new Ordering[LockState[?]]:
-        def compare(x: LockState[?], y: LockState[?]): Int = (x, y) match
-          case (Finish(_), Finish(_)) => 0
-
-          case (Lock(l1, _), Lock(l2, _)) =>
-            val value = (l2.number - l1.number).intValue // L(n1) > L(n2) iff n1 < n2
-            if value == 0 then
-              throw new InvalidLockOrderException("same locking listener used multiple times")
-            value
-
-          case (Cancel(ex1), Cancel(ex2)) =>
-            def bVal(b: Boolean) = if b then 1 else 0
-            // C(ex1) > C(ex2) if only ex1 present
-            bVal(ex1.isDefined) - bVal(ex2.isDefined)
-      )
 
   /** Lock two Listeners preventing deadlocks. If locking of both succeeds, both locks
    *  are returned as a tuple wrapped in a right. If one (the first) listener fails
    *  (unable to lock), then this listener instance is returned in a Left.
    */
   def lockBoth[T, V](l1: Listener[T], l2: Listener[V])(using support: SuspendSupport): Either[Listener[?], (ListenerLock[T], ListenerLock[V])] =
-    def startLock[X](listener: Listener[X]) =
-      support.boundary[LockState[X]]:
-        val ctx = MultiLockContext[X](support)
-        Try[LockState[X]]:
-          listener.tryLock()(using ctx)
-            .fold(LockState.Cancel(None))(x => LockState.Finish(x))
-        .fold(ex => LockState.Cancel(Some(ex)), identity)
+    var lock1 = l1.tryLock() match
+      case None => return Left(l1)
+      case Some(value) => value
+    var lock2 = l2.tryLock() match
+      case None =>
+        lock1.fold(_.release(), _.release())
+        return Left(l2)
+      case Some(value) => value
 
-    var state1: LockState[?] = startLock(l1)
-    if (state1.isInstanceOf[LockState.Cancel[?]]) then
-      state1.asInstanceOf[LockState.Cancel[?]].exception.foreach(throw _)
-      return Left(l1)
-    var state2: LockState[?] = startLock(l2)
-    var permuted = false
+    var isFirst: Boolean = false
+    var isSecond: Boolean = false
+    boundary[Either[Listener[?], (ListenerLock[T], ListenerLock[V])]]:
+      inline def advance[X](inline listener: Listener[X], inline lock: Either[PartialListenerLock[X], ListenerLock[X]], inline other: Either[PartialListenerLock[?], ListenerLock[?]]) =
+        lock.left.get.lock() match
+          case None =>
+            other.fold(_.release(), _.release())
+            break(Left(listener))
+          case Some(value) => value
 
-    while true do
-      if LockState.priorityOrdering.compare(state1, state2) < 0 then
-        val temp = state1
-        state1 = state2
-        state2 = temp
-        permuted = !permuted
-      (state1, state2) match
-        case (LockState.Cancel(ex1), LockState.Lock(_, suspension2)) =>
-          val result2 = suspension2.resume(Some(LockCancelException()))
-          ex1.foreach(throw _)
-          result2 match
-            case LockState.Cancel(ex2) => ex2.foreach(throw _)
-            case _ => ()
-          return Left(if permuted then l2 else l1)
-        case (LockState.Cancel(ex1), LockState.Finish(lock2)) =>
-          lock2.release()
-          ex1.foreach(throw _)
-          return Left(if permuted then l2 else l1)
-        case (LockState.Lock(_, suspension), _) =>
-          state1 = suspension.resume(None)
-        case (LockState.Finish(lock1), LockState.Finish(lock2)) =>
-          return (
-            if permuted then Right(lock2, lock1)
-            else Right(lock1, lock2)
-          ).asInstanceOf[Right[Listener[?], (ListenerLock[T], ListenerLock[V])]]
-    ??? // never reached
+      while {isFirst = lock1.isLeft ; isFirst} | {isSecond = lock2.isLeft ; isSecond} do
+        if isFirst && isSecond then
+          val number1 = lock1.left.get.nextListener.number
+          val number2 = lock2.left.get.nextListener.number
+          if number1 > number2 then lock1 = advance(l1, lock1, lock2)
+          else if number1 < number2 then lock2 = advance(l2, lock2, lock1)
+          else throw InvalidLockOrderException(s"same lock $number1 used twice")
+        else if isFirst then lock1 = advance(l1, lock1, lock2)
+        else lock2 = advance(l2, lock2, lock1)
 
-  given singleLockContext: LockContext with
-    def beforeLock(listener: LockingListener): Unit = ()
+      Right((lock1.right.get, lock2.right.get))
 
   /** Create a listener that will always accept the element and pass it to the
    *  given consumer.
@@ -164,7 +94,7 @@ object Listener:
       override def release(): Unit = ()
       override def complete(data: T): Unit = consumer(data)
     new Listener[T]:
-      override def tryLock()(using LockContext) = Some(lock)
+      override def tryLock() = Some(Right(lock))
 
   /** A listener for values that are processed by the given source `src` and
    *  that are demanded by the continuation listener `continue`.
@@ -178,31 +108,46 @@ object Listener:
    *  greater numbers than their wrapped `continue`-Listener.
    */
   trait LockingListener:
+    self: Listener[?] =>
     val number = listenerNumber.getAndIncrement()
-    private val lock0 = Semaphore(1)
+    private val lock0 = ReentrantLock()
 
     /** Locks this listener's internal lock *if the LockContext permits it*.
      *  May throw because of LockContext.
      */
-    protected def lock()(using ctx: LockContext) =
-      ctx.beforeLock(this)
-      lock0.acquire()
+    protected def lock() =
+      lock0.lock()
 
     protected def unlock() =
-      lock0.release()
+      lock0.unlock()
 
 /** An atomic listener that may manage an internal lock to guarantee atomic completion
  */
 trait Listener[-T]:
   /** Try to lock the listener blockingly.
-   *  If the listener can handle an element, return the acquired lock, None otherwise.
+   *  If the listener can handle an element without locking, return a ListenerLock.
+   *  If it cannot handle an element return None.
+   *  If it needs to lock a native lock, return a PartialListenerLock before locking.
    *  A listener is considered permanently fulfilled as soon as it returned None once.
    *  Callers must ensure that the lock is released quickly.
    */
-  def tryLock()(using Listener.LockContext): Option[Listener.ListenerLock[T]]
+  def tryLock(): Option[Either[Listener.PartialListenerLock[T], Listener.ListenerLock[T]]]
+
+  /** Try to lock the listener completely and blockingly.
+   *  If the listener can handle an element, return the acquired lock, None otherwise.
+   *  See tryLock() for details on the semantics of the option and the acquired lock.
+   */
+  def lockCompletely(): Option[Listener.ListenerLock[T]] =
+    @tailrec
+    def lock(l: Option[Either[Listener.PartialListenerLock[T], Listener.ListenerLock[T]]]): Option[Listener.ListenerLock[T]] =
+      l match
+        case None => None
+        case Some(Left(partial)) => lock(partial.lock())
+        case Some(Right(lock)) => Some(lock)
+    lock(tryLock())
 
   /** Try to lock and complete directly. Returns true if the operation
    *  succeeds, false if the element is not handled.
    */
   def completeNow(data: T): Boolean =
-      tryLock().map(_.complete(data)).isDefined
+    lockCompletely().map(_.complete(data)).isDefined

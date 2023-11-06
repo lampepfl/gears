@@ -4,6 +4,8 @@ import scala.collection.mutable
 import java.util.concurrent.locks.ReentrantLock
 import java.util.concurrent.atomic.AtomicLong
 import gears.async.Listener.ListenerLock
+import gears.async.Listener.PartialListenerLock
+import gears.async.Listener.LockingListener
 
 /** A context that allows to suspend waiting for asynchronous data sources
  */
@@ -137,7 +139,7 @@ object Async:
      *  requesting the upstream listener for this source. The default behavior
      *  is to try to lock the upstream listener.
      */
-    protected def tryLock(k: Listener[U])(using Listener.LockContext) = k.tryLock()
+    protected def tryLock(k: Listener[U]) = k.tryLock()
 
     /** Perform any additional release operation after the upstream listener
      *  has been released.
@@ -148,11 +150,11 @@ object Async:
      *  passing on any operation (complete/release) to the upstream listener for
      *  this source.
      */
-    protected def complete(k: Listener.ListenerLock[U], data: T): Unit
+    protected def complete(k: ListenerLock[U], data: T): Unit
 
     private def transform(k: Listener[U]): Listener[T] =
       new Listener.ForwardingListener[T](this, k):
-        def tryLock()(using Listener.LockContext) =
+        def tryLock() =
           DerivedSource.this.tryLock(k).map(lock => lock.mapLock(DerivedSource.this.afterRelease(), DerivedSource.this.complete))
 
     def poll(k: Listener[U]): Boolean =
@@ -180,7 +182,7 @@ object Async:
         var found = false
 
         val listener = new Listener[T]:
-          def tryLock()(using Listener.LockContext): Option[Listener.ListenerLock[T]] =
+          def tryLock() =
             k.tryLock() match
               case None =>
                 // If tryLock is called, the source has - to the best of its
@@ -199,32 +201,40 @@ object Async:
         val listener = new Listener.ForwardingListener[T](this, k) with Listener.LockingListener { self =>
           var foundBefore = false
 
-          def tryLock()(using Listener.LockContext): Option[Listener.ListenerLock[T]] =
-            val result =
-              if foundBefore then None
-              else
-                k.tryLock().flatMap: lock =>
-                  try this.lock()
-                  finally lock.release()
-
-                  if foundBefore then
+          val listenerPartial = Some(Left(new PartialListenerLock[T] {
+            def nextListener = self
+            def release() = ()
+            def lock() =
+              self.lock()
+              val result =
+                if foundBefore then
+                  self.unlock()
+                  None
+                else k.tryLock() match
+                  case None =>
                     self.unlock()
-                    lock.release()
                     None
-                  else Some(lock.tapLock(self.unlock(), _ => {
-                    foundBefore = true
-                    self.unlock()
-                    sources.foreach(_.dropListener(self))
-                  }))
-            // as soon as we once return None, we are completed -> drop everywhere
-            if result.isEmpty then sources.foreach(_.dropListener(self))
-            result
-        }
+                  case Some(sublock) =>
+                    Some(sublock.tapLock(self.unlock(), _ => {
+                      foundBefore = true
+                      self.unlock()
+                      sources.foreach(_.dropListener(self))
+                    }))
+              end result
+              // as soon as we once return None, we are completed -> drop everywhere
+              if result.isEmpty then sources.foreach(_.dropListener(self))
+              result
+          }))
+
+          def tryLock() =
+            if foundBefore then None
+            else listenerPartial
+        } // end listener
         sources.foreach(_.onComplete(listener))
 
       def dropListener(k: Listener[T]): Unit =
         val listener = new Listener.ForwardingListener[T](this, k):
-          def tryLock()(using Listener.LockContext) = ???
+          def tryLock() = ???
         // not to be called, we need the listener only for its
         // hashcode and equality test.
         sources.foreach(_.dropListener(listener))
