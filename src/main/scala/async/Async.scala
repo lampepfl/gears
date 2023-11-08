@@ -118,7 +118,8 @@ object Async:
   end Source
 
   /** An original source has a standard definition of `onComplete` in terms
-   *  of `poll` and `addListener`.
+   *  of `poll` and `addListener`. Implementations should be the resource owner to
+   *  handle listener queue and completion using an object monitor on the instance.
    */
   abstract class OriginalSource[+T] extends Source[T]:
 
