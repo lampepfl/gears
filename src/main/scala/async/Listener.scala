@@ -8,6 +8,7 @@ import java.util.concurrent.Semaphore
 
 object Listener:
   trait ListenerLock[-T]:
+    self =>
     /** Release the lock without completing. May be due to a failure or the
      *  unability to actually provide an element.
      */
@@ -16,6 +17,19 @@ object Listener:
     /** Complete and release this lock successfully.
      */
     def complete(data: T): Unit
+
+    def tapLock[U <: T](beforeRelease: => Unit, beforeComplete: U => Unit): ListenerLock[U] =
+      mapLock(beforeRelease, (baseLock, data) => {
+        beforeComplete(data)
+        baseLock.complete(data)
+      })
+
+    def mapLock[U](beforeRelease: => Unit, completeLock: (ListenerLock[T], U) => Unit): ListenerLock[U] =
+      new ListenerLock[U]:
+        def release(): Unit =
+          beforeRelease
+          self.release()
+        def complete(data: U): Unit = completeLock(self, data)
 
   trait LockContext:
     /* Ask for locking confirmation before acquiring the listener's internal lock.
