@@ -24,7 +24,7 @@ object Listener:
   trait NumberedSublock extends LockResult with Lockable:
     def number: Long
 
-  type ReleaseBoundary = None.type | NumberedSublock
+  type ReleaseBoundary = NumberedSublock | Null
 
   trait ListenerLock[-T]:
     /** Release the lock without completing. May be due to a failure or the
@@ -32,11 +32,16 @@ object Listener:
      *  If a NumberedSublock is passed, then the callee shall assume that this
      *  sublock is not acquired and shall not release it (and anything it wraps).
      */
-    def release(until: ReleaseBoundary): Unit
+    def release(until: ReleaseBoundary): ListenerLock[?] | Null
 
     /** Complete and release this lock successfully.
      */
     def complete(data: T): Unit
+
+    @tailrec
+    final def releaseAll(until: ReleaseBoundary): Unit =
+      val rest = release(until)
+      if rest != null then rest.releaseAll(until)
 
   class InvalidLockOrderException(message: String) extends Exception(message)
 
@@ -46,9 +51,9 @@ object Listener:
    */
   def lockBoth[T, V](l1: Listener[T], l2: Listener[V])(using support: SuspendSupport): Either[Listener[?], (ListenerLock[T], ListenerLock[V])] =
     def unlock(listener: Listener[?], lockState: NumberedSublock | Locked.type) =
-      listener.release(lockState match
+      listener.releaseAll(lockState match
         case sublock: NumberedSublock => sublock
-        case Locked => None
+        case Locked => null
       )
 
     var lock1 = l1.tryLock() match
@@ -88,8 +93,8 @@ object Listener:
   */
   def acceptingListener[T](consumer: T => Unit) =
     new Listener[T]:
-      override def release(until: ReleaseBoundary): Unit = ()
-      override def complete(data: T): Unit = consumer(data)
+      override def release(until: ReleaseBoundary) = null
+      override def complete(data: T) = consumer(data)
       override def tryLock() = Locked
 
   /** A listener for values that are processed by the given source `src` and
@@ -127,7 +132,7 @@ trait Listener[-T] extends Listener.Lockable with Listener.ListenerLock[T]:
       l.tryLock() match
         case Listener.Gone =>
           if l.isInstanceOf[Listener.NumberedSublock] then
-            this.release(l.asInstanceOf[Listener.NumberedSublock])
+            this.releaseAll(l.asInstanceOf[Listener.NumberedSublock])
           None
         case Listener.Locked => Some(this)
         case sublock: Listener.NumberedSublock => lock(sublock)

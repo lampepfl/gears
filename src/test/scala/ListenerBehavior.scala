@@ -36,7 +36,9 @@ class ListenerBehavior extends munit.FunSuite:
         Listener.Locked
       def complete(data: Nothing): Unit =
         fail("should not succeed")
-      def release(until: Listener.ReleaseBoundary): Unit = listener1Locked = false
+      def release(until: Listener.ReleaseBoundary) =
+        listener1Locked = false
+        null
     val listener2 = TestListener(false, true, 1)
 
     assertEquals(Listener.lockBoth(listener1, listener2), Left(listener2))
@@ -183,7 +185,7 @@ private class TestListener private(sleep: AtomicBoolean, fail: Boolean, expected
 
   def complete(data: Int) = asst.assertEquals(data, expected)
 
-  def release(until: Listener.ReleaseBoundary) = ()
+  def release(until: Listener.ReleaseBoundary) = null
 
   def waitWaiter() =
     while waiter.isEmpty do Thread.`yield`()

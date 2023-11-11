@@ -139,10 +139,10 @@ object Async:
      */
     protected def tryLock(k: Listener[U]) = k.tryLock()
 
-    /** Perform any additional release operation after the upstream listener
+    /** Perform any additional release operation before the upstream listener
      *  has been released.
      */
-    protected def afterRelease(): Unit = ()
+    protected def beforeRelease(): Unit = ()
 
     /** Handle a complete request for a previous lock from the original source by
      *  passing on any operation (complete/release) to the upstream listener for
@@ -155,8 +155,8 @@ object Async:
         def tryLock() = DerivedSource.this.tryLock(k)
 
         def release(until: Listener.ReleaseBoundary) =
-          k.release(until)
-          afterRelease()
+          beforeRelease()
+          k
 
         def complete(data: T) = DerivedSource.this.complete(k, data)
 
@@ -193,7 +193,7 @@ object Async:
             if result == Listener.Gone then found = true
             result
 
-          def release(until: Listener.ReleaseBoundary) = k.release(until)
+          def release(until: Listener.ReleaseBoundary) = k
 
           def complete(data: T) =
             k.complete(data)
@@ -232,8 +232,9 @@ object Async:
 
           def release(until: Listener.ReleaseBoundary) =
             if until != listenerPartial then
-              k.release(until)
               self.unlock()
+              k
+            else null
 
           def complete(data: T) =
             k.completeNow(data)
