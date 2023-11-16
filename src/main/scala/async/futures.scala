@@ -49,7 +49,7 @@ object Future:
 
     def poll(k: Listener[Try[T]]): Boolean =
       if hasCompleted then
-        k.completeNow(result)
+        k.completeNow(result, this)
         true
       else false
 
@@ -88,7 +88,7 @@ object Future:
           val ws = waiting.toList
           waiting.clear()
           ws
-      for listener <- toNotify do listener.completeNow(result)
+      for listener <- toNotify do listener.completeNow(result, this)
 
   end CoreFuture
 
