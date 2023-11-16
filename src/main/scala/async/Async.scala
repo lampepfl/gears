@@ -3,7 +3,6 @@ import java.util.concurrent.atomic.AtomicBoolean
 import scala.collection.mutable
 import java.util.concurrent.locks.ReentrantLock
 import java.util.concurrent.atomic.AtomicLong
-import gears.async.Listener.NumberedSublock
 
 /** A context that allows to suspend waiting for asynchronous data sources
  */
@@ -130,51 +129,24 @@ object Async:
 
   end OriginalSource
 
-  /** A source that transforms an original source in some way */
-  abstract class DerivedSource[T, U](val original: Source[T]) extends Source[U]:
-
-    /** Handle a lock request `x` received from the original source by possibly
-     *  requesting the upstream listener for this source. The default behavior
-     *  is to try to lock the upstream listener.
-     */
-    protected def tryLock(k: Listener[U]) = k.tryLock()
-
-    /** Perform any additional release operation before the upstream listener
-     *  has been released.
-     */
-    protected def beforeRelease(): Unit = ()
-
-    /** Handle a complete request for a previous lock from the original source by
-     *  passing on any operation (complete/release) to the upstream listener for
-     *  this source.
-     */
-    protected def complete(k: Listener.ListenerLock[U], data: T): Unit
-
-    private def transform(k: Listener[U]): Listener[T] =
-      new Listener.ForwardingListener[T](this, k):
-        def tryLock() = DerivedSource.this.tryLock(k)
-
-        def release(until: Listener.ReleaseBoundary) =
-          beforeRelease()
-          k
-
-        def complete(data: T) = DerivedSource.this.complete(k, data)
-
-    def poll(k: Listener[U]): Boolean =
-      original.poll(transform(k))
-    def onComplete(k: Listener[U]): Unit =
-      original.onComplete(transform(k))
-    def dropListener(k: Listener[U]): Unit =
-      original.dropListener(transform(k))
-
-  end DerivedSource
-
   extension [T](src: Source[T])
     /** Pass on data transformed by `f` */
-    def map[U](f: T => U): Source[U] =
-      new DerivedSource[T, U](src):
-        protected def complete(k: Listener.ListenerLock[U], data: T) =
-          k.complete(f(data))
+    def map[U](f: T => U) =
+      new Source[U]:
+        selfSrc =>
+        def transform(k: Listener[U]) =
+          new Listener[T]:
+            val topLock = k.topLock // TODO wrap for correcting source
+            def complete(data: T, source: Async.Source[T]) =
+              k.complete(f(data), selfSrc)
+            def release(to: Listener.ReleaseBoundary) = k
+
+        def poll(k: Listener[U]): Boolean =
+          src.poll(transform(k))
+        def onComplete(k: Listener[U]): Unit =
+          src.onComplete(transform(k))
+        def dropListener(k: Listener[U]): Unit =
+          src.dropListener(transform(k))
 
   /** Pass first result from any of `sources` to the continuation */
   def race[T](sources: Source[T]*): Source[T] =
@@ -185,24 +157,52 @@ object Async:
         var found = false
 
         val listener = new Listener[T]:
-          def tryLock() =
-            val result = k.tryLock()
-            // If tryLock is called, the source has - to the best of its
-            // knowledge - an item available. But the upstream listener k
-            // refuses to take any -> we assume there would have been one.
-            if result == Listener.Gone then found = true
-            result
+          val topLock =
+            if k.topLock != null then
+              new Listener.TopLock:
+                val selfNumber = k.topLock.selfNumber
+                def lockSelf(source: Async.Source[?]) =
+                  k.topLock.lockSelf()
+            else null
 
-          def release(until: Listener.ReleaseBoundary) = k
-
-          def complete(data: T) =
-            k.complete(data)
-            found = true
-        end listener
+          def complete(data: T, source: Async.Source[T]): Unit
+          def release(to: Listener.ReleaseBoundary) =
+            /* If release is called with a non-null boundary,
+               tryLock has been called but failed, so the source has -
+               to the best of its knowledge - an item available.
+               But the upstream listener k refuses to take any ->
+                 we assume there would have been one.
+            */
+            if to != null then found = true
+            k
 
         while it.hasNext && !found do
           it.next.poll(listener)
         found
+
+      // def poll(k: Listener[T]): Boolean =
+      //   val it = sources.iterator
+      //   var found = false
+
+      //   val listener = new Listener[T]:
+      //     def tryLock() =
+      //       val result = k.tryLock()
+      //       // If tryLock is called, the source has - to the best of its
+      //       // knowledge - an item available. But the upstream listener k
+      //       // refuses to take any -> we assume there would have been one.
+      //       if result == Listener.Gone then found = true
+      //       result
+
+      //     def release(until: Listener.ReleaseBoundary) = k
+
+      //     def complete(data: T) =
+      //       k.complete(data)
+      //       found = true
+      //   end listener
+
+      //   while it.hasNext && !found do
+      //     it.next.poll(listener)
+      //   found
 
       def onComplete(k: Listener[T]): Unit =
         val listener = new Listener.ForwardingListener[T](this, k) with Listener.LockingListener { self =>

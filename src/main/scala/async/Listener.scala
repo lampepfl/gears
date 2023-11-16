@@ -1,145 +1,73 @@
 package gears.async
 
-import java.util.concurrent.atomic.AtomicLong
-import scala.collection.mutable
-import scala.util.Try
-import scala.util.boundary, boundary.break
-import java.util.concurrent.locks.ReentrantLock
+import gears.async.Listener.Locked
+import gears.async.Listener.Failed
+import gears.async.Listener.SemiLock
 import scala.annotation.tailrec
+import gears.async.Async.Source
 
 object Listener:
-  trait Lockable:
-    /** Try to lock the (sub)listener blockingly.
-     *  A listener is considered permanently fulfilled as soon as it returned Gone once.
-     *  Callers must ensure that the lock is released quickly.
-     */
-    def tryLock(): LockResult
-
   sealed trait LockResult
-  /** Signals that a listener cannot be locked (already fulfilled) */
-  case object Gone extends LockResult
-  /** Signals that the listener is now successfully locked */
-  case object Locked extends LockResult
-  /** An encapsulation of a lock step that will lock an internal lock */
-  trait NumberedSublock extends LockResult with Lockable:
-    def number: Long
 
-  type ReleaseBoundary = NumberedSublock | Null
+  object Locked extends LockResult
 
-  trait ListenerLock[-T]:
-    /** Release the lock without completing. May be due to a failure or the
-     *  unability to actually provide an element.
-     *  If a NumberedSublock is passed, then the callee shall assume that this
-     *  sublock is not acquired and shall not release it (and anything it wraps).
-     */
-    def release(until: ReleaseBoundary): ListenerLock[?] | Null
+  object Failed extends LockResult
 
-    /** Complete and release this lock successfully.
-     */
-    def complete(data: T): Unit
+  trait SemiLock extends LockResult:
+    val nextNumber: Long
+    def lockNext(): LockResult
 
-    @tailrec
-    final def releaseAll(until: ReleaseBoundary): Unit =
-      val rest = release(until)
-      if rest != null then rest.releaseAll(until)
+  type ReleaseBoundary = SemiLock | Locked.type
 
-  class InvalidLockOrderException(message: String) extends Exception(message)
+  trait TopLock:
+    val selfNumber: Long
+    def lockSelf(source: Async.Source[?]): LockResult
 
-  /** Lock two Listeners preventing deadlocks. If locking of both succeeds, both locks
-   *  are returned as a tuple wrapped in a right. If one (the first) listener fails
-   *  (unable to lock), then this listener instance is returned in a Left.
-   */
-  def lockBoth[T, V](l1: Listener[T], l2: Listener[V])(using support: SuspendSupport): Either[Listener[?], (ListenerLock[T], ListenerLock[V])] =
-    def unlock(listener: Listener[?], lockState: NumberedSublock | Locked.type) =
-      listener.releaseAll(lockState match
-        case sublock: NumberedSublock => sublock
-        case Locked => null
-      )
+  // TODO this should only be used for adapting the source
+  inline def mappingTopLock(inner: TopLock | Null, inline body: (Async.Source[?]) => LockResult) =
+    if inner != null then
+      new TopLock:
+        val selfNumber = inner.selfNumber
+        def lockSelf(source: Source[?]) = body(source)
 
-    var lock1 = l1.tryLock() match
-      case Gone => return Left(l1)
-      case value: (NumberedSublock | Locked.type) => value
-    var lock2 = l2.tryLock() match
-      case Gone =>
-        unlock(l1, lock1)
-        return Left(l2)
-      case value: (NumberedSublock | Locked.type) => value
-
-    var isFirst: Boolean = false
-    var isSecond: Boolean = false
-    boundary[Either[Listener[?], (ListenerLock[T], ListenerLock[V])]]:
-      def advance[X](listener: Listener[X], lock: NumberedSublock | Locked.type, otherListener: Listener[?], other: NumberedSublock | Locked.type) =
-        lock.asInstanceOf[NumberedSublock].tryLock() match
-          case Gone =>
-            unlock(otherListener, other)
-            unlock(listener, lock)
-            break(Left(listener))
-          case value: (NumberedSublock | Locked.type) => value
-
-      while {isFirst = lock1.isInstanceOf[NumberedSublock] ; isFirst} | {isSecond = lock2.isInstanceOf[NumberedSublock] ; isSecond} do
-        if isFirst && isSecond then
-          val number1 = lock1.asInstanceOf[NumberedSublock].number
-          val number2 = lock2.asInstanceOf[NumberedSublock].number
-          if number1 > number2 then lock1 = advance(l1, lock1, l2, lock2)
-          else if number1 < number2 then lock2 = advance(l2, lock2, l1, lock1)
-          else throw InvalidLockOrderException(s"same lock $number1 used twice")
-        else if isFirst then lock1 = advance(l1, lock1, l2, lock2)
-        else lock2 = advance(l2, lock2, l1, lock1)
-
-      Right((l1, l2))
-
-  /** Create a listener that will always accept the element and pass it to the
-   *  given consumer.
-  */
   def acceptingListener[T](consumer: T => Unit) =
     new Listener[T]:
-      override def release(until: ReleaseBoundary) = null
-      override def complete(data: T) = consumer(data)
-      override def tryLock() = Locked
+      val topLock = null
+      def complete(data: T, source: Source[T]) = consumer(data)
+      def release(to: ReleaseBoundary) = null
 
-  /** A listener for values that are processed by the given source `src` and
-   *  that are demanded by the continuation listener `continue`.
-   *  This class is necessary to identify listeners registered to upstream sources (for removal).
-   */
-  abstract case class ForwardingListener[T](src: Async.Source[?], continue: Listener[?]) extends Listener[T]
+trait Listener[-T]:
+  val topLock: Listener.TopLock | Null
 
-  private val listenerNumber = AtomicLong()
-  /** A listener that wraps an internal lock and that receives a number atomically
-   *  for deadlock prevention. Note that numbered ForwardingListeners always have
-   *  greater numbers than their wrapped `continue`-Listener.
-   */
-  trait LockingListener:
-    self: Listener[?] =>
-    val number = listenerNumber.getAndIncrement()
-    private val lock0 = ReentrantLock()
+  def complete(data: T, source: Async.Source[T]): Unit
+  def release(to: Listener.ReleaseBoundary): Listener[?] | Null
 
-    /** Locks this listener's internal lock.
-     */
-    protected def lock() = lock0.lock()
+  @tailrec
+  final def releaseAll(until: Listener.ReleaseBoundary): Unit =
+    val rest = release(until)
+    if rest != null then rest.releaseAll(until)
 
-    protected def unlock() = lock0.unlock()
+  @tailrec
+  private def lock(l: Listener.SemiLock): Locked.type | Failed.type =
+    l.lockNext() match
+      case Locked => Locked
+      case Failed =>
+        this.releaseAll(l)
+        Failed
+      case inner: SemiLock => lock(inner)
 
-/** An atomic listener that may manage an internal lock to guarantee atomic completion
- */
-trait Listener[-T] extends Listener.Lockable with Listener.ListenerLock[T]:
-  /** Try to lock the listener completely and blockingly.
-   *  If the listener can handle an element, return the acquired lock, None otherwise.
-   *  See tryLock() for details on the semantics of the option and the acquired lock.
-   */
-  def lockCompletely(): Option[Listener.ListenerLock[T]] =
-    @tailrec
-    def lock(l: Listener.Lockable): Option[Listener.ListenerLock[T]] =
-      l.tryLock() match
-        case Listener.Gone =>
-          if l.isInstanceOf[Listener.NumberedSublock] then
-            this.releaseAll(l.asInstanceOf[Listener.NumberedSublock])
-          None
-        case Listener.Locked => Some(this)
-        case sublock: Listener.NumberedSublock => lock(sublock)
-    lock(this)
+  def lockCompletely(source: Async.Source[T]): Locked.type | Failed.type =
+    this.topLock match
+      case topLock: Listener.TopLock =>
+        topLock.lockSelf(source) match
+          case Locked => Locked
+          case Failed => Failed
+          case inner: SemiLock => lock(inner)
+      case _ => Locked
 
-  /** Try to lock and complete directly. Returns true if the operation
-   *  succeeds, false if the element is not handled.
-   */
-  def completeNow(data: T): Boolean =
-    lockCompletely().map(_.complete(data)).isDefined
+  def completeNow(data: T, source: Async.Source[T]): Boolean =
+    lockCompletely(source) match
+      case Locked =>
+        this.complete(data, source)
+        true
+      case Failed => false
