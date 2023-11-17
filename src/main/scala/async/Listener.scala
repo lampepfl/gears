@@ -9,12 +9,12 @@ object Listener:
   sealed trait LockResult
 
   /** We have completed locking the listener. It can now be `completed`. */
-  object Locked extends LockResult
+  case object Locked extends LockResult
 
   /** The listener is no longer available.
     * It should be removed from the source, and any acquired locks should be `released`.
     */
-  object Gone extends LockResult
+  case object Gone extends LockResult
 
   /** Locking is successful; however, there are more locks to be acquired. */
   trait SemiLock extends LockResult:
