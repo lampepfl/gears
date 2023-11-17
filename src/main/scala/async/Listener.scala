@@ -133,6 +133,9 @@ trait Listener[-T]:
         Gone
       case inner: SemiLock => lock(inner)
 
+  /** Attempts to completely lock the listener, if such a lock exists.
+    * Succeeds with `Locked` immediately if there is no `TopLock`.
+    */
   def lockCompletely(source: Async.Source[T]): Locked.type | Gone.type =
     this.topLock match
       case topLock: Listener.TopLock =>
