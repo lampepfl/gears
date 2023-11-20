@@ -181,20 +181,19 @@ object Async:
       def onComplete(k: Listener[T]): Unit =
         val listener = new Listener.ForwardingListener[T](this, k) with NumberedLock { self =>
           var found = false
+          var lockingSrc: Async.Source[?] = null // guaranteed to not be null when lock is held
+          val heldLock = k.lock match
+            case null => Listener.Locked
+            case inner: Listener.ListenerLock =>
+              new Listener.PartialLock:
+                val nextNumber = inner.selfNumber
+                def lockNext() =
+                  val r = inner.lockSelf(selfSrc)
+                  if r == Listener.Gone && !found then
+                    found = true
+                    cleanup(lockingSrc)
+                  r
           val lock =
-            var lockingSrc: Async.Source[?] = null // guaranteed to not be null when lock is held
-            val heldLock = k.lock match
-              case null => Listener.Locked
-              case inner: Listener.ListenerLock =>
-                new Listener.PartialLock:
-                  val nextNumber = inner.selfNumber
-                  def lockNext() =
-                    val r = inner.lockSelf(selfSrc)
-                    if r == Listener.Gone && !found then
-                      found = true
-                      cleanup(lockingSrc)
-                    r
-
             new Listener.ListenerLock:
               val selfNumber = self.number
               def lockSelf(src: Async.Source[?]) =
@@ -218,7 +217,7 @@ object Async:
 
           def release(until: Listener.LockMarker) =
             self.releaseLock()
-            k
+            if until == heldLock then null else k
         } // end listener
 
         sources.foreach(_.onComplete(listener))
