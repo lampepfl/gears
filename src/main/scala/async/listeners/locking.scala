@@ -2,7 +2,7 @@
 package gears.async.listeners
 
 import gears.async._
-import Listener.{Locked, TopLock, Gone, SemiLock, LockMarker}
+import Listener.{Locked, ListenerLock, Gone, PartialLock, LockMarker}
 import scala.annotation.tailrec
 
 /** Attempt to lock both listeners belonging to possibly different sources at the same time.
@@ -13,24 +13,24 @@ import scala.annotation.tailrec
 def lockBoth[T, U](st: Async.Source[T], su: Async.Source[U])(lt: Listener[T], lu: Listener[U]): lt.type | lu.type | Locked.type =
   /* Step 1: weed out non-locking listeners */
   inline def lockedOr[V >: Locked.type](cause: lt.type | lu.type)(inline body: V) = if body == Locked then Locked else cause
-  val tlt = lt.topLock match
-    case tl: TopLock => tl
+  val tlt = lt.lock match
+    case tl: ListenerLock => tl
     case null => return lockedOr(lu) { lu.lockCompletely(su) }
-  val tlu = lu.topLock match
-    case tl: TopLock => tl
+  val tlu = lu.lock match
+    case tl: ListenerLock => tl
     case null => return lockedOr(lt) { lt.lockCompletely(st) }
 
   /* Attempts to advance locking one by one. */
   @tailrec
   def loop(mt: LockMarker, mu: LockMarker): lt.type | lu.type | Locked.type =
-    inline def advanceSu(su: SemiLock): lt.type | lu.type | Locked.type = su.lockNext() match
+    inline def advanceSu(su: PartialLock): lt.type | lu.type | Locked.type = su.lockNext() match
       case Gone => { lt.releaseAll(mt); lu.releaseAll(mu); lu }
       case v: LockMarker => loop(mt, v)
     (mt, mu) match
       case (Locked, Locked) => Locked
-      case (Locked, su: SemiLock) => advanceSu(su)
-      case (st: SemiLock, su: SemiLock) if st.nextNumber < su.nextNumber => advanceSu(su)
-      case (st: SemiLock, _) => st.lockNext() match
+      case (Locked, su: PartialLock) => advanceSu(su)
+      case (st: PartialLock, su: PartialLock) if st.nextNumber < su.nextNumber => advanceSu(su)
+      case (st: PartialLock, _) => st.lockNext() match
         case Gone => { lt.releaseAll(mt); lu.releaseAll(mu); lt }
         case v: LockMarker => loop(v, mu)
 

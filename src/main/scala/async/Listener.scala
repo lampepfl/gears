@@ -17,7 +17,7 @@ object Listener:
   case object Gone extends LockResult
 
   /** Locking is successful; however, there are more locks to be acquired. */
-  trait SemiLock extends LockResult:
+  trait PartialLock extends LockResult:
     /** The number of the next lock. */
     val nextNumber: Long
     /** Attempt to lock the next lock. */
@@ -26,7 +26,7 @@ object Listener:
   /** Points to a position on the lock chain, whose lock up until this point has been acquired,
     * but no further.
     */
-  type LockMarker = SemiLock | Locked.type
+  type LockMarker = PartialLock | Locked.type
 
   /** A lock required by a listener to be acquired before accepting values.
     * Should there be multiple listeners that needs to be locked at the same time,
@@ -39,7 +39,7 @@ object Listener:
     *   that only forwards the requests to the underlying topLock. `wrapLock` is a convenient
     *   `.map` for `TopLock | Null`.
     */
-  trait TopLock:
+  trait ListenerLock:
     /** The assigned number of the lock.
       * If the listener holds inner listeners underneath that utilizes locks,
       * it is @required that `selfNumber` must be larger than any `nextNumber` of
@@ -52,28 +52,41 @@ object Listener:
       */
     def lockSelf(source: Async.Source[?]): LockResult
 
-  /** A special TopLockWrapper that just passes the source through. */
-  class TopLockWrapper(inner: TopLock, src: Async.Source[?]) extends TopLock:
+  /** A special wrapper for ListenerLock that just passes the source through. */
+  class ListenerLockWrapper(inner: ListenerLock, src: Async.Source[?]) extends ListenerLock:
     val selfNumber: Long = inner.selfNumber
     def lockSelf(_src: Async.Source[?]) =
       inner.lockSelf(src)
 
-  inline def wrapLock[T](listener: Listener[?])(inline body: TopLock => T): T | Null =
-    listener.topLock match
+  /** Wraps the lock of a given listener, if it exists. */
+  inline def wrapLock[T](listener: Listener[?])(inline body: ListenerLock => T): T | Null =
+    listener.lock match
       case null => null
-      case l: TopLock => body(l)
+      case l: ListenerLock => body(l)
 
   /** A simple listener that always accepts the item and sends it to the consumer. */
   def acceptingListener[T](consumer: T => Unit) =
     new Listener[T]:
-      val topLock = null
+      val lock = null
       def complete(data: T, source: Source[T]) = consumer(data)
       def release(to: LockMarker) = null
 
   /** A simple listener that always accepts the item and sends it to the consumer. */
   def apply[T](consumer: T => Unit): Listener[T] = acceptingListener(consumer)
 
+  /** A special class of listener that forwards the inner listener through the given source.
+    * For purposes of `dropListener` these listeners are compared for equality
+    * by the hash of the source and the inner listener.
+    */
   abstract case class ForwardingListener[T](src: Async.Source[?], inner: Listener[T]) extends Listener[T]
+
+  object ForwardingListener:
+    /** Create an empty forwarding listener for equality comparison. */
+    def empty[T](src: Async.Source[?], inner: Listener[T]) = new ForwardingListener(src, inner):
+      val lock = null
+      override def complete(data: T, source: Async.Source[T]) = ???
+      override def release(to: Listener.LockMarker) = ???
+
 
   /** A helper instance that provides an uniquely numbered mutex. */
   trait NumberedLock:
@@ -82,8 +95,8 @@ object Listener:
     val number = listenerNumber.getAndIncrement()
     private val lock0 = ReentrantLock()
 
-    protected def lock() = lock0.lock()
-    protected def unlock() = lock0.unlock()
+    protected def acquireLock() = lock0.lock()
+    protected def releaseLock() = lock0.unlock()
   object NumberedLock:
     private val listenerNumber = java.util.concurrent.atomic.AtomicLong()
 
@@ -100,7 +113,7 @@ trait Listener[-T]:
   /** Represents the exposed API for synchronization on listeners at receiving time.
     * If the listener does not have any form of synchronization, `topLock` should be `null`.
     */
-  val topLock: Listener.TopLock | Null
+  val lock: Listener.ListenerLock | Null
 
   /** Complete the listener with the given item, from the given source.
     * *If the listener exposes a `TopLock`*, it is required to acquire this lock completely
@@ -125,24 +138,24 @@ trait Listener[-T]:
     if rest != null then rest.releaseAll(until)
 
   @tailrec
-  private def lock(l: Listener.SemiLock): Locked.type | Gone.type =
+  private def lockRecursively(l: Listener.PartialLock): Locked.type | Gone.type =
     l.lockNext() match
       case Locked => Locked
       case Gone =>
         this.releaseAll(l)
         Gone
-      case inner: SemiLock => lock(inner)
+      case inner: PartialLock => lockRecursively(inner)
 
   /** Attempts to completely lock the listener, if such a lock exists.
     * Succeeds with `Locked` immediately if there is no `TopLock`.
     */
   def lockCompletely(source: Async.Source[T]): Locked.type | Gone.type =
-    this.topLock match
-      case topLock: Listener.TopLock =>
+    this.lock match
+      case topLock: Listener.ListenerLock =>
         topLock.lockSelf(source) match
           case Locked => Locked
           case Gone => Gone
-          case inner: SemiLock => lock(inner)
+          case inner: PartialLock => lockRecursively(inner)
       case null => Locked
 
   def completeNow(data: T, source: Async.Source[T]): Boolean =

@@ -9,7 +9,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import gears.async.listeners.lockBoth
 import gears.async.Listener.Locked
 import gears.async.Listener.Gone
-import gears.async.Listener.TopLock
+import gears.async.Listener.ListenerLock
 import gears.async.Async.Source
 import gears.async.Listener.LockMarker
 
@@ -35,7 +35,7 @@ class ListenerBehavior extends munit.FunSuite:
   test("lock two listeners where one fails"):
     var listener1Locked = false
     val listener1 = new Listener[Nothing]:
-      val topLock = null
+      val lock = null
       def complete(data: Nothing, src: Async.Source[Nothing]): Unit =
         fail("should not succeed")
       def release(until: Listener.LockMarker) =
@@ -160,7 +160,7 @@ class ListenerBehavior extends munit.FunSuite:
       assertEquals(f1.value, s1listener)
 
 private class TestListener(expected: Int)(using asst: munit.Assertions) extends Listener[Int]:
-  val topLock = null
+  val lock = null
 
   def complete(data: Int, source: Source[Int]): Unit =
     asst.assertEquals(data, expected)
@@ -173,7 +173,7 @@ private class NumberedTestListener private(sleep: AtomicBoolean, fail: Boolean, 
   def this(sleep: Boolean, fail: Boolean, expected: Int)(using munit.Assertions) =
     this(AtomicBoolean(sleep), fail, expected)
 
-  override val topLock = new TopLock:
+  override val lock = new ListenerLock:
     val selfNumber = NumberedTestListener.this.number
     def lockSelf(source: Source[?]) =
       if sleep.getAndSet(false) then

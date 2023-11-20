@@ -3,7 +3,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import scala.collection.mutable
 import java.util.concurrent.locks.ReentrantLock
 import java.util.concurrent.atomic.AtomicLong
-import gears.async.Listener.{wrapLock, TopLockWrapper}
+import gears.async.Listener.{wrapLock, ListenerLockWrapper}
 import gears.async.Listener.NumberedLock
 
 /** A context that allows to suspend waiting for asynchronous data sources
@@ -138,7 +138,7 @@ object Async:
         selfSrc =>
         def transform(k: Listener[U]) =
           new Listener[T]:
-            val topLock = wrapLock(k) { inner => new TopLockWrapper(inner, selfSrc ) }
+            val lock = wrapLock(k) { inner => new ListenerLockWrapper(inner, selfSrc ) }
             def complete(data: T, source: Async.Source[T]) =
               k.complete(f(data), selfSrc)
             def release(to: Listener.LockMarker) = k
@@ -159,7 +159,7 @@ object Async:
         var found = false
 
         val listener = new Listener[T]:
-          val topLock = wrapLock(k) { inner => new TopLockWrapper(inner, selfSrc) }
+          val lock = wrapLock(k) { inner => new ListenerLockWrapper(inner, selfSrc) }
 
           def complete(data: T, source: Async.Source[T]): Unit =
             found = true
@@ -181,12 +181,12 @@ object Async:
       def onComplete(k: Listener[T]): Unit =
         val listener = new Listener.ForwardingListener[T](this, k) with NumberedLock { self =>
           var found = false
-          val topLock =
+          val lock =
             var lockingSrc: Async.Source[?] = null // guaranteed to not be null when lock is held
-            val heldLock = k.topLock match
+            val heldLock = k.lock match
               case null => Listener.Locked
-              case inner: Listener.TopLock =>
-                new Listener.SemiLock:
+              case inner: Listener.ListenerLock =>
+                new Listener.PartialLock:
                   val nextNumber = inner.selfNumber
                   def lockNext() =
                     val r = inner.lockSelf(selfSrc)
@@ -195,14 +195,14 @@ object Async:
                       cleanup(lockingSrc)
                     r
 
-            new Listener.TopLock:
+            new Listener.ListenerLock:
               val selfNumber = self.number
               def lockSelf(src: Async.Source[?]) =
                 if found then return Listener.Gone
-                self.lock()
+                self.acquireLock()
                 lockingSrc = src
                 if found then
-                  self.unlock()
+                  self.releaseLock()
                   Listener.Gone
                 else heldLock
 
@@ -212,24 +212,19 @@ object Async:
 
           def complete(item: T, src: Async.Source[T]) =
             found = true
-            self.unlock()
+            self.releaseLock()
             k.complete(item, selfSrc)
             cleanup(src)
 
           def release(until: Listener.LockMarker) =
-            self.unlock()
+            self.releaseLock()
             k
         } // end listener
 
         sources.foreach(_.onComplete(listener))
 
       def dropListener(k: Listener[T]): Unit =
-        val listener = new Listener.ForwardingListener[T](this, k):
-          val topLock = null
-          def complete(item: T, src: Async.Source[T]) = ???
-          def release(until: Listener.LockMarker) = ???
-        // not to be called, we need the listener only for its
-        // hashcode and equality test.
+        val listener = Listener.ForwardingListener.empty(this, k)
         sources.foreach(_.dropListener(listener))
 
     }
