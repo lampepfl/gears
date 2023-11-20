@@ -3,7 +3,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import scala.collection.mutable
 import java.util.concurrent.locks.ReentrantLock
 import java.util.concurrent.atomic.AtomicLong
-import gears.async.Listener.{wrapLock, ListenerLockWrapper}
+import gears.async.Listener.{withLock, ListenerLockWrapper}
 import gears.async.Listener.NumberedLock
 
 /** A context that allows to suspend waiting for asynchronous data sources
@@ -138,7 +138,7 @@ object Async:
         selfSrc =>
         def transform(k: Listener[U]) =
           new Listener[T]:
-            val lock = wrapLock(k) { inner => new ListenerLockWrapper(inner, selfSrc ) }
+            val lock = withLock(k) { inner => new ListenerLockWrapper(inner, selfSrc ) }
             def complete(data: T, source: Async.Source[T]) =
               k.complete(f(data), selfSrc)
             def release(to: Listener.LockMarker) = k
@@ -159,7 +159,7 @@ object Async:
         var found = false
 
         val listener = new Listener[T]:
-          val lock = wrapLock(k) { inner => new ListenerLockWrapper(inner, selfSrc) }
+          val lock = withLock(k) { inner => new ListenerLockWrapper(inner, selfSrc) }
 
           def complete(data: T, source: Async.Source[T]): Unit =
             found = true

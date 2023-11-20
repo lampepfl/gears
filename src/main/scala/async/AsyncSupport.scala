@@ -14,7 +14,7 @@ trait SuspendSupport:
     /** Should return immediately if resume is called from within body */
     def suspend[T, R](body: Suspension[T, R] => R)(using Label[R]): T
 
-/** Extends [[Suspend]] with "asynchronous" boundary/resume functions, in the presence of a [[Scheduler]] */
+/** Extends [[SuspendSupport]] with "asynchronous" boundary/resume functions, in the presence of a [[Scheduler]] */
 trait AsyncSupport extends SuspendSupport:
     type Scheduler <: gears.async.Scheduler
 
