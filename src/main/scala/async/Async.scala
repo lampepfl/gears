@@ -179,41 +179,36 @@ object Async:
         found
 
       def onComplete(k: Listener[T]): Unit =
-        val listener = new Listener.ForwardingListener[T](this, k) with NumberedLock { self =>
+        val listener = new Listener.ForwardingListener[T](this, k) with NumberedLock with Listener.ListenerLock { self =>
+          val lock = self
+
           var found = false
-          var lockingSrc: Async.Source[?] = null // guaranteed to not be null when lock is held
           val heldLock = k.lock match
             case null => Listener.Locked
             case inner: Listener.ListenerLock =>
               new Listener.PartialLock:
                 val nextNumber = inner.selfNumber
-                def lockNext() =
-                  val r = inner.lockSelf(selfSrc)
-                  if r == Listener.Gone && !found then
-                    found = true
-                    cleanup(lockingSrc)
-                  r
-          val lock =
-            new Listener.ListenerLock:
-              val selfNumber = self.number
-              def lockSelf(src: Async.Source[?]) =
-                if found then return Listener.Gone
-                self.acquireLock()
-                lockingSrc = src
-                if found then
-                  self.releaseLock()
-                  Listener.Gone
-                else heldLock
+                def lockNext() = inner.lockSelf(selfSrc)
 
-          /** Remove all instances of this listener on other sources */
+          /* == ListenerLock implementation == */
+          val selfNumber = self.number
+          def lockSelf(src: Async.Source[?]) =
+            if found then return Listener.Gone
+            self.acquireLock()
+            if found then
+              self.releaseLock()
+              Listener.Gone
+            else heldLock
+
+          /** Remove all instances of this listener on sources other than `src`. */
           def cleanup(src: Async.Source[?]) =
-            sources.filter(_ != src).foreach(_.dropListener(self))
+            sources.foreach(s => if s != src then s.dropListener(self))
 
           def complete(item: T, src: Async.Source[T]) =
             found = true
             self.releaseLock()
-            k.complete(item, selfSrc)
             cleanup(src)
+            k.complete(item, selfSrc)
 
           def release(until: Listener.LockMarker) =
             self.releaseLock()
