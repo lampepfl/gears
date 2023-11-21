@@ -179,35 +179,32 @@ object Async:
         found
 
       def onComplete(k: Listener[T]): Unit =
-        val listener = new Listener.ForwardingListener[T](this, k) with NumberedLock with Listener.ListenerLock { self =>
+        val listener = new Listener.ForwardingListener[T](this, k) with NumberedLock with Listener.ListenerLock with Listener.PartialLock { self =>
           val lock = self
 
           var found = false
-          val heldLock = k.lock match
-            case null => Listener.Locked
-            case inner: Listener.ListenerLock =>
-              new Listener.PartialLock:
-                val nextNumber = inner.selfNumber
-                def lockNext() = inner.lockSelf(selfSrc)
+          inline def heldLock = if k.lock == null then Listener.Locked else this
+
+          /* == PartialLock implementation == */
+          // Note that this is bogus if k.lock is null, but we'll never use it if it is.
+          val nextNumber = if k.lock == null then -1 else k.lock.selfNumber
+          def lockNext() = k.lock.lockSelf(selfSrc)
 
           /* == ListenerLock implementation == */
           val selfNumber = self.number
           def lockSelf(src: Async.Source[?]) =
-            if found then return Listener.Gone
-            self.acquireLock()
-            if found then
-              self.releaseLock()
-              Listener.Gone
-            else heldLock
-
-          /** Remove all instances of this listener on sources other than `src`. */
-          def cleanup(src: Async.Source[?]) =
-            sources.foreach(s => if s != src then s.dropListener(self))
+            if found then Listener.Gone
+            else
+              self.acquireLock()
+              if found then
+                self.releaseLock()
+                Listener.Gone
+              else heldLock
 
           def complete(item: T, src: Async.Source[T]) =
             found = true
             self.releaseLock()
-            cleanup(src)
+            sources.foreach(s => if s != src then s.dropListener(self))
             k.complete(item, selfSrc)
 
           def release(until: Listener.LockMarker) =
