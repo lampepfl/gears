@@ -5,6 +5,7 @@ import java.util.concurrent.locks.ReentrantLock
 import java.util.concurrent.atomic.AtomicLong
 import gears.async.Listener.{withLock, ListenerLockWrapper}
 import gears.async.Listener.NumberedLock
+import scala.util.boundary
 
 /** A context that allows to suspend waiting for asynchronous data sources
   */
@@ -130,6 +131,31 @@ object Async:
 
   end OriginalSource
 
+  object Source:
+    /** Create a [[Source]] containing the given values, resolved once for each. */
+    def values[T](values: T*) =
+      import scala.collection.JavaConverters._
+      val q = java.util.concurrent.ConcurrentLinkedQueue[T]()
+      q.addAll(values.asJavaCollection)
+      new Source[T]: 
+        override def poll(k: Listener[T]): Boolean =
+          if q.isEmpty() then return false
+          else
+            k.lockCompletely(this) match
+              case Listener.Gone => true
+              case v: Listener.LockMarker =>
+                val item = q.poll()
+                if item == null then
+                  k.releaseLock(v)
+                  false
+                else
+                  k.complete(item, this)
+                  true
+
+        override def onComplete(k: Listener[T]): Unit = poll(k)
+        override def dropListener(k: Listener[T]): Unit = ()
+    end values
+
   extension [T](src: Source[T])
     /** Pass on data transformed by `f` */
     def map[U](f: T => U) =
@@ -214,5 +240,4 @@ object Async:
     */
   def either[T1, T2](src1: Source[T1], src2: Source[T2]): Source[Either[T1, T2]] =
     race(src1.map(Left(_)), src2.map(Right(_)))
-
 end Async
