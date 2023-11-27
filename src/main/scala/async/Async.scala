@@ -141,7 +141,6 @@ object Async:
             val lock = withLock(k) { inner => new ListenerLockWrapper(inner, selfSrc ) }
             def complete(data: T, source: Async.Source[T]) =
               k.complete(f(data), selfSrc)
-            def release(to: Listener.LockMarker) = k
 
         def poll(k: Listener[U]): Boolean =
           src.poll(transform(k))

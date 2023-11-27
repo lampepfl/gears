@@ -98,7 +98,6 @@ object Listener:
     new Listener[T]:
       val lock = null
       def complete(data: T, source: Source[T]) = consumer(data)
-      def release(to: LockMarker) = null
 
   /** Returns a simple [[Listener]] that always accepts the item and sends it to the consumer. */
   inline def apply[T](consumer: T => Unit): Listener[T] = acceptingListener(consumer)
@@ -154,6 +153,9 @@ trait Listener[-T]:
     * recursively.
     */
   def complete(data: T, source: Async.Source[T]): Unit
+
+  /** Release the listener lock up to the given [[Listener.LockMarker]], if it exists. */
+  inline final def releaseLock(to: Listener.LockMarker): Unit = if lock != null then lock.releaseAll(to)
 
   /** Attempts to completely lock the listener, if such a lock exists.
     * Succeeds with [[Listener.Locked]] immediately if there is no [[Listener.ListenerLock]].
