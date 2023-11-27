@@ -134,6 +134,18 @@ class ListenerBehavior extends munit.FunSuite:
     assert(source1.listener.isEmpty)
     assert(source2.listener.isEmpty)
 
+  test("race polling"):
+    val source1 = new Async.Source[Int]():
+      override def poll(k: Listener[Int]): Boolean = k.completeNow(1, this) || true
+      override def onComplete(k: Listener[Int]): Unit = ???
+      override def dropListener(k: Listener[Int]): Unit = ???
+    val source2 = TSource()
+    val listener = TestListener(1)
+
+    assert(Async.race(source1, source2).poll(listener))
+    assert(Async.race(source2, source1).poll(listener))
+
+
   test("race failed without wait"):
     val source1 = TSource()
     val source2 = TSource()
@@ -199,7 +211,7 @@ private object Dummy extends Async.Source[Nothing]:
 
 private class TSource(using asst: munit.Assertions) extends Async.Source[Int]:
   var listener: Option[Listener[Int]] = None
-  def poll(k: Listener[Int]): Boolean = ???
+  def poll(k: Listener[Int]): Boolean = false
   def onComplete(k: Listener[Int]): Unit =
     assert(listener.isEmpty)
     listener = Some(k)

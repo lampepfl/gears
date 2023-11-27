@@ -158,24 +158,8 @@ object Async:
         val it = sources.iterator
         var found = false
 
-        val listener = new Listener[T]:
-          val lock = withLock(k) { inner => new ListenerLockWrapper(inner, selfSrc) }
-
-          def complete(data: T, source: Async.Source[T]): Unit =
-            found = true
-            k.complete(data, selfSrc)
-          def release(to: Listener.LockMarker) =
-            /* If release is called with a non-null boundary,
-               tryLock has been called but failed, so the source has -
-               to the best of its knowledge - an item available.
-               But the upstream listener k refuses to take any ->
-                 we assume there would have been one.
-            */
-            if to != null then found = true
-            k
-
         while it.hasNext && !found do
-          it.next.poll(listener)
+          found = it.next.poll(k)
         found
 
       def onComplete(k: Listener[T]): Unit =
