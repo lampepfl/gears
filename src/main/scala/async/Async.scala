@@ -189,16 +189,15 @@ object Async:
                 self.releaseLock()
                 Listener.Gone
               else heldLock
+          def release(until: Listener.LockMarker) =
+            self.releaseLock()
+            if until == heldLock then null else k.lock
 
           def complete(item: T, src: Async.Source[T]) =
             found = true
             self.releaseLock()
             sources.foreach(s => if s != src then s.dropListener(self))
             k.complete(item, selfSrc)
-
-          def release(until: Listener.LockMarker) =
-            self.releaseLock()
-            if until == heldLock then null else k
         } // end listener
 
         sources.foreach(_.onComplete(listener))

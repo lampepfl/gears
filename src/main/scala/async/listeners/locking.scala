@@ -24,14 +24,14 @@ def lockBoth[T, U](st: Async.Source[T], su: Async.Source[U])(lt: Listener[T], lu
   @tailrec
   def loop(mt: LockMarker, mu: LockMarker): lt.type | lu.type | Locked.type =
     inline def advanceSu(su: PartialLock): lt.type | lu.type | Locked.type = su.lockNext() match
-      case Gone => { lt.releaseAll(mt); lu.releaseAll(mu); lu }
+      case Gone => { tlt.releaseAll(mt); tlu.releaseAll(mu); lu }
       case v: LockMarker => loop(mt, v)
     (mt, mu) match
       case (Locked, Locked) => Locked
       case (Locked, su: PartialLock) => advanceSu(su)
       case (st: PartialLock, su: PartialLock) if st.nextNumber < su.nextNumber => advanceSu(su)
       case (st: PartialLock, _) => st.lockNext() match
-        case Gone => { lt.releaseAll(mt); lu.releaseAll(mu); lt }
+        case Gone => { tlt.releaseAll(mt); tlu.releaseAll(mu); lt }
         case v: LockMarker => loop(v, mu)
 
   /* We have to do the first locking step manually. */
@@ -39,16 +39,16 @@ def lockBoth[T, U](st: Async.Source[T], su: Async.Source[U])(lt: Listener[T], lu
     val mt = tlt.lockSelf(st) match
       case Gone => return lt
       case v: LockMarker => v
-    val mu = tlu.lockSelf(st) match
-      case Gone => { lt.releaseAll(mt); return lu }
+    val mu = tlu.lockSelf(su) match
+      case Gone => { tlt.releaseAll(mt); return lu }
       case v: LockMarker => v
     loop(mt, mu)
   else
-    val mu = tlu.lockSelf(st) match
+    val mu = tlu.lockSelf(su) match
       case Gone => return lu
       case v: LockMarker => v
     val mt = tlt.lockSelf(st) match
-      case Gone => { lu.releaseAll(mu); return lt }
+      case Gone => { tlu.releaseAll(mu); return lt }
       case v: LockMarker => v
     loop(mt, mu)
 end lockBoth

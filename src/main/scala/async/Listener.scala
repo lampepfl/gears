@@ -51,12 +51,41 @@ object Listener:
       * Locks are guaranteed to be held as short as possible.
       */
     def lockSelf(source: Async.Source[?]): LockResult
+    /** Release the current lock without resolving the listener with any items, if the
+      * current listener lock is before or the same as the current [[Listener.LockMarker]].
+      * Returns the next lock to be released, `null` if there are no more.
+      */
+    protected def release(to: Listener.LockMarker): ListenerLock | Null
+
+    /** Attempt to release all locks up to and including the given [[Listener.LockMarker]]. */
+    @tailrec
+    final def releaseAll(to: Listener.LockMarker): Unit =
+      val rest = release(to)
+      if rest != null then rest.releaseAll(to)
+
+    /** Attempt to lock all layers of this listener lock. */
+    private[Listener] final def lockAll(source: Async.Source[?]): Locked.type | Gone.type =
+      lockSelf(source) match
+        case Locked => Locked
+        case Gone => Gone
+        case inner: PartialLock => lockRecursively(inner)
+
+    @tailrec
+    private final def lockRecursively(l: Listener.PartialLock): Locked.type | Gone.type =
+      l.lockNext() match
+        case Locked => Locked
+        case Gone =>
+          this.releaseAll(l)
+          Gone
+        case inner: PartialLock => lockRecursively(inner)
+  end ListenerLock
 
   /** A special wrapper for [[ListenerLock]] that just passes the source through. */
   class ListenerLockWrapper(inner: ListenerLock, src: Async.Source[?]) extends ListenerLock:
     val selfNumber: Long = inner.selfNumber
     def lockSelf(_src: Async.Source[?]) =
       inner.lockSelf(src)
+    def release(to: LockMarker): ListenerLock | Null = inner
 
   /** Maps the lock of a listener, if it exists. */
   inline def withLock[T](listener: Listener[?])(inline body: ListenerLock => T): T | Null =
@@ -72,7 +101,7 @@ object Listener:
       def release(to: LockMarker) = null
 
   /** Returns a simple [[Listener]] that always accepts the item and sends it to the consumer. */
-  def apply[T](consumer: T => Unit): Listener[T] = acceptingListener(consumer)
+  inline def apply[T](consumer: T => Unit): Listener[T] = acceptingListener(consumer)
 
   /** A special class of listener that forwards the inner listener through the given source.
     * For purposes of [[Async.Source.dropListener]] these listeners are compared for equality
@@ -85,8 +114,6 @@ object Listener:
     def empty[T](src: Async.Source[?], inner: Listener[T]) = new ForwardingListener(src, inner):
       val lock = null
       override def complete(data: T, source: Async.Source[T]) = ???
-      override def release(to: Listener.LockMarker) = ???
-
 
   /** A helper instance that provides an uniquely numbered mutex. */
   trait NumberedLock:
@@ -127,16 +154,6 @@ trait Listener[-T]:
     * recursively.
     */
   def complete(data: T, source: Async.Source[T]): Unit
-  /** Release the current lock without resolving the listener with any items, if the
-    * current listener is before or the same as the current [[Listener.LockMarker]].
-    */
-  protected def release(to: Listener.LockMarker): Listener[?] | Null
-
-  /** Attempt to release all locks up to and including the given [[Listener.LockMarker]]. */
-  @tailrec
-  final def releaseAll(to: Listener.LockMarker): Unit =
-    val rest = release(to)
-    if rest != null then rest.releaseAll(to)
 
   /** Attempts to completely lock the listener, if such a lock exists.
     * Succeeds with [[Listener.Locked]] immediately if there is no [[Listener.ListenerLock]].
@@ -144,11 +161,7 @@ trait Listener[-T]:
     */
   def lockCompletely(source: Async.Source[T]): Locked.type | Gone.type =
     this.lock match
-      case lock: Listener.ListenerLock =>
-        lock.lockSelf(source) match
-          case Locked => Locked
-          case Gone => Gone
-          case inner: PartialLock => lockRecursively(inner)
+      case lock: Listener.ListenerLock => lock.lockAll(source)
       case null => Locked
 
   /** Attempts to acquire all locks and then calling [[complete]] with the given item and source.
@@ -160,12 +173,3 @@ trait Listener[-T]:
         this.complete(data, source)
         true
       case Gone => false
-
-  @tailrec
-  private def lockRecursively(l: Listener.PartialLock): Locked.type | Gone.type =
-    l.lockNext() match
-      case Locked => Locked
-      case Gone =>
-        this.releaseAll(l)
-        Gone
-      case inner: PartialLock => lockRecursively(inner)

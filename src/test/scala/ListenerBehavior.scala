@@ -177,8 +177,6 @@ private class TestListener(expected: Int)(using asst: munit.Assertions) extends 
   def complete(data: Int, source: Source[Int]): Unit =
     asst.assertEquals(data, expected)
 
-  protected def release(to: LockMarker): Listener[?] | Null = null
-
 private class NumberedTestListener private(sleep: AtomicBoolean, fail: Boolean, expected: Int)(using munit.Assertions) extends TestListener(expected) with Listener.NumberedLock:
   private var waiter: Option[Promise[Unit]] = None
 
@@ -197,6 +195,7 @@ private class NumberedTestListener private(sleep: AtomicBoolean, fail: Boolean, 
         waiter = None
       if fail then Listener.Gone
       else Listener.Locked
+    protected def release(to: LockMarker): ListenerLock | Null = null
 
   def waitWaiter() =
     while waiter.isEmpty do Thread.`yield`()
