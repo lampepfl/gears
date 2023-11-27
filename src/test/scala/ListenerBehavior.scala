@@ -12,6 +12,9 @@ import gears.async.Listener.Gone
 import gears.async.Listener.ListenerLock
 import gears.async.Async.Source
 import gears.async.Listener.LockMarker
+import gears.async.Listener.LockResult
+import gears.async.Listener.PartialLock
+import scala.collection.mutable.Buffer
 
 class ListenerBehavior extends munit.FunSuite:
   given munit.Assertions = this
@@ -170,6 +173,51 @@ class ListenerBehavior extends munit.FunSuite:
       assert(source2.listener.get.completeNow(1, source2))
       other.continue()
       assertEquals(f1.value, s1listener)
+
+  test("lockBoth ordering"):
+    val ordering = Buffer[Long]()
+    val src = TSource()
+    val l = TestListener(1)
+    val s1 = lockChain(ordering, l)(5, 3, 1)
+    val s2 = lockChain(ordering, l)(4, 2)
+
+    assertEquals(lockBoth(src, src)(s1, s2), Locked)
+    assertEquals(ordering.toSeq, Seq(5L, 4, 3, 2, 1))
+    ordering.clear()
+    assertEquals(lockBoth(src, src)(s2, s1), Locked)
+    assertEquals(ordering.toSeq, Seq(5L, 4, 3, 2, 1))
+
+    val s3 = lockChain(ordering, l)(5, 4, 1)
+    val s4 = lockChain(ordering, l)(3, 2)
+
+    ordering.clear()
+    assertEquals(lockBoth(src, src)(s3, s4), Locked)
+    assertEquals(ordering.toSeq, Seq(5L, 4, 3, 2, 1))
+    ordering.clear()
+    assertEquals(lockBoth(src, src)(s4, s3), Locked)
+    assertEquals(ordering.toSeq, Seq(5L, 4, 3, 2, 1))
+
+def lockChain[T](buf: Buffer[Long], inner: Listener[T])(numbers: Long*) =
+  def wrap(num: Long, inner: Listener[T]) = new Listener[T] {
+    override val lock: ListenerLock | Null = new ListenerLock {
+      override val selfNumber: Long = num
+      var heldSrc: Source[?] = null
+      val partialLock = Listener.withLock(inner):
+        innerLock => new PartialLock:
+          override val nextNumber: Long = innerLock.selfNumber
+          override def lockNext(): LockResult = innerLock.lockSelf(heldSrc)
+      override def lockSelf(source: Source[?]): LockResult =
+        heldSrc = source
+        buf += num
+        partialLock match
+          case null => Locked
+          case pl: PartialLock => pl
+      override protected def release(to: LockMarker): ListenerLock | Null =
+        if to == partialLock then null else inner.lock
+    }
+    override def complete(data: T, source: Source[T]): Unit = ???
+  }
+  numbers.foldRight(inner)(wrap)
 
 private class TestListener(expected: Int)(using asst: munit.Assertions) extends Listener[Int]:
   val lock = null

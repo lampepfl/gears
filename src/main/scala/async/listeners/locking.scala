@@ -2,7 +2,7 @@
 package gears.async.listeners
 
 import gears.async._
-import Listener.{Locked, ListenerLock, Gone, PartialLock, LockMarker}
+import Listener.{Locked, ListenerLock, Gone, PartialLock, LockMarker, LockResult}
 import scala.annotation.tailrec
 
 /** Attempt to lock both listeners belonging to possibly different sources at the same time.
@@ -34,9 +34,22 @@ def lockBoth[T, U](st: Async.Source[T], su: Async.Source[U])(lt: Listener[T], lu
         case Gone => { tlt.releaseAll(mt); tlu.releaseAll(mu); lt }
         case v: LockMarker => loop(v, mu)
 
+  /* Attempt to lock the ListenerLock and advance until we start needing to lock the other one. */
+  inline def lockUntilLessThan(other: ListenerLock)(src: Async.Source[?], tl: ListenerLock): LockResult =
+    @tailrec def loop(v: LockMarker): LockResult =
+      v match
+        case Locked => Locked
+        case v: PartialLock if v.nextNumber < other.selfNumber => v
+        case v: PartialLock => v.lockNext() match
+          case Gone => tl.releaseAll(v); Gone
+          case m: LockMarker => loop(m)
+    tl.lockSelf(src) match
+      case Gone => Gone
+      case m: LockMarker => loop(m)
+
   /* We have to do the first locking step manually. */
   if tlt.selfNumber > tlu.selfNumber then
-    val mt = tlt.lockSelf(st) match
+    val mt = lockUntilLessThan(tlu)(st, tlt) match
       case Gone => return lt
       case v: LockMarker => v
     val mu = tlu.lockSelf(su) match
@@ -44,7 +57,7 @@ def lockBoth[T, U](st: Async.Source[T], su: Async.Source[U])(lt: Listener[T], lu
       case v: LockMarker => v
     loop(mt, mu)
   else
-    val mu = tlu.lockSelf(su) match
+    val mu = lockUntilLessThan(tlt)(su, tlu) match
       case Gone => return lu
       case v: LockMarker => v
     val mt = tlt.lockSelf(st) match
