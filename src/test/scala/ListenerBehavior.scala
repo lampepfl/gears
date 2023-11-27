@@ -212,8 +212,9 @@ private class TSource(using asst: munit.Assertions) extends Async.Source[Int]:
     if r == Listener.Gone then listener = None
     r
   def completeWith(value: Int) =
-    listener.get.complete(value, this)
+    val l = listener.get
     listener = None
+    l.complete(value, this)
   def completeNowWith(value: Int) =
     val r = listener.get.completeNow(value, this)
     listener = None

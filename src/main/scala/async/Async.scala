@@ -188,7 +188,12 @@ object Async:
           /* == PartialLock implementation == */
           // Note that this is bogus if k.lock is null, but we'll never use it if it is.
           val nextNumber = if k.lock == null then -1 else k.lock.selfNumber
-          def lockNext() = k.lock.lockSelf(selfSrc)
+          def lockNext() =
+            val res = k.lock.lockSelf(selfSrc)
+            if res == Listener.Gone then
+              found = true // This is always false before this, since PartialLock is only returned when found is false
+              sources.foreach(_.dropListener(self))
+            res
 
           /* == ListenerLock implementation == */
           val selfNumber = self.number
