@@ -15,6 +15,7 @@ import gears.async.Listener.LockMarker
 import gears.async.Listener.LockResult
 import gears.async.Listener.PartialLock
 import scala.collection.mutable.Buffer
+import gears.async.listeners.ConflictingLocksException
 
 class ListenerBehavior extends munit.FunSuite:
   given munit.Assertions = this
@@ -196,6 +197,46 @@ class ListenerBehavior extends munit.FunSuite:
     ordering.clear()
     assertEquals(lockBoth(src, src)(s4, s3), Locked)
     assertEquals(ordering.toSeq, Seq(5L, 4, 3, 2, 1))
+
+  test("conflicting locks"):
+    val l = NumberedTestListener(false, false, 1)
+    val srcs = Seq(TSource(), TSource())
+    val Seq(s1, s2) = srcs
+    val Seq(l1, l2) = srcs.map(_ => {
+      val src = TSource()
+      val r = race(src)
+      r.onComplete(l)
+      src.listener.get
+    })
+    val (k1, k2) =
+      try
+        lockBoth(s1, s2)(l1, l2)
+        ???
+      catch
+        case ConflictingLocksException(base, conflict) =>
+          assertEquals(base, (l1, l2))
+          conflict
+    try
+      lockBoth(s2, s1)(l2, l1)
+      ???
+    catch
+      case ConflictingLocksException(base, conflict) =>
+        assertEquals(base, (l2, l1))
+        assertEquals(conflict, (k2, k1))
+    try
+      lockBoth(s1, s2)(l, l2)
+      ???
+    catch
+      case ConflictingLocksException(base, conflict) =>
+        assertEquals(base, (l, l2))
+        assertEquals(conflict, (l.lock, k2))
+    try
+      lockBoth(s1, s2)(l1, l)
+      ???
+    catch
+      case ConflictingLocksException(base, conflict) =>
+        assertEquals(base, (l1, l))
+        assertEquals(conflict, (k1, l.lock))
 
 def lockChain[T](buf: Buffer[Long], inner: Listener[T])(numbers: Long*) =
   def wrap(num: Long, inner: Listener[T]) = new Listener[T] {

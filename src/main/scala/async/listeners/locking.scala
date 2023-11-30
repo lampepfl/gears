@@ -5,10 +5,16 @@ import gears.async._
 import Listener.{Locked, ListenerLock, Gone, PartialLock, LockMarker, LockResult}
 import scala.annotation.tailrec
 
+/** Two listeners being locked at the same time, while holding the same lock on their listener chains. */
+case class ConflictingLocksException(base: (Listener[?], Listener[?]), conflict: ((ListenerLock | PartialLock), (ListenerLock | PartialLock))) extends Exception
+
 /** Attempt to lock both listeners belonging to possibly different sources at the same time.
   * Lock orders are respected by comparing numbers on every step.
   *
-  * Returns `Locked` on success, or the listener that fails first.
+  * Returns [[Locked]] on success, or the listener that fails first.
+  *
+  * In the case that two locks sharing the same number is encountered, [[ConflictingLocksException]] is thrown
+  * with the base listeners and conflicting listeners.
   */
 def lockBoth[T, U](st: Async.Source[T], su: Async.Source[U])(lt: Listener[T], lu: Listener[U]): lt.type | lu.type | Locked.type =
   /* Step 1: weed out non-locking listeners */
@@ -29,6 +35,9 @@ def lockBoth[T, U](st: Async.Source[T], su: Async.Source[U])(lt: Listener[T], lu
     (mt, mu) match
       case (Locked, Locked) => Locked
       case (Locked, su: PartialLock) => advanceSu(su)
+      case (st: PartialLock, su: PartialLock) if st.nextNumber == su.nextNumber =>
+        tlt.releaseAll(mt); tlu.releaseAll(mu)
+        throw ConflictingLocksException((lt, lu), (st, su))
       case (st: PartialLock, su: PartialLock) if st.nextNumber < su.nextNumber => advanceSu(su)
       case (st: PartialLock, _) => st.lockNext() match
         case Gone => { tlt.releaseAll(mt); tlu.releaseAll(mu); lt }
@@ -39,6 +48,9 @@ def lockBoth[T, U](st: Async.Source[T], su: Async.Source[U])(lt: Listener[T], lu
     @tailrec def loop(v: LockMarker): LockResult =
       v match
         case Locked => Locked
+        case v: PartialLock if v.nextNumber == other.selfNumber =>
+          tl.releaseAll(v)
+          throw ConflictingLocksException((lt, lu), if lt.lock == other then (other, v) else (v, other))
         case v: PartialLock if v.nextNumber < other.selfNumber => v
         case v: PartialLock => v.lockNext() match
           case Gone => tl.releaseAll(v); Gone
