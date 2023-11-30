@@ -89,9 +89,9 @@ class ChannelClosedException extends Exception
 private val channelClosedException = ChannelClosedException()
 
 object SyncChannel:
-  def apply[T]()(using SuspendSupport): SyncChannel[T] = Impl()
+  def apply[T](): SyncChannel[T] = Impl()
 
-  private class Impl[T](using suspend: SuspendSupport) extends Channel.Impl[T] with SyncChannel[T]:
+  private class Impl[T] extends Channel.Impl[T] with SyncChannel[T]:
     override def pollRead(r: Reader): Boolean = synchronized:
       // match reader with buffer of senders
       checkClosed(canRead, r) || cells.matchReader(r)
@@ -103,8 +103,8 @@ object SyncChannel:
 end SyncChannel
 
 object BufferedChannel:
-  def apply[T](size: Int = 10)(using SuspendSupport): BufferedChannel[T] = Impl(size)
-  private class Impl[T](size: Int)(using SuspendSupport) extends Channel.Impl[T] with BufferedChannel[T]:
+  def apply[T](size: Int = 10): BufferedChannel[T] = Impl(size)
+  private class Impl[T](size: Int) extends Channel.Impl[T] with BufferedChannel[T]:
     require(size > 0, "Buffered channels must have a buffer size greater than 0")
     val buf = new mutable.Queue[T](size)
 
@@ -275,7 +275,7 @@ object ChannelMultiplexer:
     private var isClosed = false
     private val publishers = ArrayBuffer[ReadableChannel[T]]()
     private val subscribers = ArrayBuffer[SendableChannel[Try[T]]]()
-    private val infoChannel: BufferedChannel[Message] = BufferedChannel[Message](1)(using ac.support)
+    private val infoChannel: BufferedChannel[Message] = BufferedChannel[Message](1)
     ac.scheduler.execute { () =>
       var shouldTerminate = false
       var publishersCopy: List[ReadableChannel[T]] = null
