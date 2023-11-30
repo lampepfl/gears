@@ -175,7 +175,7 @@ object Async:
             val res = k.lock.lockSelf(selfSrc)
             if res == Listener.Gone then
               found = true // This is always false before this, since PartialLock is only returned when found is false
-              sources.foreach(_.dropListener(self))
+              sources.foreach(_.dropListener(this)) // same as dropListener(k), but avoids an allocation
             res
 
           /* == ListenerLock implementation == */
@@ -186,6 +186,7 @@ object Async:
               self.acquireLock()
               if found then
                 self.releaseLock()
+                // no cleanup needed here, since we have done this by an earlier `complete` or `lockNext`
                 Listener.Gone
               else heldLock
           def release(until: Listener.LockMarker) =
