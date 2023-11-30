@@ -4,7 +4,78 @@ import scala.annotation.tailrec
 import gears.async.Async.Source
 import java.util.concurrent.locks.ReentrantLock
 
+/** A listener, representing an one-time value receiver of an [[Async.Source]].
+  *
+  * Most of the time listeners should involve only calling a receiver function,
+  * and can be created by [[Listener.apply]] or [[Listener.acceptingListener]].
+  *
+  * However, should the listener want to attempt synchronization, it has to
+  * expose some locking-related interfaces. See `lock` and `release`.
+  */
+trait Listener[-T]:
+  import Listener._
+  /** Complete the listener with the given item, from the given source.
+    * **If the listener exposes a [[Listener.ListenerLock]]**, it is required to acquire this lock completely
+    * (either through [[lockCompletely]] or through manual locking of every layer)
+    * before calling [[complete]]. This can also be done conveniently with [[completeNow]].
+    * For performance reasons, this condition is usually not checked and will end up
+    * causing unexpected behavior.
+    *
+    * The listener must automatically release the lock of itself and any underlying listeners,
+    * however this usually is done automatically by calling the inner listener's [[complete]]
+    * recursively.
+    */
+  def complete(data: T, source: Async.Source[T]): Unit
+
+  /** Represents the exposed API for synchronization on listeners at receiving time.
+    * If the listener does not have any form of synchronization, [[lock]] should be `null`.
+    */
+  val lock: Listener.ListenerLock | Null
+
+  /** Attempts to acquire all locks and then calling [[complete]] with the given item and source.
+    * If locking fails, [[releaseAll]] is automatically called.
+    */
+  def completeNow(data: T, source: Async.Source[T]): Boolean =
+    lockCompletely(source) match
+      case Locked =>
+        this.complete(data, source)
+        true
+      case Gone => false
+
+  /** Release the listener lock up to the given [[Listener.LockMarker]], if it exists. */
+  inline final def releaseLock(to: Listener.LockMarker): Unit = if lock != null then lock.releaseAll(to)
+
+  /** Attempts to completely lock the listener, if such a lock exists.
+    * Succeeds with [[Listener.Locked]] immediately if there is no [[Listener.ListenerLock]].
+    * If locking fails, [[releaseAll]] is automatically called.
+    */
+  def lockCompletely(source: Async.Source[T]): Locked.type | Gone.type =
+    this.lock match
+      case lock: Listener.ListenerLock => lock.lockAll(source)
+      case null => Locked
+
 object Listener:
+  /** A simple [[Listener]] that always accepts the item and sends it to the consumer. */
+  def acceptingListener[T](consumer: T => Unit) =
+    new Listener[T]:
+      val lock = null
+      def complete(data: T, source: Source[T]) = consumer(data)
+
+  /** Returns a simple [[Listener]] that always accepts the item and sends it to the consumer. */
+  inline def apply[T](consumer: T => Unit): Listener[T] = acceptingListener(consumer)
+
+  /** A special class of listener that forwards the inner listener through the given source.
+    * For purposes of [[Async.Source.dropListener]] these listeners are compared for equality
+    * by the hash of the source and the inner listener.
+    */
+  abstract case class ForwardingListener[T](src: Async.Source[?], inner: Listener[T]) extends Listener[T]
+
+  object ForwardingListener:
+    /** Create an empty [[ForwardingListener]] for equality comparison. */
+    def empty[T](src: Async.Source[?], inner: Listener[T]) = new ForwardingListener(src, inner):
+      val lock = null
+      override def complete(data: T, source: Async.Source[T]) = ???
+
   /** The result of locking a single listener lock. */
   sealed trait LockResult
 
@@ -12,7 +83,8 @@ object Listener:
   case object Locked extends LockResult
 
   /** The listener is no longer available.
-    * It should be removed from the source, and any acquired locks should be `release`d.
+    * It should be removed from the source, and any acquired locks by the source must be
+    * manually `release`d by the source itself.
     */
   case object Gone extends LockResult
 
@@ -93,27 +165,6 @@ object Listener:
       case null => null
       case l: ListenerLock => body(l)
 
-  /** A simple [[Listener]] that always accepts the item and sends it to the consumer. */
-  def acceptingListener[T](consumer: T => Unit) =
-    new Listener[T]:
-      val lock = null
-      def complete(data: T, source: Source[T]) = consumer(data)
-
-  /** Returns a simple [[Listener]] that always accepts the item and sends it to the consumer. */
-  inline def apply[T](consumer: T => Unit): Listener[T] = acceptingListener(consumer)
-
-  /** A special class of listener that forwards the inner listener through the given source.
-    * For purposes of [[Async.Source.dropListener]] these listeners are compared for equality
-    * by the hash of the source and the inner listener.
-    */
-  abstract case class ForwardingListener[T](src: Async.Source[?], inner: Listener[T]) extends Listener[T]
-
-  object ForwardingListener:
-    /** Create an empty [[ForwardingListener]] for equality comparison. */
-    def empty[T](src: Async.Source[?], inner: Listener[T]) = new ForwardingListener(src, inner):
-      val lock = null
-      override def complete(data: T, source: Async.Source[T]) = ???
-
   /** A helper instance that provides an uniquely numbered mutex. */
   trait NumberedLock:
     import NumberedLock._
@@ -125,53 +176,3 @@ object Listener:
     protected def releaseLock() = lock0.unlock()
   object NumberedLock:
     private val listenerNumber = java.util.concurrent.atomic.AtomicLong()
-
-/** A listener, representing an one-time value receiver of an `Async.Source`.
-  *
-  * Most of the time listeners should involve only calling a receiver function,
-  * and can be created by `Listener.apply` or `Listener.acceptingListener`.
-  *
-  * However, should the listener want to attempt synchronization, it has to
-  * expose some locking-related interfaces. See `lock` and `release`.
-  */
-trait Listener[-T]:
-  import Listener._
-  /** Represents the exposed API for synchronization on listeners at receiving time.
-    * If the listener does not have any form of synchronization, [[lock]] should be `null`.
-    */
-  val lock: Listener.ListenerLock | Null
-
-  /** Complete the listener with the given item, from the given source.
-    * **If the listener exposes a [[Listener.ListenerLock]]**, it is required to acquire this lock completely
-    * (either through [[lockCompletely]] or through manual locking of every layer)
-    * before calling [[complete]].
-    * For performance reasons, this condition is usually not checked and will end up
-    * causing unexpected behavior.
-    *
-    * The listener should automatically release the lock of itself and any underlying listeners,
-    * however this usually is done automatically by calling the inner listener's [[complete]]
-    * recursively.
-    */
-  def complete(data: T, source: Async.Source[T]): Unit
-
-  /** Release the listener lock up to the given [[Listener.LockMarker]], if it exists. */
-  inline final def releaseLock(to: Listener.LockMarker): Unit = if lock != null then lock.releaseAll(to)
-
-  /** Attempts to completely lock the listener, if such a lock exists.
-    * Succeeds with [[Listener.Locked]] immediately if there is no [[Listener.ListenerLock]].
-    * If locking fails, [[releaseAll]] is automatically called.
-    */
-  def lockCompletely(source: Async.Source[T]): Locked.type | Gone.type =
-    this.lock match
-      case lock: Listener.ListenerLock => lock.lockAll(source)
-      case null => Locked
-
-  /** Attempts to acquire all locks and then calling [[complete]] with the given item and source.
-    * If locking fails, [[releaseAll]] is automatically called.
-    */
-  def completeNow(data: T, source: Async.Source[T]): Boolean =
-    lockCompletely(source) match
-      case Locked =>
-        this.complete(data, source)
-        true
-      case Gone => false
