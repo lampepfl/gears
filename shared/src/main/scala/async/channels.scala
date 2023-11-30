@@ -9,6 +9,7 @@ import scala.util.control.Breaks.{break, breakable}
 import gears.async.Async.Source
 import gears.async.listeners.lockBoth
 import gears.async.Async.OriginalSource
+import gears.async.Listener.acceptingListener
 
 trait BaseChannel[T]:
   sealed trait Result:
@@ -134,6 +135,42 @@ object BufferedChannel:
       else false
   end Impl
 end BufferedChannel
+
+/** UnboundedChannel are buffered channels that does not bound the number of items in the channel. */
+trait UnboundedChannel[T] extends Channel[T] {
+  /** Send the item immediately. Throws [[ChannelClosedException]] if the channel is closed. */
+  def sendImmediately(x: T): Unit
+}
+
+object UnboundedChannel:
+  def apply[T](): UnboundedChannel[T] = Impl[T]()
+
+  private final class Impl[T]() extends Channel.Impl[T] with UnboundedChannel[T] {
+    val buf = new mutable.Queue[T]()
+
+    override def sendImmediately(x: T): Unit =
+      var result: SendResult = Closed
+      pollSend(CanSend(x), acceptingListener((r, _) => result = r))
+      if result == Closed then
+        throw channelClosedException
+
+    override def pollRead(r: Reader): Boolean = synchronized:
+      if checkClosed(canRead, r) then true
+      else if !buf.isEmpty then
+        if r.completeNow(Read(buf.head), canRead) then
+          // there are never senders in the cells
+          buf.dequeue()
+        true
+      else false
+
+    override def pollSend(src: CanSend, s: Sender): Boolean = synchronized:
+      checkClosed(src, s) || cells.matchSender(src, s) || {
+        buf += src.item
+        s.completeNow(Sent, src)
+        true
+      }
+  }
+end UnboundedChannel
 
 object Channel:
   private[async] abstract class Impl[T] extends Channel[T]:
