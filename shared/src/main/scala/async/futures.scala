@@ -12,6 +12,7 @@ import scala.annotation.unchecked.uncheckedVariance
 import java.util.concurrent.CancellationException
 import scala.annotation.tailrec
 import scala.util
+import java.util.concurrent.atomic.AtomicLong
 
 /** A cancellable future that can suspend waiting for other asynchronous sources
   */
@@ -272,6 +273,25 @@ object Future:
     def complete(result: Try[T]): Unit = myFuture.complete(result)
 
   end Promise
+
+  /** Like [[Collector]], but exposes the ability to add futures after creation. */
+  class MutableCollector[T](futures: Future[T]*) extends Collector[T](futures*):
+    /** Add a new [[Future]] into the collector. */
+    def add(future: Future[T]) = addFuture(future)
+    inline def +=(future: Future[T]) = add(future)
+  /** Collects a list of futures into a channel of futures, arriving as they finish. */
+  class Collector[T](futures: Future[T]*):
+    private val ch = UnboundedChannel[Future[T]]()
+    /** Output channels of all finished futures. */
+    val results: ReadableChannel[Future[T]] = ch
+
+    private val listener = Listener ((_, fut) =>
+      // safe, as we only attach this listener to Future[T]
+      ch.sendImmediately(fut.asInstanceOf[Future[T]]))
+
+    futures.foreach(addFuture)
+    protected final def addFuture(future: Future[T]) = future.onComplete(listener)
+  end Collector
 end Future
 
 /** TaskSchedule describes the way in which a task should be repeated. Tasks can be set to run for example every 100
