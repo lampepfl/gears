@@ -274,11 +274,6 @@ object Future:
 
   end Promise
 
-  /** Like [[Collector]], but exposes the ability to add futures after creation. */
-  class MutableCollector[T](futures: Future[T]*) extends Collector[T](futures*):
-    /** Add a new [[Future]] into the collector. */
-    def add(future: Future[T]) = addFuture(future)
-    inline def +=(future: Future[T]) = add(future)
   /** Collects a list of futures into a channel of futures, arriving as they finish. */
   class Collector[T](futures: Future[T]*):
     private val ch = UnboundedChannel[Future[T]]()
@@ -292,6 +287,12 @@ object Future:
     futures.foreach(addFuture)
     protected final def addFuture(future: Future[T]) = future.onComplete(listener)
   end Collector
+
+  /** Like [[Collector]], but exposes the ability to add futures after creation. */
+  class MutableCollector[T](futures: Future[T]*) extends Collector[T](futures*):
+    /** Add a new [[Future]] into the collector. */
+    def add(future: Future[T]) = addFuture(future)
+    inline def +=(future: Future[T]) = add(future)
 end Future
 
 /** TaskSchedule describes the way in which a task should be repeated. Tasks can be set to run for example every 100
