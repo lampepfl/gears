@@ -25,13 +25,13 @@ class ListenerBehavior extends munit.FunSuite:
     val prom2 = Promise[Unit]()
     Async.blocking:
       val raced = race(Future { prom1.future.value ; 10 }, Future { prom2.future.value ; 20 })
-      assert(!raced.poll(Listener.acceptingListener(x => fail(s"race uncomplete $x"))))
+      assert(!raced.poll(Listener.acceptingListener((x, _) => fail(s"race uncomplete $x"))))
       prom1.complete(Success(()))
       assertEquals(Async.await(raced).get, 10)
 
   test("lock two listeners"):
-    val listener1 = Listener.acceptingListener[Int](x => assertEquals(x, 1))
-    val listener2 = Listener.acceptingListener[Int](x => assertEquals(x, 2))
+    val listener1 = Listener.acceptingListener[Int]((x, _) => assertEquals(x, 1))
+    val listener2 = Listener.acceptingListener[Int]((x, _) => assertEquals(x, 2))
     assertEquals(lockBoth(Dummy, Dummy)(listener1, listener2), Locked)
     listener1.complete(1, Dummy)
     listener2.complete(2, Dummy)
@@ -57,8 +57,8 @@ class ListenerBehavior extends munit.FunSuite:
     val source1 = TSource()
     val source2 = TSource()
 
-    Async.race(source1).onComplete(Listener.acceptingListener[Int](x => assertEquals(x, 1)))
-    Async.race(source2).onComplete(Listener.acceptingListener[Int](x => assertEquals(x, 2)))
+    Async.race(source1).onComplete(Listener.acceptingListener[Int]((x, _) => assertEquals(x, 1)))
+    Async.race(source2).onComplete(Listener.acceptingListener[Int]((x, _) => assertEquals(x, 2)))
 
     assertEquals(lockBoth(source1, source2)(source1.listener.get, source2.listener.get), Locked)
     source1.completeWith(1)
@@ -68,8 +68,8 @@ class ListenerBehavior extends munit.FunSuite:
     val source1 = TSource()
     val source2 = TSource()
 
-    Async.race(source1).onComplete(Listener.acceptingListener[Int](x => assertEquals(x, 1)))
-    Async.race(source2).onComplete(Listener.acceptingListener[Int](x => assertEquals(x, 2)))
+    Async.race(source1).onComplete(Listener.acceptingListener[Int]((x, _) => assertEquals(x, 1)))
+    Async.race(source2).onComplete(Listener.acceptingListener[Int]((x, _) => assertEquals(x, 2)))
 
     assertEquals(lockBoth(source1, source2)(source2.listener.get, source1.listener.get), Locked)
     source1.completeWith(1)
@@ -80,8 +80,8 @@ class ListenerBehavior extends munit.FunSuite:
     val source2 = TSource()
 
     val race1 = Async.race(source1)
-    Async.race(Async.race(source2)).onComplete(Listener.acceptingListener[Int](x => assertEquals(x, 2)))
-    Async.race(race1).onComplete(Listener.acceptingListener[Int](x => assertEquals(x, 1)))
+    Async.race(Async.race(source2)).onComplete(Listener.acceptingListener[Int]((x, _) => assertEquals(x, 2)))
+    Async.race(race1).onComplete(Listener.acceptingListener[Int]((x, _) => assertEquals(x, 1)))
 
     assertEquals(lockBoth(source1, source2)(source1.listener.get, source2.listener.get), Locked)
     source1.completeWith(1)
@@ -92,8 +92,8 @@ class ListenerBehavior extends munit.FunSuite:
     val source2 = TSource()
 
     val race1 = Async.race(source1)
-    Async.race(Async.race(source2)).onComplete(Listener.acceptingListener[Int](x => assertEquals(x, 2)))
-    Async.race(race1).onComplete(Listener.acceptingListener[Int](x => assertEquals(x, 1)))
+    Async.race(Async.race(source2)).onComplete(Listener.acceptingListener[Int]((x, _) => assertEquals(x, 2)))
+    Async.race(race1).onComplete(Listener.acceptingListener[Int]((x, _) => assertEquals(x, 1)))
 
     assertEquals(lockBoth(source2, source1)(source2.listener.get, source1.listener.get), Locked)
     source1.completeWith(1)

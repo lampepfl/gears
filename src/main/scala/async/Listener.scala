@@ -54,13 +54,13 @@ trait Listener[-T]:
 
 object Listener:
   /** A simple [[Listener]] that always accepts the item and sends it to the consumer. */
-  def acceptingListener[T](consumer: T => Unit) =
+  inline def acceptingListener[T](inline consumer: (T, Source[T]) => Unit) =
     new Listener[T]:
       val lock = null
-      def complete(data: T, source: Source[T]) = consumer(data)
+      def complete(data: T, source: Source[T]) = consumer(data, source)
 
   /** Returns a simple [[Listener]] that always accepts the item and sends it to the consumer. */
-  inline def apply[T](consumer: T => Unit): Listener[T] = acceptingListener(consumer)
+  inline def apply[T](consumer: (T, Source[T]) => Unit): Listener[T] = acceptingListener(consumer)
 
   /** A special class of listener that forwards the inner listener through the given source.
     * For purposes of [[Async.Source.dropListener]] these listeners are compared for equality

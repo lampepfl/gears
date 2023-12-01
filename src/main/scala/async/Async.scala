@@ -28,7 +28,7 @@ object Async:
     override def await[T](src: Async.Source[T]): T =
       src.poll().getOrElse:
         var result: Option[T] = None
-        src onComplete Listener.acceptingListener: t =>
+        src onComplete Listener.acceptingListener: (t, _) =>
           lock.lock()
           try
             result = Some(t)
@@ -112,7 +112,7 @@ object Async:
     /** Utility method for direct polling. */
     def poll(): Option[T] =
       var resultOpt: Option[T] = None
-      poll(Listener.acceptingListener { x => resultOpt = Some(x) })
+      poll(Listener.acceptingListener { (x, _) => resultOpt = Some(x) })
       resultOpt
 
   end Source
