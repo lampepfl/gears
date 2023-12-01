@@ -72,7 +72,7 @@ object SyncChannel:
     private var isClosed = false
 
     private def testListenerValuePair(l: Listener[Try[T]], v: T): Boolean =
-      if (l.completeNow(Success(v))) {
+      if (l.completeNow(Success(v), canRead)) {
         pendingReads -= l
         obj = None
         val f = senderAwaitingRead.get
@@ -84,13 +84,13 @@ object SyncChannel:
       def poll(k: Listener[Try[T]]): Boolean =
         SyncChannel.this.synchronized:
           if (isClosed)
-            k.completeNow(Failure(channelClosedException))
+            k.completeNow(Failure(channelClosedException), canRead)
             true
           else obj.isDefined && testListenerValuePair(k, obj.get) // TODO returns false if k fails to lock
 
       def addListener(k: Listener[Try[T]]): Unit =
         SyncChannel.this.synchronized:
-          if (isClosed) k.completeNow(Failure(channelClosedException))
+          if (isClosed) k.completeNow(Failure(channelClosedException), canRead)
           pendingReads += k
           if (obj.isDefined) testListenerValuePair(k, obj.get)
 
@@ -159,7 +159,7 @@ object SyncChannel:
           f()
           senderAwaitingRead = None
         }
-        pendingReads.foreach(_.completeNow(Failure(channelClosedException)))
+        pendingReads.foreach(_.completeNow(Failure(channelClosedException), canRead))
         pendingReads.clear()
 
 end SyncChannel
@@ -177,7 +177,7 @@ object BufferedChannel:
     private val pendingReads = ArrayBuffer[Listener[Try[T]]]()
 
     private def testListenerValuePair(l: Listener[Try[T]], v: T): Boolean =
-      if (l.completeNow(Success(v))) {
+      if (l.completeNow(Success(v), canRead)) {
         buffer(start) = null
         start = (start + 1) % size
         pendingReads -= l
@@ -205,13 +205,13 @@ object BufferedChannel:
       def poll(k: Listener[Try[T]]): Boolean =
         BufferedChannel.this.synchronized:
           if (isClosed)
-            k.completeNow(Failure(channelClosedException))
+            k.completeNow(Failure(channelClosedException), canRead)
             true
           else flushListeners() // TODO include k in flushing process
 
       def addListener(k: Listener[Try[T]]): Unit =
         BufferedChannel.this.synchronized:
-          if (isClosed) k.completeNow(Failure(channelClosedException))
+          if (isClosed) k.completeNow(Failure(channelClosedException), canRead)
           else {
             pendingReads += k
             flushListeners()
@@ -242,7 +242,7 @@ object BufferedChannel:
     def close(): Unit =
       BufferedChannel.this.synchronized:
         isClosed = true
-        for (r <- pendingReads) r.completeNow(Failure(channelClosedException))
+        for (r <- pendingReads) r.completeNow(Failure(channelClosedException), canRead)
         pendingReads.clear()
 
 end BufferedChannel

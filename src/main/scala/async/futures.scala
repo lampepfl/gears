@@ -49,7 +49,7 @@ object Future:
 
     def poll(k: Listener[Try[T]]): Boolean =
       if hasCompleted then
-        k.completeNow(result)
+        k.completeNow(result, this)
         true
       else false
 
@@ -88,7 +88,7 @@ object Future:
           val ws = waiting.toList
           waiting.clear()
           ws
-      for listener <- toNotify do listener.completeNow(result)
+      for listener <- toNotify do listener.completeNow(result, this)
 
   end CoreFuture
 
@@ -130,7 +130,7 @@ object Future:
         src.poll().getOrElse:
           val cancellable = CancelSuspension()
           val res = ac.support.suspend[Try[U], Unit](k =>
-            val listener = Listener.acceptingListener[U]: x =>
+            val listener = Listener.acceptingListener[U]: (x, _) =>
               val completedBefore = cancellable.complete()
               if !completedBefore then
                 ac.support.resumeAsync(k)(Success(x))

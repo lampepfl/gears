@@ -42,7 +42,7 @@ class StartableTimer(val millis: Long) extends Async.OriginalSource[TimerRang], 
                     state = TimerState.RangAlready
                   case _ =>
                     toNotify = List()
-              for listener <- toNotify do listener.completeNow(true)
+              for listener <- toNotify do listener.completeNow(true, this)
             state = TimerState.Ticking(f)
 
     def cancel(): Unit =
@@ -54,14 +54,14 @@ class StartableTimer(val millis: Long) extends Async.OriginalSource[TimerRang], 
             val ws = waiting.toList
             waiting.clear()
             ws
-          for listener <- toNotify do listener.completeNow(false)
+          for listener <- toNotify do listener.completeNow(false, this)
       state = TimerState.Cancelled
 
     def poll(k: Listener[TimerRang]): Boolean =
       state match
         case TimerState.Ready | TimerState.Ticking(_) => false
-        case TimerState.RangAlready => k.completeNow(true) ; true
-        case TimerState.Cancelled => k.completeNow(false) ; true
+        case TimerState.RangAlready => k.completeNow(true, this) ; true
+        case TimerState.Cancelled => k.completeNow(false, this) ; true
 
     def addListener(k: Listener[TimerRang]): Unit = synchronized:
       waiting += k

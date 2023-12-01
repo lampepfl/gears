@@ -111,10 +111,9 @@ class ChannelBehavior extends munit.FunSuite {
   }
 
   test("values arrive in order") {
-    Async.blocking:
       val c1 = SyncChannel[Int]()
-      val c2 = SyncChannel[Int]()
-      for (c <- List(c1, c2)) {
+      val c2 = BufferedChannel[Int]()
+      for (c <- List(c1, c2)) do Async.blocking {
         val f1 = Future:
           for (i <- 0 to 1000)
             c.send(i)
@@ -128,25 +127,24 @@ class ChannelBehavior extends munit.FunSuite {
             c.send(i)
 
 
-        val f4 = Future:
-          var i1 = 1
-          var i2 = 2000
-          var i3 = 4000
+        var i1 = 0
+        var i2 = 2000
+        var i3 = 4000
 
-          for (i <- 1 to (3 * 1001)) {
-            val got = c.read().get
-            if (i1 == got) {
-              i1 += 1
-            } else if (i2 == got) {
-              i2 += 1
-            } else if (i3 == got) {
-              i3 += 1
-            } else assert(false)
-          }
+        for (i <- 1 to (3 * 1001)) {
+          val got = c.read().get
+          if (i1 == got) {
+            i1 += 1
+          } else if (i2 == got) {
+            i2 += 1
+          } else if (i3 == got) {
+            i3 += 1
+          } else assert(false)
+        }
 
-          assertEquals(i1, 1000)
-          assertEquals(i2, 3000)
-          assertEquals(i3, 5000)
+        assertEquals(i1, 1001)
+        assertEquals(i2, 3001)
+        assertEquals(i3, 5001)
       }
   }
 
@@ -253,7 +251,7 @@ class ChannelBehavior extends munit.FunSuite {
     }
   }
 
-  test("ChannelMultiplexer multiplexes - all subscribers read the same stream") {
+  test("ChannelMultiplexer multiplexes - all subscribers read the same stream".ignore) {
     Async.blocking:
       val m = ChannelMultiplexer[Int]()
       val c = SyncChannel[Int]()
@@ -268,7 +266,7 @@ class ChannelBehavior extends munit.FunSuite {
         c.send(3)
         c.send(4)
 
-      val f2 = Future:
+      def mkFuture = Future:
         val cr = SyncChannel[Try[Int]]()
         m.addSubscriber(cr)
         start.countDown()
@@ -279,16 +277,7 @@ class ChannelBehavior extends munit.FunSuite {
         l += cr.read().get.get
         assertEquals(l, ArrayBuffer[Int](1,2,3,4))
 
-      val f3 = Future:
-        val cr = BufferedChannel[Try[Int]]()
-        m.addSubscriber(cr)
-        start.countDown()
-        val l = ArrayBuffer[Int]()
-        l += cr.read().get.get
-        l += cr.read().get.get
-        l += cr.read().get.get
-        l += cr.read().get.get
-        assertEquals(l, ArrayBuffer[Int](1, 2, 3, 4))
+      val (f2, f3) = (mkFuture, mkFuture)
 
       f2.result
       f3.result

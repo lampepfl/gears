@@ -3,6 +3,8 @@ import java.util.concurrent.atomic.AtomicBoolean
 import scala.collection.mutable
 import java.util.concurrent.locks.ReentrantLock
 import java.util.concurrent.atomic.AtomicLong
+import gears.async.Listener.{withLock, ListenerLockWrapper}
+import gears.async.Listener.NumberedLock
 
 /** A context that allows to suspend waiting for asynchronous data sources
  */
@@ -26,7 +28,7 @@ object Async:
     override def await[T](src: Async.Source[T]): T =
       src.poll().getOrElse:
         var result: Option[T] = None
-        src onComplete Listener.acceptingListener: t =>
+        src onComplete Listener.acceptingListener: (t, _) =>
           lock.lock()
           try
             result = Some(t)
@@ -110,7 +112,7 @@ object Async:
     /** Utility method for direct polling. */
     def poll(): Option[T] =
       var resultOpt: Option[T] = None
-      poll(Listener.acceptingListener { x => resultOpt = Some(x) })
+      poll(Listener.acceptingListener { (x, _) => resultOpt = Some(x) })
       resultOpt
 
   end Source
@@ -136,10 +138,9 @@ object Async:
         selfSrc =>
         def transform(k: Listener[U]) =
           new Listener[T]:
-            val topLock = k.topLock // TODO wrap for correcting source
+            val lock = withLock(k) { inner => new ListenerLockWrapper(inner, selfSrc ) }
             def complete(data: T, source: Async.Source[T]) =
               k.complete(f(data), selfSrc)
-            def release(to: Listener.ReleaseBoundary) = k
 
         def poll(k: Listener[U]): Boolean =
           src.poll(transform(k))
@@ -150,108 +151,59 @@ object Async:
 
   /** Pass first result from any of `sources` to the continuation */
   def race[T](sources: Source[T]*): Source[T] =
-    new Source[T] {
+    new Source[T] { selfSrc =>
 
       def poll(k: Listener[T]): Boolean =
         val it = sources.iterator
         var found = false
 
-        val listener = new Listener[T]:
-          val topLock =
-            if k.topLock != null then
-              new Listener.TopLock:
-                val selfNumber = k.topLock.selfNumber
-                def lockSelf(source: Async.Source[?]) =
-                  k.topLock.lockSelf()
-            else null
-
-          def complete(data: T, source: Async.Source[T]): Unit
-          def release(to: Listener.ReleaseBoundary) =
-            /* If release is called with a non-null boundary,
-               tryLock has been called but failed, so the source has -
-               to the best of its knowledge - an item available.
-               But the upstream listener k refuses to take any ->
-                 we assume there would have been one.
-            */
-            if to != null then found = true
-            k
-
         while it.hasNext && !found do
-          it.next.poll(listener)
+          found = it.next.poll(k)
         found
 
-      // def poll(k: Listener[T]): Boolean =
-      //   val it = sources.iterator
-      //   var found = false
-
-      //   val listener = new Listener[T]:
-      //     def tryLock() =
-      //       val result = k.tryLock()
-      //       // If tryLock is called, the source has - to the best of its
-      //       // knowledge - an item available. But the upstream listener k
-      //       // refuses to take any -> we assume there would have been one.
-      //       if result == Listener.Gone then found = true
-      //       result
-
-      //     def release(until: Listener.ReleaseBoundary) = k
-
-      //     def complete(data: T) =
-      //       k.complete(data)
-      //       found = true
-      //   end listener
-
-      //   while it.hasNext && !found do
-      //     it.next.poll(listener)
-      //   found
-
       def onComplete(k: Listener[T]): Unit =
-        val listener = new Listener.ForwardingListener[T](this, k) with Listener.LockingListener { self =>
-          var foundBefore = false
+        val listener = new Listener.ForwardingListener[T](this, k) with NumberedLock with Listener.ListenerLock with Listener.PartialLock { self =>
+          val lock = self
 
-          val listenerPartial = new Listener.NumberedSublock {
-            def number: Long = self.number
-            def tryLock() =
-              self.lock()
-              val result =
-                if foundBefore then
-                  self.unlock()
-                  Listener.Gone
-                else
-                  val result = k.tryLock()
-                  if result == Listener.Gone then self.unlock()
-                  result
-              end result
-              // as soon as we once return None, we are completed -> drop everywhere
-              if result == Listener.Gone then sources.foreach(_.dropListener(self))
-              result
-          } // end listenerPartial: NumberedSublock
+          var found = false
+          inline def heldLock = if k.lock == null then Listener.Locked else this
 
-          def tryLock() =
-            if foundBefore then Listener.Gone
-            else listenerPartial
+          /* == PartialLock implementation == */
+          // Note that this is bogus if k.lock is null, but we'll never use it if it is.
+          val nextNumber = if k.lock == null then -1 else k.lock.selfNumber
+          def lockNext() =
+            val res = k.lock.lockSelf(selfSrc)
+            if res == Listener.Gone then
+              found = true // This is always false before this, since PartialLock is only returned when found is false
+              sources.foreach(_.dropListener(this)) // same as dropListener(k), but avoids an allocation
+            res
 
-          def release(until: Listener.ReleaseBoundary) =
-            if until != listenerPartial then
-              self.unlock()
-              k
-            else null
+          /* == ListenerLock implementation == */
+          val selfNumber = self.number
+          def lockSelf(src: Async.Source[?]) =
+            if found then Listener.Gone
+            else
+              self.acquireLock()
+              if found then
+                self.releaseLock()
+                // no cleanup needed here, since we have done this by an earlier `complete` or `lockNext`
+                Listener.Gone
+              else heldLock
+          def release(until: Listener.LockMarker) =
+            self.releaseLock()
+            if until == heldLock then null else k.lock
 
-          def complete(data: T) =
-            k.completeNow(data)
-            foundBefore = true
-            self.unlock()
-            sources.foreach(_.dropListener(self))
+          def complete(item: T, src: Async.Source[T]) =
+            found = true
+            self.releaseLock()
+            sources.foreach(s => if s != src then s.dropListener(self))
+            k.complete(item, selfSrc)
         } // end listener
 
         sources.foreach(_.onComplete(listener))
 
       def dropListener(k: Listener[T]): Unit =
-        val listener = new Listener.ForwardingListener[T](this, k):
-          def tryLock() = ???
-          def complete(data: T) = ???
-          def release(until: Listener.ReleaseBoundary) = ???
-        // not to be called, we need the listener only for its
-        // hashcode and equality test.
+        val listener = Listener.ForwardingListener.empty(this, k)
         sources.foreach(_.dropListener(listener))
 
     }
