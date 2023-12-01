@@ -10,7 +10,7 @@ import java.util.concurrent.locks.ReentrantLock
   * and can be created by [[Listener.apply]] or [[Listener.acceptingListener]].
   *
   * However, should the listener want to attempt synchronization, it has to
-  * expose some locking-related interfaces. See `lock` and `release`.
+  * expose some locking-related interfaces. See `lock`.
   */
 trait Listener[-T]:
   import Listener._
@@ -114,7 +114,7 @@ object Listener:
   trait ListenerLock:
     /** The assigned number of the lock.
       * If the listener holds inner listeners underneath that utilizes locks,
-      * it is **required** that [[selfNumber]] must be larger than any [[PartialLock.nextNumber]] of
+      * it is **required** that [[selfNumber]] must be greater or equal any [[PartialLock.nextNumber]] of
       * any returned [[PartialLock]]s.
       */
     val selfNumber: Long

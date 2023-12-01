@@ -5,7 +5,9 @@ import gears.async._
 import Listener.{Locked, ListenerLock, Gone, PartialLock, LockMarker, LockResult}
 import scala.annotation.tailrec
 
-/** Two listeners being locked at the same time, while holding the same lock on their listener chains. */
+/** Two listeners being locked at the same time, while holding the same lock on their listener chains.
+  * This happens if you attempt to lockBoth two listeners with a common downstream listener, e.g., two derived listeners of the same race.
+  */
 case class ConflictingLocksException(base: (Listener[?], Listener[?]), conflict: ((ListenerLock | PartialLock), (ListenerLock | PartialLock))) extends Exception
 
 /** Attempt to lock both listeners belonging to possibly different sources at the same time.
