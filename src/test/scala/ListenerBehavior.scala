@@ -245,6 +245,48 @@ class ListenerBehavior extends munit.FunSuite:
         assertEquals(base, (l, l))
         assertEquals(conflict, (l.lock, l.lock))
 
+  test("unlocking midway releases locks"):
+    val source1 = TSource()
+    Async.race(source1).onComplete(NumberedTestListener(false, false, 1))
+    val wrapped = source1.listener.get
+
+    Thread.startVirtualThread: () =>
+      val result = wrapped.lock.lockSelf(source1).asInstanceOf[Listener.PartialLock]
+      wrapped.releaseLock(result)
+    .join()
+
+    assert(wrapped.completeNow(1, source1))
+
+  test("failing downstream listener is dropped in race"):
+    val source1 = TSource()
+    val source2 = TSource()
+    val source3 = TSource()
+    Async.race(Async.race(source1, source2), source3).onComplete(NumberedTestListener(false, true, 1))
+    assert(source1.listener.isDefined)
+    assert(source2.listener.isDefined)
+    assert(source3.listener.isDefined)
+
+    // downstream listener fails -> should fail -> should drop listener everywhere
+    assert(!source1.listener.get.completeNow(1, source1))
+    assert(source1.listener.isEmpty)
+    assert(source2.listener.isEmpty)
+    assert(source3.listener.isEmpty)
+
+  test("succeeding downstream listener is dropped in race"):
+    val source1 = TSource()
+    val source2 = TSource()
+    val source3 = TSource()
+    Async.race(Async.race(source1, source2), source3).onComplete(NumberedTestListener(false, false, 1))
+    assert(source1.listener.isDefined)
+    assert(source2.listener.isDefined)
+    assert(source3.listener.isDefined)
+
+    // downstream listener succeeds -> should cleanup, i.e., drop listener everywhere
+    assert(source1.listener.get.completeNow(1, source1))
+    // do not check source1 because it is assumed to drop the listener itself
+    assert(source2.listener.isEmpty)
+    assert(source3.listener.isEmpty)
+
 def lockChain[T](buf: Buffer[Long], inner: Listener[T])(numbers: Long*) =
   def wrap(num: Long, inner: Listener[T]) = new Listener[T] {
     override val lock: ListenerLock | Null = new ListenerLock {
