@@ -237,6 +237,13 @@ class ListenerBehavior extends munit.FunSuite:
       case ConflictingLocksException(base, conflict) =>
         assertEquals(base, (l1, l))
         assertEquals(conflict, (k1, l.lock))
+    try
+      lockBoth(s1, s2)(l, l)
+      ???
+    catch
+      case ConflictingLocksException(base, conflict) =>
+        assertEquals(base, (l, l))
+        assertEquals(conflict, (l.lock, l.lock))
 
 def lockChain[T](buf: Buffer[Long], inner: Listener[T])(numbers: Long*) =
   def wrap(num: Long, inner: Listener[T]) = new Listener[T] {
