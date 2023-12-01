@@ -1,49 +1,54 @@
-package concurrent
+package gears.async
 import java.util.concurrent.atomic.AtomicBoolean
 import scala.collection.mutable
-import scala.concurrent.ExecutionContext
+import java.util.concurrent.locks.ReentrantLock
+import java.util.concurrent.atomic.AtomicLong
+import gears.async.Listener.{withLock, ListenerLockWrapper}
+import gears.async.Listener.NumberedLock
 
 /** A context that allows to suspend waiting for asynchronous data sources
  */
-trait Async:
-
+trait Async(using val support: AsyncSupport, val scheduler: support.Scheduler):
   /** Wait for completion of async source `src` and return the result */
   def await[T](src: Async.Source[T]): T
 
-  /** The execution context for this Async */
-  def scheduler: ExecutionContext
-
   /** The cancellation group for this Async */
-  def group: CancellationGroup
+  def group: CompletionGroup
 
   /** An Async of the same kind as this one, with a new cancellation group */
-  def withGroup(group: CancellationGroup): Async
+  def withGroup(group: CompletionGroup): Async
 
 object Async:
 
-  /** An implementation of Async that blocks the running thread when waiting */
-  private class Blocking(val group: CancellationGroup)(using val scheduler: ExecutionContext) extends Async:
+  private class Blocking(val group: CompletionGroup)(using support: AsyncSupport, scheduler: support.Scheduler) extends Async(using support, scheduler):
+    private val lock = ReentrantLock()
+    private val condVar = lock.newCondition()
 
-    def await[T](src: Source[T]): T =
+    /** Wait for completion of async source `src` and return the result */
+    override def await[T](src: Async.Source[T]): T =
       src.poll().getOrElse:
         var result: Option[T] = None
-        src.onComplete: x =>
-          synchronized:
-            result = Some(x)
-            notify()
-          true
-        synchronized:
-          while result.isEmpty do wait()
-          result.get
+        src onComplete Listener.acceptingListener: (t, _) =>
+          lock.lock()
+          try
+            result = Some(t)
+            condVar.signalAll()
+          finally lock.unlock()
 
-    def withGroup(group: CancellationGroup) = Blocking(group)
-  end Blocking
+        lock.lock()
+        try
+          while result.isEmpty do condVar.await()
+          result.get
+        finally lock.unlock()
+
+    /** An Async of the same kind as this one, with a new cancellation group */
+    override def withGroup(group: CompletionGroup): Async = Blocking(group)
 
   /** Execute asynchronous computation `body` on currently running thread.
    *  The thread will suspend when the computation waits.
    */
-  def blocking[T](body: Async ?=> T)(using ExecutionContext): T =
-    body(using Blocking(CancellationGroup.Unlinked))
+  def blocking[T](body: Async ?=> T)(using support: AsyncSupport, scheduler: support.Scheduler): T =
+    group(body)(using Blocking(CompletionGroup.Unlinked))
 
   /** The currently executing Async context */
   inline def current(using async: Async): Async = async
@@ -52,32 +57,41 @@ object Async:
   inline def await[T](src: Source[T])(using async: Async): T = async.await(src)
 
   def group[T](body: Async ?=> T)(using async: Async): T =
-    val newGroup = CancellationGroup().link()
-    try body(using async.withGroup(newGroup))
-    finally newGroup.cancel()
+    withNewCompletionGroup(CompletionGroup(async.group.handleCompletion).link())(body)
 
-  /** A function `T => Boolean` whose lineage is recorded by its implementing
-   *  classes. The Listener function accepts values of type `T` and returns
-   *  `true` iff the value was consumed by an async block.
-   */
-  trait Listener[-T] extends (T => Boolean)
+  def withCompletionHandler[T](handler: Cancellable => Async ?=> Unit)(body: Async ?=> T)(using async: Async): T =
+    val combined = (c: Cancellable) => (async: Async) ?=>
+      handler(c)
+      async.group.handleCompletion(c)
+    withNewCompletionGroup(CompletionGroup(combined).link())(body)
 
-  /** A listener for values that are processed by the given source `src` and
-   *  that are demanded by the continuation listener `continue`.
+  /** Runs a body within another completion group. When the body returns, the
+   *  group is cancelled and its completion awaited with the `Unlinked` group.
    */
-  abstract case class ForwardingListener[T](src: Source[?], continue: Listener[?]) extends Listener[T]
+  private[async] def withNewCompletionGroup[T](group: CompletionGroup)(body: Async ?=> T)(using async: Async): T =
+    val completionAsync =
+      if CompletionGroup.Unlinked == async.group
+      then async
+      else async.withGroup(CompletionGroup.Unlinked)
+
+    try body(using async.withGroup(group))
+    finally
+      group.cancel()
+      group.waitCompletion()(using completionAsync)
 
   /** An asynchronous data source. Sources can be persistent or ephemeral.
    *  A persistent source will always pass same data to calls of `poll and `onComplete`.
-   *  An ephememral source can pass new data in every call.
+   *  An ephemeral source can pass new data in every call.
    *  An example of a persistent source is `Future`.
    *  An example of an ephemeral source is `Channel`.
    */
   trait Source[+T]:
 
-    /** If data is available at present, pass it to function `k`
-     *  and return the result of this call. Otherwise return false.
-     *  `k` returns true iff the data was consumed in an async block.
+    /** Check whether data is available at present and pass it to k if so.
+     *  If no element is available, does not lock k and returns false immediately.
+     *  If there is (or may be) data available, the listener is locked and if
+     *  it fails, true is returned to signal this source's general availability.
+     *  If locking k succeeds, only return true iff k's complete is called.
      *  Calls to `poll` are always synchronous.
      */
     def poll(k: Listener[T]): Boolean
@@ -91,20 +105,21 @@ object Async:
 
     /** Signal that listener `k` is dead (i.e. will always return `false` from now on).
      *  This permits original, (i.e. non-derived) sources like futures or channels
-     *  to drop the  listener from their waiting sets.
+     *  to drop the listener from their waiting sets.
      */
     def dropListener(k: Listener[T]): Unit
 
-    /** Utililty method for direct polling. */
+    /** Utility method for direct polling. */
     def poll(): Option[T] =
       var resultOpt: Option[T] = None
-      poll { x => resultOpt = Some(x); true }
+      poll(Listener.acceptingListener { (x, _) => resultOpt = Some(x) })
       resultOpt
 
   end Source
 
-  /** An original source has a standard definition of `onCopmplete` in terms
-   *  of `poll` and `addListener`.
+  /** An original source has a standard definition of `onComplete` in terms
+   *  of `poll` and `addListener`. Implementations should be the resource owner to
+   *  handle listener queue and completion using an object monitor on the instance.
    */
   abstract class OriginalSource[+T] extends Source[T]:
 
@@ -116,70 +131,82 @@ object Async:
 
   end OriginalSource
 
-  /** A source that transforms an original source in some way */
-  abstract class DerivedSource[T, U](val original: Source[T]) extends Source[U]:
-
-    /** Handle a value `x` passed to the original source by possibly
-     *  invokiong the continuation for this source.
-     */
-    protected def listen(x: T, k: Listener[U]): Boolean
-
-    private def transform(k: Listener[U]): Listener[T] =
-      new ForwardingListener[T](this, k):
-        def apply(x: T): Boolean = listen(x, k)
-
-    def poll(k: Listener[U]): Boolean =
-      original.poll(transform(k))
-    def onComplete(k: Listener[U]): Unit =
-      original.onComplete(transform(k))
-    def dropListener(k: Listener[U]): Unit =
-      original.dropListener(transform(k))
-
-  end DerivedSource
-
   extension [T](src: Source[T])
-
     /** Pass on data transformed by `f` */
-    def map[U](f: T => U): Source[U]  =
-      new DerivedSource[T, U](src):
-        def listen(x: T, k: Listener[U]) = k(f(x))
+    def map[U](f: T => U) =
+      new Source[U]:
+        selfSrc =>
+        def transform(k: Listener[U]) =
+          new Listener[T]:
+            val lock = withLock(k) { inner => new ListenerLockWrapper(inner, selfSrc ) }
+            def complete(data: T, source: Async.Source[T]) =
+              k.complete(f(data), selfSrc)
 
-    /** Pass on only data matching the predicate `p` */
-    def filter(p: T => Boolean): Source[T] =
-      new DerivedSource[T, T](src):
-        def listen(x: T, k: Listener[T]) = p(x) && k(x)
+        def poll(k: Listener[U]): Boolean =
+          src.poll(transform(k))
+        def onComplete(k: Listener[U]): Unit =
+          src.onComplete(transform(k))
+        def dropListener(k: Listener[U]): Unit =
+          src.dropListener(transform(k))
 
   /** Pass first result from any of `sources` to the continuation */
   def race[T](sources: Source[T]*): Source[T] =
-    new Source[T]:
+    new Source[T] { selfSrc =>
 
       def poll(k: Listener[T]): Boolean =
         val it = sources.iterator
         var found = false
+
         while it.hasNext && !found do
-          it.next.poll: x =>
-            found = k(x)
-            found
+          found = it.next.poll(k)
         found
 
       def onComplete(k: Listener[T]): Unit =
-        val listener = new ForwardingListener[T](this, k):
-          var foundBefore = false
-          def continueIfFirst(x: T): Boolean = synchronized:
-            if foundBefore then false else { foundBefore = k(x); foundBefore }
-          def apply(x: T): Boolean =
-            val found = continueIfFirst(x)
-            if found then sources.foreach(_.dropListener(this))
-            found
+        val listener = new Listener.ForwardingListener[T](this, k) with NumberedLock with Listener.ListenerLock with Listener.PartialLock { self =>
+          val lock = self
+
+          var found = false
+          inline def heldLock = if k.lock == null then Listener.Locked else this
+
+          /* == PartialLock implementation == */
+          // Note that this is bogus if k.lock is null, but we'll never use it if it is.
+          val nextNumber = if k.lock == null then -1 else k.lock.selfNumber
+          def lockNext() =
+            val res = k.lock.lockSelf(selfSrc)
+            if res == Listener.Gone then
+              found = true // This is always false before this, since PartialLock is only returned when found is false
+              sources.foreach(_.dropListener(this)) // same as dropListener(k), but avoids an allocation
+            res
+
+          /* == ListenerLock implementation == */
+          val selfNumber = self.number
+          def lockSelf(src: Async.Source[?]) =
+            if found then Listener.Gone
+            else
+              self.acquireLock()
+              if found then
+                self.releaseLock()
+                // no cleanup needed here, since we have done this by an earlier `complete` or `lockNext`
+                Listener.Gone
+              else heldLock
+          def release(until: Listener.LockMarker) =
+            self.releaseLock()
+            if until == heldLock then null else k.lock
+
+          def complete(item: T, src: Async.Source[T]) =
+            found = true
+            self.releaseLock()
+            sources.foreach(s => if s != src then s.dropListener(self))
+            k.complete(item, selfSrc)
+        } // end listener
+
         sources.foreach(_.onComplete(listener))
 
       def dropListener(k: Listener[T]): Unit =
-        val listener = new ForwardingListener[T](this, k):
-          def apply(x: T): Boolean = ???
-            // not to be called, we need the listener only for its
-            // hashcode and equality test.
+        val listener = Listener.ForwardingListener.empty(this, k)
         sources.foreach(_.dropListener(listener))
 
+    }
   end race
 
   /** If left (respectively, right) source succeeds with `x`, pass `Left(x)`,
@@ -189,4 +216,3 @@ object Async:
     race(src1.map(Left(_)), src2.map(Right(_)))
 
 end Async
-

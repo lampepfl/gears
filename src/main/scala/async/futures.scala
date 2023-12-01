@@ -1,13 +1,17 @@
-package concurrent
+package gears.async
 
-import scala.collection.mutable, mutable.ListBuffer
-import fiberRuntime.util.*
-import fiberRuntime.boundary
+import TaskSchedule.ExponentialBackoff
+import AsyncOperations.sleep
+
+import scala.collection.mutable
+import mutable.ListBuffer
+
 import scala.compiletime.uninitialized
-import scala.util.{Try, Success, Failure}
+import scala.util.{Failure, Success, Try}
 import scala.annotation.unchecked.uncheckedVariance
 import java.util.concurrent.CancellationException
-import scala.concurrent.ExecutionContext
+import scala.annotation.tailrec
+import scala.util
 
 /** A cancellable future that can suspend waiting for other asynchronous sources
  */
@@ -39,17 +43,20 @@ object Future:
     @volatile protected var hasCompleted: Boolean = false
     protected var cancelRequest = false
     private var result: Try[T] = uninitialized // guaranteed to be set if hasCompleted = true
-    private val waiting: mutable.Set[Try[T] => Boolean] = mutable.Set()
+    private val waiting: mutable.Set[Listener[Try[T]]] = mutable.Set()
 
     // Async.Source method implementations
 
-    def poll(k: Async.Listener[Try[T]]): Boolean =
-      hasCompleted && k(result)
+    def poll(k: Listener[Try[T]]): Boolean =
+      if hasCompleted then
+        k.completeNow(result, this)
+        true
+      else false
 
-    def addListener(k: Async.Listener[Try[T]]): Unit = synchronized:
+    def addListener(k: Listener[Try[T]]): Unit = synchronized:
       waiting += k
 
-    def dropListener(k: Async.Listener[Try[T]]): Unit = synchronized:
+    def dropListener(k: Listener[Try[T]]): Unit = synchronized:
       waiting -= k
 
     // Cancellable method implementations
@@ -59,7 +66,9 @@ object Future:
 
     // Future method implementations
 
-    def result(using async: Async): Try[T] = async.await(this)
+    def result(using async: Async): Try[T] =
+      val r = async.await(this)
+      if cancelRequest then Failure(new CancellationException()) else r
 
     /** Complete future with result. If future was cancelled in the meantime,
      *  return a CancellationException failure instead.
@@ -79,7 +88,7 @@ object Future:
           val ws = waiting.toList
           waiting.clear()
           ws
-      for listener <- toNotify do listener(result)
+      for listener <- toNotify do listener.completeNow(result, this)
 
   end CoreFuture
 
@@ -88,62 +97,68 @@ object Future:
    */
   private class RunnableFuture[+T](body: Async ?=> T)(using ac: Async) extends CoreFuture[T]:
 
-    def checkCancellation() =
-      if cancelRequest then throw CancellationException()
+    private var innerGroup: CompletionGroup = CompletionGroup()
 
-    /** a handler for Async */
-    private def async(body: Async ?=> Unit): Unit =
-      class FutureAsync(val group: CancellationGroup)(using val scheduler: ExecutionContext) extends Async:
+    private def checkCancellation(): Unit =
+      if cancelRequest then throw new CancellationException()
 
-        /** Await a source first by polling it, and, if that fails, by suspending
-         *  in a onComplete call.
-         */
-        def await[T](src: Async.Source[T]): T =
-          checkCancellation()
-          src.poll().getOrElse:
-            try
-              src.poll().getOrElse:
-                sleepABit()
-                log(s"suspending ${threadName.get()}")
-                var result: Option[T] = None
-                src.onComplete: x =>
-                  synchronized:
-                    result = Some(x)
-                    notify()
-                  true
-                sleepABit()
-                synchronized:
-                  log(s"suspended ${threadName.get()}")
-                  while result.isEmpty do wait()
-                  result.get
-              /* With full continuations, the try block can be written more simply as follows:
+    private class FutureAsync(val group: CompletionGroup)(using label: ac.support.Label[Unit]) extends Async(using ac.support, ac.scheduler):
 
-                suspend[T, Unit]: k =>
-                  src.onComplete: x =>
-                    scheduler.schedule: () =>
-                      k.resume(x)
-                  true
-              */
-            finally checkCancellation()
+      /** Await a source first by polling it, and, if that fails, by suspending
+       *  in a onComplete call.
+       */
+      override def await[U](src: Async.Source[U]): U =
+        class CancelSuspension extends Cancellable:
+          var suspension: ac.support.Suspension[Try[U], Unit] = uninitialized
+          var listener: Listener[U] = uninitialized
+          var completed = false
 
-        def withGroup(group: CancellationGroup) = FutureAsync(group)
+          def complete() = synchronized:
+            val completedBefore = completed
+            completed = true
+            completedBefore
 
-      sleepABit()
-      try body(using FutureAsync(ac.group)(using ac.scheduler))
-      finally log(s"finished ${threadName.get()} ${Thread.currentThread.getId()}")
-      /** With continuations, this becomes:
+          override def cancel() =
+            val completedBefore = complete()
+            if !completedBefore then
+              src.dropListener(listener)
+              ac.support.resumeAsync(suspension)(Failure(new CancellationException()))
 
-      boundary [Unit]:
-        body(using FutureAsync())
-      */
-    end async
+        if group.isCancelled then
+          throw new CancellationException()
 
-    ac.scheduler.execute: () =>
-      async:
-        link()
-        Async.group:
-          complete(Try(body))
-        unlink()
+        src.poll().getOrElse:
+          val cancellable = CancelSuspension()
+          val res = ac.support.suspend[Try[U], Unit](k =>
+            val listener = Listener.acceptingListener[U]: (x, _) =>
+              val completedBefore = cancellable.complete()
+              if !completedBefore then
+                ac.support.resumeAsync(k)(Success(x))
+            cancellable.suspension = k
+            cancellable.listener = listener
+            src.onComplete(listener)
+            cancellable.link(group) // may resume + remove listener immediately
+          )
+          cancellable.unlink()
+          res.get
+
+      override def withGroup(group: CompletionGroup) = FutureAsync(group)
+
+    override def cancel(): Unit =
+      super.cancel()
+      this.innerGroup.cancel()
+
+    link()
+    ac.support.scheduleBoundary:
+      Async.withNewCompletionGroup(innerGroup)(complete(Try({
+        val r = body
+        checkCancellation()
+        r
+      }).recoverWith {
+        case _: InterruptedException | _: CancellationException =>
+          Failure(new CancellationException())
+      }))(using FutureAsync(CompletionGroup.Unlinked))
+      signalCompletion()(using ac)
 
   end RunnableFuture
 
@@ -174,6 +189,16 @@ object Future:
         case Left(Failure(ex))  => throw ex
         case Right(Failure(ex)) => throw ex
 
+    /** Parallel composition of tuples of futures.
+     * Future.Success(EmptyTuple) might be treated as Nil.
+     */
+    def *:[U <: Tuple](f2: Future[U])(using Async): Future[T *: U] = Future:
+      Async.await(Async.either(f1, f2)) match
+        case Left(Success(x1)) => x1 *: f2.value
+        case Right(Success(x2)) => f1.value *: x2
+        case Left(Failure(ex)) => throw ex
+        case Right(Failure(ex)) => throw ex
+
     /** Alternative parallel composition of this task with `other` task.
      *  If either task succeeds, succeed with the success that was returned first.
      *  Otherwise, fail with the failure that was returned last.
@@ -185,9 +210,22 @@ object Future:
         case Left(_: Failure[?])  => f2.value
         case Right(_: Failure[?]) => f1.value
 
-  end extension
+    /** Like `alt` but the slower future is cancelled.
+     * If either task succeeds, succeed with the success that was returned first and the other is cancelled.
+     * Otherwise, fail with the failure that was returned last.
+     */
+    def altC(f2: Future[T])(using Async): Future[T] = Future:
+      Async.await(Async.either(f1, f2)) match
+        case Left(Success(x1)) =>
+          f2.cancel()
+          x1
+        case Right(Success(x2)) =>
+          f1.cancel()
+          x2
+        case Left(_: Failure[?]) => f2.value
+        case Right(_: Failure[?]) => f1.value
 
-  // TODO: efficient n-ary versions of the last two operations
+  end extension
 
   /** A promise defines a future that is be completed via the
    *  promise's `complete` method.
@@ -207,35 +245,184 @@ object Future:
   end Promise
 end Future
 
+/**
+ * TaskSchedule describes the way in which a task should be repeated.
+ * Tasks can be set to run for example every 100 milliseconds or repeated as long as they fail.
+ * `maxRepetitions` describes the maximum amount of repetitions allowed, after that regardless
+ * of TaskSchedule chosen, the task is not repeated anymore and the last returned value is returned.
+ * `maxRepetitions` equal to zero means that repetitions can go on potentially forever.
+ */
+enum TaskSchedule:
+  case Every(val millis: Long, val maxRepetitions: Long = 0)
+  case ExponentialBackoff(val millis: Long, val exponentialBase: Int = 2, val maxRepetitions: Long = 0)
+  case FibonacciBackoff(val millis: Long, val maxRepetitions: Long = 0)
+  case RepeatUntilFailure(val millis: Long = 0, val maxRepetitions: Long = 0)
+  case RepeatUntilSuccess(val millis: Long = 0, val maxRepetitions: Long = 0)
+
 /** A task is a template that can be turned into a runnable future
  *  Composing tasks can be referentially transparent.
+ *  Tasks can be also ran on a specified schedule.
  */
 class Task[+T](val body: Async ?=> T):
 
   /** Start a future computed from the `body` of this task */
   def run(using Async) = Future(body)
 
+  def schedule(s: TaskSchedule)(using async: Async): Task[T] =
+    s match {
+      case TaskSchedule.Every(millis, maxRepetitions) =>
+        assert(millis >= 1)
+        assert(maxRepetitions >= 0)
+        Task {
+          var repetitions = 0
+          var ret: T = body
+          repetitions += 1
+          if (maxRepetitions == 1) ret
+          else {
+            while (maxRepetitions == 0 || repetitions < maxRepetitions) {
+              sleep(millis)
+              ret = body
+              repetitions += 1
+            }
+            ret
+          }
+        }
+      case TaskSchedule.ExponentialBackoff(millis, exponentialBase, maxRepetitions) =>
+        assert(millis >= 1)
+        assert(exponentialBase >= 2)
+        assert(maxRepetitions >= 0)
+        Task {
+          var repetitions = 0
+          var ret: T = body
+          repetitions += 1
+          if (maxRepetitions == 1) ret
+          else {
+            var timeToSleep = millis
+            while (maxRepetitions == 0 || repetitions < maxRepetitions) {
+              sleep(timeToSleep)
+              timeToSleep *= exponentialBase
+              ret = body
+              repetitions += 1
+            }
+            ret
+          }
+        }
+      case TaskSchedule.FibonacciBackoff(millis, maxRepetitions) =>
+        assert(millis >= 1)
+        assert(maxRepetitions >= 0)
+        Task {
+          var repetitions = 0
+          var a: Long = 0
+          var b: Long = 1
+          var ret: T = body
+          repetitions += 1
+          if (maxRepetitions == 1) ret
+          else {
+            sleep(millis)
+            ret = body
+            repetitions += 1
+            if (maxRepetitions == 2) ret
+            else {
+              while (maxRepetitions == 0 || repetitions < maxRepetitions) {
+                val aOld = a
+                a = b
+                b = aOld + b
+                sleep(b * millis)
+                ret = body
+                repetitions += 1
+              }
+              ret
+            }
+          }
+        }
+      case TaskSchedule.RepeatUntilFailure(millis, maxRepetitions) =>
+        assert(millis >= 0)
+        assert(maxRepetitions >= 0)
+        Task {
+          @tailrec
+          def helper(repetitions: Long = 0): T =
+            if (repetitions > 0 && millis > 0)
+              sleep(millis)
+            val ret: T = body
+            ret match {
+              case Failure(_) => ret
+              case _ if (repetitions+1) == maxRepetitions && maxRepetitions != 0 => ret
+              case _ => helper(repetitions + 2)
+            }
+          helper()
+        }
+      case TaskSchedule.RepeatUntilSuccess(millis, maxRepetitions) =>
+        assert(millis >= 0)
+        assert(maxRepetitions >= 0)
+        Task {
+          @tailrec
+          def helper(repetitions: Long = 0): T =
+            if (repetitions > 0 && millis > 0)
+              sleep(millis)
+            val ret: T = body
+            ret match {
+              case Success(_) => ret
+              case _ if (repetitions + 1) == maxRepetitions && maxRepetitions != 0 => ret
+              case _ => helper(repetitions + 2)
+            }
+          helper()
+        }
+    }
+
 end Task
 
-def add(x: Future[Int], xs: List[Future[Int]])(using Async): Future[Int] =
-  val b = x.zip:
+private def altAndAltCImplementation[T](shouldCancel: Boolean, futures: Future[T]*)(using Async): Future[T] = Future[T]:
+  val fs: Seq[Future[(Try[T], Int)]] = futures.zipWithIndex.map({ (f, i) =>
     Future:
-      xs.headOption.toString
+      try
+        (Success(f.value), i)
+      catch case e => (Failure(e), i)
+  })
 
-  val _: Future[(Int, String)] = b
+  @tailrec
+  def helper(failed: Int, fs: Seq[(Future[(Try[T], Int)], Int)]): Try[T] =
+    Async.await(Async.race( fs.map(_._1)* )) match
+      case Success((Success(x), i)) =>
+        if (shouldCancel) {
+          for ((f, j) <- futures.zipWithIndex) {
+            if (j != i) f.cancel()
+          }
+        }
+        Success(x)
+      case Success((Failure(e), i)) =>
+        if (failed + 1 == futures.length)
+          Failure(e)
+        else
+          helper(failed + 1, fs.filter({ case (_, j) => j != i }))
+      case _ => assert(false)
 
-  val c = x.alt:
-    Future:
-      b.value._1
-  val _: Future[Int] = c
+  helper(0, fs.zipWithIndex).get
 
-  Future:
-    val f1 = Future:
-      x.value * 2
-    x.value + xs.map(_.value).sum
+/** `alt` defined for multiple futures, not only two.
+ * If either task succeeds, succeed with the success that was returned first.
+ * Otherwise, fail with the failure that was returned last.
+ */
+def alt[T](futures: Future[T]*)(using Async): Future[T] =
+  altAndAltCImplementation(false, futures*)
 
-end add
+/** `altC` defined for multiple futures, not only two.
+ * If either task succeeds, succeed with the success that was returned first and cancel all other tasks.
+ * Otherwise, fail with the failure that was returned last.
+ */
+def altC[T](futures: Future[T]*)(using Async): Future[T] =
+  altAndAltCImplementation(true, futures*)
 
-def Main(x: Future[Int], xs: List[Future[Int]])(using ExecutionContext): Int =
-  Async.blocking(add(x, xs).value)
+def uninterruptible[T](body: Async ?=> T)(using ac: Async) =
+  val tracker = Cancellable.Tracking().link()
 
+  try
+    val group = CompletionGroup()
+    Async.withNewCompletionGroup(group)(body)
+  finally tracker.unlink()
+
+  if tracker.isCancelled then throw new CancellationException()
+
+def cancellationScope[T](cancel: Cancellable)(fn: => T)(using a: Async): T =
+  cancel.link()
+  try fn
+  finally cancel.unlink()
