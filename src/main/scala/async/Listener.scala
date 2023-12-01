@@ -19,7 +19,7 @@ trait Listener[-T]:
     * (either through [[lockCompletely]] or through manual locking of every layer)
     * before calling [[complete]]. This can also be done conveniently with [[completeNow]].
     * For performance reasons, this condition is usually not checked and will end up
-    * causing unexpected behavior.
+    * causing unexpected behavior if not satisfied.
     *
     * The listener must automatically release the lock of itself and any underlying listeners,
     * however this usually is done automatically by calling the inner listener's [[complete]]
