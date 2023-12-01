@@ -5,16 +5,41 @@ on:
       - main
   pull_request:
 jobs:
-  test:
+  test-jvm:
     strategy:
       fail-fast: false
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+        fetch-depth: 0
     - uses: coursier/cache-action@v6
     - uses: actions/setup-java@v3
       with:
         distribution: temurin
         java-version: 21
+    - name: Build dependencies
+      run: ./dependencies/publish-deps.sh --scala-native-only
     - name: Test
-      run: sbt test
+      run: sbt rootJVM/test
+  test-native:
+    strategy:
+      fail-fast: false
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+        fetch-depth: 0
+    - uses: coursier/cache-action@v6
+    - uses: actions/setup-java@v3
+      with:
+        distribution: temurin
+        java-version: 19
+    - name: Build dependencies
+      run: ./dependencies/publish-deps.sh
+    - name: Install scala-native dependencies
+      run: sudo apt-get install clang libstdc++-12-dev libgc-dev
+    - name: Test
+      run: sbt rootNative/test
