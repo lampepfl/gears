@@ -62,7 +62,9 @@ def lockBoth[T, U](st: Async.Source[T], su: Async.Source[U])(lt: Listener[T], lu
       case m: LockMarker => loop(m)
 
   /* We have to do the first locking step manually. */
-  if tlt.selfNumber > tlu.selfNumber then
+  if tlt.selfNumber == tlu.selfNumber then
+    throw ConflictingLocksException((lt, lu), (tlt, tlu))
+  else if tlt.selfNumber > tlu.selfNumber then
     val mt = lockUntilLessThan(tlu)(st, tlt) match
       case Gone => return lt
       case v: LockMarker => v

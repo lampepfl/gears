@@ -49,10 +49,8 @@ trait Listener[-T]:
     * Succeeds with [[Listener.Locked]] immediately if there is no [[Listener.ListenerLock]].
     * If locking fails, [[releaseAll]] is automatically called.
     */
-  def lockCompletely(source: Async.Source[T]): Locked.type | Gone.type =
-    this.lock match
-      case lock: Listener.ListenerLock => lock.lockAll(source)
-      case null => Locked
+  inline final def lockCompletely(source: Async.Source[T]): Locked.type | Gone.type =
+    if lock != null then lock.lockAll(source) else Locked
 
 object Listener:
   /** A simple [[Listener]] that always accepts the item and sends it to the consumer. */
