@@ -109,7 +109,7 @@ class FutureBehavior extends munit.FunSuite {
       Future {
         sleep(200)
         touched += 1
-      }.altC(Future { 10 }).result
+      }.altWithCancel(Future { 10 }).result
       sleep(300)
       assertEquals(touched, 0)
   }
@@ -434,6 +434,42 @@ class FutureBehavior extends munit.FunSuite {
       for i <- range do
         sum += collector.results.read().get.value
       assertEquals(sum, 2 * range.sum)
+  }
+
+  test("future collection: awaitAll*") {
+    Async.blocking:
+      val range = (0 to 10)
+      def futs = range.map(i => Future { sleep(i * 100); i })
+      assertEquals(futs.awaitAll, range.toSeq)
+
+      val exc = new Exception("a")
+      def futsWithFail = futs ++ Seq(Future { throw exc })
+      assertEquals(Try(futsWithFail.awaitAll), Failure(exc))
+
+      var lastFutureFinished = false
+      def futsWithSleepy = futsWithFail ++ Seq(Future { sleep(200000); lastFutureFinished = true; -1 })
+      assertEquals(Try(futsWithSleepy.awaitAll), Failure(exc))
+      assert(!lastFutureFinished)
+  }
+
+  test("future collection: altAll*") {
+    Async.blocking:
+      val range = (0 to 10)
+      def futs = range.map(i => Future { sleep(i * 100); i })
+      assert(range contains futs.altAll)
+
+      val exc = new Exception("a")
+      def futsWithFail = futs ++ Seq(Future { throw exc })
+      assert(range contains futsWithFail.altAll)
+
+      val excs = range.map(i => new Exception(i.toString()))
+      def futsAllFail = range.zip(excs).map((i, exc) => Future { sleep(i * 100); throw exc })
+      assertEquals(Try(futsAllFail.altAll), Failure(excs.last))
+
+      var lastFutureFinished = false
+      def futsWithSleepy = futsWithFail ++ Seq(Future { sleep(200000); lastFutureFinished = true; 0 })
+      assert(range contains futsWithSleepy.altAll)
+      assert(!lastFutureFinished)
   }
 
 }
