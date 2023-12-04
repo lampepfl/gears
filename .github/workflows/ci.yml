@@ -19,6 +19,14 @@ jobs:
       with:
         distribution: temurin
         java-version: 21
+    - name: Get submodule status hash
+      id: get-submodules
+      run: echo "submodules=$(git submodule status | sha256sum | awk '{print $1}')" >> $GITHUB_OUTPUT
+    - uses: actions/cache@v3
+      with:
+        path: |
+          ./dependencies/**/target
+        key: ${{ runner.os }}-${{ steps.get-submodules.outputs.submodules }}-scala-native-only
     - name: Build dependencies
       run: ./dependencies/publish-deps.sh --scala-native-only
     - name: Test
@@ -37,6 +45,14 @@ jobs:
       with:
         distribution: temurin
         java-version: 19
+    - name: Get submodule status hash
+      id: get-submodules
+      run: echo "submodules=$(git submodule status | sha256sum | awk '{print $1}')" >> $GITHUB_OUTPUT
+    - uses: actions/cache@v3
+      with:
+        path: |
+          ./dependencies/**/target
+        key: ${{ runner.os }}-${{ steps.get-submodules.outputs.submodules }}
     - name: Build dependencies
       run: ./dependencies/publish-deps.sh
     - name: Install scala-native dependencies
