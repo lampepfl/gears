@@ -278,14 +278,15 @@ object Future:
   class Collector[T](futures: Future[T]*):
     private val ch = UnboundedChannel[Future[T]]()
     /** Output channels of all finished futures. */
-    val results: ReadableChannel[Future[T]] = ch
+    final def results = ch.asReadable
 
     private val listener = Listener ((_, fut) =>
       // safe, as we only attach this listener to Future[T]
       ch.sendImmediately(fut.asInstanceOf[Future[T]]))
 
-    futures.foreach(addFuture)
     protected final def addFuture(future: Future[T]) = future.onComplete(listener)
+
+    futures.foreach(addFuture)
   end Collector
 
   /** Like [[Collector]], but exposes the ability to add futures after creation. */
@@ -296,7 +297,10 @@ object Future:
 
   extension[T] (fs: Seq[Future[T]])
     /** `.await` for all futures in the sequence, returns the results in a sequence, or throws if any futures fail. */
-    def awaitAll(using Async) = fs.map(_.value)
+    def awaitAll(using Async) =
+      val collector = Collector(fs*)
+      for _ <- fs do collector.results.read().get.value
+      fs.map(_.value)
 
     /** Like [[awaitAll]], but cancels all futures as soon as one of them fails. */
     def awaitAllOrCancel(using Async) =
