@@ -257,7 +257,7 @@ class ChannelBehavior extends munit.FunSuite {
       }
       val race = Async.race(
         (0 until 100).map(i =>
-          Async.race((10 * i until 10 * i + 10).map(idx => channels(idx).canRead.map(_.mustRead))*)
+          Async.race((10 * i until 10 * i + 10).map(idx => channels(idx).readSource.map(_.mustRead))*)
         )*
       )
       var sum = 0
@@ -284,7 +284,7 @@ class ChannelBehavior extends munit.FunSuite {
       val ch = SyncChannel[Int]()
       var timesSent = 0
       val race = Async.race(
-        (for i <- 0 until 1000 yield ch.canSend(i))*
+        (for i <- 0 until 1000 yield ch.sendSource(i))*
       )
       Future {
         while Async.await(race) != ch.Closed do {
@@ -307,7 +307,7 @@ class ChannelBehavior extends munit.FunSuite {
       Future { assertEquals(b.read().get, 10) }
       var valuesSent = 0
       for i <- 1 to 2 do
-        Async.race(a.canRead, b.canSend(10)).await match
+        Async.race(a.readSource, b.sendSource(10)).await match
           case a.Read(v) => assertEquals(v, 0)
           case b.Sent =>
             valuesSent += 1
@@ -316,7 +316,7 @@ class ChannelBehavior extends munit.FunSuite {
 
       a.close()
       b.close()
-      Async.race(a.canRead, b.canRead).await match
+      Async.race(a.readSource, b.readSource).await match
         case a.Closed | b.Closed => ()
         case r                   => assert(false, s"Should not happen, got $r")
   }

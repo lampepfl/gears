@@ -12,6 +12,7 @@ import gears.async.Async.OriginalSource
 import gears.async.Listener.acceptingListener
 
 trait BaseChannel[T]:
+  /** The result of a channel operation. */
   sealed trait Result:
     def mustSent: Unit = this match
       case Sent => ()
@@ -23,68 +24,91 @@ trait BaseChannel[T]:
       case Read(item) => item
       case _          => throw channelClosedException
 
+  /** [[item]] was read from the channel. */
   case class Read(item: T) extends Result
+
+  /** A value was sent to the channel. */
   case object Sent extends Result
+
+  /** The channel was closed. */
   case object Closed extends Result
 
+  /** Possible outcomes of a send operation. */
   type SendResult = Sent.type | Closed.type
+
+  /** Possible outcomes of a read operation. */
   type ReadResult = Read | Closed.type
 
-/** The part of a channel one can send values to. Blocking behavior depends on the implementation. Note that while
-  * sending is a special (potentially) blocking operation similar to await, reading is done using Async.Sources of
-  * channel values.
+/** The part of a channel one can send values to. Blocking behavior depends on the implementation.
   */
 trait SendableChannel[T] extends BaseChannel[T]:
-  def canSend(x: T): Async.Source[SendResult]
-  def send(x: T)(using Async): Unit = Async.await(canSend(x)) match
+  /** Create an [[Async.Source]] representing the send action of value [[x]]. Note that *each* listener attached to and
+    * accepting a [[Sent]] value corresponds to [[x]] being sent once.
+    *
+    * To create an [[Async.Source]] that sends the item exactly once regardless of listeners attached, wrap the [[send]]
+    * operation inside a [[gears.async.Future]].
+    */
+  def sendSource(x: T): Async.Source[SendResult]
+
+  /** Send [[x]] over the channel, blocking (asynchronously with [[Async]]) until the item has been sent or, if the
+    * channel is buffered, queued. Throws [[ChannelClosedException]] if the channel was closed.
+    */
+  def send(x: T)(using Async): Unit = Async.await(sendSource(x)) match
     case Sent   => ()
     case Closed => throw channelClosedException
 end SendableChannel
 
-/** The part of a channel one can read values from. Blocking behavior depends on the implementation. Note that while
-  * sending is a special (potentially) blocking operation similar to await, reading is done using Async.Sources of
-  * channel values.
+/** The part of a channel one can read values from. Blocking behavior depends on the implementation.
   */
 trait ReadableChannel[T] extends BaseChannel[T]:
-  val canRead: Async.Source[ReadResult]
-  def read()(using Async): Try[T] = await(canRead) match
+  /** An [[Async.Source]] corresponding to items being sent over the channel. Note that *each* listener attached to and
+    * accepting a [[Read]] value corresponds to one value received over the channel.
+    *
+    * To create an [[Async.Source]] that reads *exactly one* item regardless of listeners attached, wrap the [[read]]
+    * operation inside a [[gears.async.Future]].
+    */
+  val readSource: Async.Source[ReadResult]
+
+  /** Read an item from the channel, blocking (asynchronously with [[Async]]) until the item has been received. Returns
+    * `Failure(ChannelClosedException)` if the channel was closed.
+    */
+  def read()(using Async): Try[T] = await(readSource) match
     case Read(item) => Success(item)
     case Closed     => Failure(channelClosedException)
 end ReadableChannel
 
+/** A generic channel that can be sent to, received from and closed. */
 trait Channel[T] extends SendableChannel[T], ReadableChannel[T], java.io.Closeable:
-  def asSendable(): SendableChannel[T] = this
-  def asReadable(): ReadableChannel[T] = this
-  def asCloseable(): java.io.Closeable = this
+  def asSendable: SendableChannel[T] = this
+  def asReadable: ReadableChannel[T] = this
+  def asCloseable: java.io.Closeable = this
 
   protected type Reader = Listener[ReadResult]
   protected type Sender = Listener[SendResult]
 end Channel
 
 /** SyncChannel, sometimes called a rendez-vous channel has the following semantics:
-  *   - send to an unclosed channel blocks until a reader willing to accept this value (which is indicated by the
-  *     reader's listener returning true after sampling the value) is found and this reader reads the value.
-  *   - reading is done via the canRead async source of potential values (wrapped in a Try). Note that only reading is
-  *     represented as an async source, sending is a blocking operations that is implemented similarly to how await is
-  *     implemented.
+  *   - `send` to an unclosed channel blocks until a reader commits to receiving the value (via successfully locking).
   */
 trait SyncChannel[T] extends Channel[T]
 
 /** BufferedChannel(size: Int) is a version of a channel with an internal value buffer (represented internally as an
   * array with positive size). It has the following semantics:
-  *   - send() if the buffer is not full appends the value to the buffer and returns immediately.
-  *   - send() if the buffer is full sleeps until some buffer slot is freed, then writes the value there and immediately
-  *     returns.
-  *   - reading is done via the canRead async source that awaits the buffer being nonempty and the reader accepting the
-  *     first value in the buffer. Because readers can refuse a value, it is possible that many readers await on canRead
-  *     while the buffer is non-empty if all of them refused the first value in the buffer. At no point a reader is
-  *     allowed to sample/read anything but the first entry in the buffer.
+  *   - `send` if the buffer is not full appends the value to the buffer and success immediately.
+  *   - `send` if the buffer is full blocks until some buffer slot is freed and assigned to this sender.
   */
 trait BufferedChannel[T] extends Channel[T]
 
-/** This exception is being raised by send()s on closed channel, it is also returned wrapped in Failure when reading
-  * form a closed channel. ChannelMultiplexer sends Failure(ChannelClosedException) to all subscribers when it receives
-  * a close() signal.
+/** UnboundedChannel are buffered channels that does not bound the number of items in the channel. In other words, the
+  * buffer is treated as never being full and will expand as needed.
+  */
+trait UnboundedChannel[T] extends BufferedChannel[T]:
+  /** Send the item immediately. Throws [[ChannelClosedException]] if the channel is closed. */
+  def sendImmediately(x: T): Unit
+
+/** This exception is being raised by [[Channel.send]] on closed [[Channel]], it is also returned wrapped in `Failure`
+  * when reading form a closed channel. [[ChannelMultiplexer]] sends `Failure(ChannelClosedException)` to all
+  * subscribers when it receives a `close()` signal.
   */
 class ChannelClosedException extends Exception
 private val channelClosedException = ChannelClosedException()
@@ -95,7 +119,7 @@ object SyncChannel:
   private class Impl[T] extends Channel.Impl[T] with SyncChannel[T]:
     override def pollRead(r: Reader): Boolean = synchronized:
       // match reader with buffer of senders
-      checkClosed(canRead, r) || cells.matchReader(r)
+      checkClosed(readSource, r) || cells.matchReader(r)
 
     override def pollSend(src: CanSend, s: Sender): Boolean = synchronized:
       // match reader with buffer of senders
@@ -104,6 +128,7 @@ object SyncChannel:
 end SyncChannel
 
 object BufferedChannel:
+  /** Create a new buffered channel with the given buffer size. */
   def apply[T](size: Int = 10): BufferedChannel[T] = Impl(size)
   private class Impl[T](size: Int) extends Channel.Impl[T] with BufferedChannel[T]:
     require(size > 0, "Buffered channels must have a buffer size greater than 0")
@@ -116,9 +141,9 @@ object BufferedChannel:
     // Check space in buf -> fail
     // If we can pop from buf -> try to feed a sender
     override def pollRead(r: Reader): Boolean = synchronized:
-      if checkClosed(canRead, r) then return true
+      if checkClosed(readSource, r) then return true
       if !buf.isEmpty then
-        if r.completeNow(Read(buf.head), canRead) then
+        if r.completeNow(Read(buf.head), readSource) then
           buf.dequeue()
           if cells.hasSender then
             val (src, s) = cells.nextSender
@@ -136,12 +161,6 @@ object BufferedChannel:
   end Impl
 end BufferedChannel
 
-/** UnboundedChannel are buffered channels that does not bound the number of items in the channel. */
-trait UnboundedChannel[T] extends Channel[T] {
-  /** Send the item immediately. Throws [[ChannelClosedException]] if the channel is closed. */
-  def sendImmediately(x: T): Unit
-}
-
 object UnboundedChannel:
   def apply[T](): UnboundedChannel[T] = Impl[T]()
 
@@ -151,13 +170,12 @@ object UnboundedChannel:
     override def sendImmediately(x: T): Unit =
       var result: SendResult = Closed
       pollSend(CanSend(x), acceptingListener((r, _) => result = r))
-      if result == Closed then
-        throw channelClosedException
+      if result == Closed then throw channelClosedException
 
     override def pollRead(r: Reader): Boolean = synchronized:
-      if checkClosed(canRead, r) then true
+      if checkClosed(readSource, r) then true
       else if !buf.isEmpty then
-        if r.completeNow(Read(buf.head), canRead) then
+        if r.completeNow(Read(buf.head), readSource) then
           // there are never senders in the cells
           buf.dequeue()
         true
@@ -179,28 +197,28 @@ object Channel:
     def pollRead(r: Reader): Boolean
     def pollSend(src: CanSend, s: Sender): Boolean
 
-    def checkClosed(src: Async.Source[?], l: Listener[Closed.type]): Boolean =
+    protected final def checkClosed(src: Async.Source[?], l: Listener[Closed.type]): Boolean =
       if isClosed then
         l.completeNow(Closed, src.asInstanceOf[Async.Source[Closed.type] @unchecked /* TODO fix later */ ])
         true
       else false
 
-    override val canRead: Source[ReadResult] = new Source {
+    override val readSource: Source[ReadResult] = new Source {
       override def poll(k: Reader): Boolean = pollRead(k)
       override def onComplete(k: Reader): Unit = Impl.this.synchronized:
         if !pollRead(k) then cells.addReader(k)
       override def dropListener(k: Reader): Unit = Impl.this.synchronized:
         if !isClosed then cells.dropReader(k)
     }
-    override def canSend(x: T): Source[SendResult] = CanSend(x)
-    override def close(): Unit =
+    override final def sendSource(x: T): Source[SendResult] = CanSend(x)
+    override final def close(): Unit =
       synchronized:
         if isClosed then return
         isClosed = true
         cells.cancel()
 
-    protected def complete(src: CanSend, reader: Listener[ReadResult], sender: Listener[SendResult]) =
-      reader.complete(Read(src.item), canRead)
+    protected final def complete(src: CanSend, reader: Listener[ReadResult], sender: Listener[SendResult]) =
+      reader.complete(Read(src.item), readSource)
       sender.complete(Sent, src)
 
     protected final case class CanSend(item: T) extends OriginalSource[SendResult] {
@@ -248,7 +266,7 @@ object Channel:
       def matchReader(r: Reader): Boolean =
         while hasSender do
           val (canSend, sender) = nextSender
-          lockBoth(canRead, canSend)(r, sender) match
+          lockBoth(readSource, canSend)(r, sender) match
             case Listener.Locked =>
               Impl.this.complete(canSend, r, sender)
               dequeue()
@@ -261,7 +279,7 @@ object Channel:
       def matchSender(src: CanSend, s: Sender): Boolean =
         while hasReader do
           val reader = nextReader
-          lockBoth(canRead, src)(reader, s) match
+          lockBoth(readSource, src)(reader, s) match
             case Listener.Locked =>
               Impl.this.complete(src, reader, s)
               dequeue()
@@ -274,7 +292,7 @@ object Channel:
       def cancel() =
         pending.foreach {
           case (src, s)  => s.completeNow(Closed, src)
-          case r: Reader => r.completeNow(Closed, canRead)
+          case r: Reader => r.completeNow(Closed, readSource)
         }
         pending.clear()
         reader = 0
@@ -322,7 +340,7 @@ object ChannelMultiplexer:
           publishersCopy = publishers.toList
 
         val got =
-          Async.await(Async.race(infoChannel.canRead, Async.race(publishersCopy.map(c => c.canRead.map(_.get))*)))
+          Async.await(Async.race(infoChannel.readSource, Async.race(publishersCopy.map(c => c.readSource.map(_.get))*)))
         got match {
           case infoChannel.Read(Message.Quit) => {
             ChannelMultiplexer.this.synchronized:
