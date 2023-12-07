@@ -4,9 +4,6 @@ import scala.annotation.unchecked.uncheckedVariance
 import java.util.concurrent.locks.ReentrantLock
 import scala.concurrent.duration.FiniteDuration
 
-// given VThreadScheduler.type = VThreadScheduler
-// given VThreadSupport.type = VThreadSupport
-
 object VThreadScheduler extends Scheduler:
   override def execute(body: Runnable): Unit = Thread.startVirtualThread(body)
 
