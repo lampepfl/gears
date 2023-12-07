@@ -1,4 +1,4 @@
-import gears.async.{Async, BufferedChannel, ChannelClosedException, ChannelMultiplexer, Future, SyncChannel, Task, TaskSchedule, alt, altC, given}
+import gears.async.{Async, BufferedChannel, ChannelClosedException, ChannelMultiplexer, Future, SyncChannel, Task, TaskSchedule, alt, altC}
 import gears.async.default.given
 import gears.async.AsyncOperations.*
 import Future.{*:, zip}

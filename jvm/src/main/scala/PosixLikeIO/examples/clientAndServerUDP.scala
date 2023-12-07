@@ -1,7 +1,7 @@
 package PosixLikeIO.examples
 
 import gears.async.default.given
-import gears.async.{Async, Future, given}
+import gears.async.{Async, Future}
 import gears.async.AsyncOperations.*
 import PosixLikeIO.{PIOHelper, SocketUDP}
 

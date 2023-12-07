@@ -1,6 +1,6 @@
 package PosixLikeIO
 
-import gears.async.{Async, Future, given}
+import gears.async.{Async, Future}
 import gears.async.default.given
 import Future.Promise
 

@@ -1,4 +1,4 @@
-import gears.async.{Async, Future, Listener, given}
+import gears.async.{Async, Future, Listener}
 import Async.either
 import gears.async.AsyncOperations.*
 import gears.async.default.given

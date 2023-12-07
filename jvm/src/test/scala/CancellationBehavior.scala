@@ -1,4 +1,4 @@
-import gears.async.{Async, Future, AsyncSupport, uninterruptible, given}
+import gears.async.{Async, Future, AsyncSupport, uninterruptible}
 import gears.async.AsyncOperations.*
 import gears.async.default.given
 import scala.util.boundary
