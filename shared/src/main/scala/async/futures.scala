@@ -277,12 +277,14 @@ object Future:
   /** Collects a list of futures into a channel of futures, arriving as they finish. */
   class Collector[T](futures: Future[T]*):
     private val ch = UnboundedChannel[Future[T]]()
+
     /** Output channels of all finished futures. */
     final def results = ch.asReadable
 
-    private val listener = Listener ((_, fut) =>
+    private val listener = Listener((_, fut) =>
       // safe, as we only attach this listener to Future[T]
-      ch.sendImmediately(fut.asInstanceOf[Future[T]]))
+      ch.sendImmediately(fut.asInstanceOf[Future[T]])
+    )
 
     protected final def addFuture(future: Future[T]) = future.onComplete(listener)
 
@@ -295,25 +297,26 @@ object Future:
     def add(future: Future[T]) = addFuture(future)
     inline def +=(future: Future[T]) = add(future)
 
-  extension[T] (fs: Seq[Future[T]])
+  extension [T](fs: Seq[Future[T]])
     /** `.await` for all futures in the sequence, returns the results in a sequence, or throws if any futures fail. */
     def awaitAll(using Async) =
       val collector = Collector(fs*)
-      for _ <- fs do collector.results.read().get.value
+      for _ <- fs do collector.results.read().right.get.value
       fs.map(_.value)
 
     /** Like [[awaitAll]], but cancels all futures as soon as one of them fails. */
     def awaitAllOrCancel(using Async) =
       val collector = Collector(fs*)
       try
-        for _ <- fs do collector.results.read().get.value
+        for _ <- fs do collector.results.read().right.get.value
         fs.map(_.value)
       catch
         case e: Exception =>
           fs.foreach(_.cancel())
           throw e
 
-    /** Race all futures, returning the first successful value. Throws the last exception received, if everything fails. */
+    /** Race all futures, returning the first successful value. Throws the last exception received, if everything fails.
+      */
     def altAll(using Async): T = altImpl(false)
 
     /** Like [[altAll]], but cancels all other futures as soon as the first future succeeds. */
@@ -321,8 +324,9 @@ object Future:
 
     private inline def altImpl(withCancel: Boolean)(using Async): T =
       val collector = Collector(fs*)
-      @scala.annotation.tailrec def loop(attempt: Int): T =
-        collector.results.read().get.result match
+      @scala.annotation.tailrec
+      def loop(attempt: Int): T =
+        collector.results.read().right.get.result match
           case Failure(exception) =>
             if attempt == fs.length then /* everything failed */ throw exception else loop(attempt + 1)
           case Success(value) =>

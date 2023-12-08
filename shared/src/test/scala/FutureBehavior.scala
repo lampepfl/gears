@@ -410,8 +410,7 @@ class FutureBehavior extends munit.FunSuite {
       val collector = Future.Collector(futs*)
 
       var sum = 0
-      for i <- range do
-        sum += collector.results.read().get.value
+      for i <- range do sum += collector.results.read().right.get.value
       assertEquals(sum, range.sum)
   }
 
@@ -427,12 +426,9 @@ class FutureBehavior extends munit.FunSuite {
           sleep(i * 200)
           collector += r
 
-
       var sum = 0
-      for i <- range do
-        sum += collector.results.read().get.value
-      for i <- range do
-        sum += collector.results.read().get.value
+      for i <- range do sum += collector.results.read().right.get.value
+      for i <- range do sum += collector.results.read().right.get.value
       assertEquals(sum, 2 * range.sum)
   }
 
