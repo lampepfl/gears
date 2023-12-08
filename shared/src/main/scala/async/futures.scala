@@ -170,6 +170,50 @@ object Future:
   def apply[T](body: Async ?=> T)(using Async): Future[T] =
     RunnableFuture(body)
 
+  /** The group of handlers to be used in [[withResolver]].
+   *  As a Future is completed only once, only one of resolve/reject/complete
+   *  may be used and only once.
+   */
+  trait Resolver[-T]:
+    /** Complete the future with a data item successfully */
+    def resolve(item: T): Unit = complete(Success(item))
+    /** Complete the future with a failure  */
+    def reject(exc: Throwable): Unit = complete(Failure(exc))
+
+    /** Complete the future with the result, be it Success or Failure */
+    def complete(result: Try[T]): Unit
+
+    /** Register a cancellation handler to be called when the created future
+     *  is cancelled. Note that only one handler may be used.
+     */
+    def onCancel(handler: () => Unit): Unit
+  end Resolver
+
+  /** Create a future that may be completed asynchronously using external means.
+   *
+   *  The body is run synchronously on the callers thread to setup an external
+   *  asynchronous operation whose success/failure it communicates using the
+   *  [[Resolver]] to complete the future.
+   *
+   *  If the external operation supports cancellation, the body can register
+   *  one handler using [[Resolver.onCancel]].
+   */
+  def withResolver[T](body: Resolver[T] => Unit): Future[T] =
+    val future = new CoreFuture[T] with Resolver[T] {
+      @volatile var cancelHandle = () => ()
+      override def onCancel(handler: () => Unit): Unit = cancelHandle = handler
+      override def complete(result: Try[T]): Unit = super.complete(result)
+
+      override def cancel(): Unit =
+        super.cancel()
+        cancelHandle()
+        reject(CancellationException())
+        this.unlink()
+    }
+    body(future)
+    future
+  end withResolver
+
   /** A future that immediately terminates with the given result */
   def now[T](result: Try[T]): Future[T] =
     val f = CoreFuture[T]()
