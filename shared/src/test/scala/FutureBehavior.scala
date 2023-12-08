@@ -259,13 +259,13 @@ class FutureBehavior extends munit.FunSuite {
           (Future {
             sleep(Random.between(200, 300));
             throw e1
-          } *:  Future {
+          } *: Future {
               sleep(Random.between(200, 300));
               throw e2
             } *: Future {
               sleep(Random.between(50, 100));
               throw e3
-            } *: Future{EmptyTuple}).result, Failure(e3))
+            } *: Future.now(Success(EmptyTuple))).result, Failure(e3))
   }
 
   test("cancelled futures return the same constant CancellationException with no stack attached".ignore) {

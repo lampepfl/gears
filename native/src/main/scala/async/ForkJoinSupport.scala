@@ -28,10 +28,7 @@ class ExecutorWithSleepThread(val exec: ExecutionContext) extends ExecutionConte
   import scala.collection.mutable
   private case class Sleeper(wakeTime: Deadline, toRun: Runnable):
     var isCancelled = false
-  private given Ordering[Sleeper] = new Ordering[Sleeper] {
-    import math.Ordered.orderingToOrdered
-    override def compare(x: Sleeper, y: Sleeper): Int = y.wakeTime.compare(x.wakeTime)
-  }
+  private given Ordering[Sleeper] = Ordering.by((sleeper: Sleeper) => sleeper.wakeTime).reverse
   private val sleepers = mutable.PriorityQueue.empty[Sleeper]
   private var sleepingUntil: Option[Deadline] = None
 
@@ -48,19 +45,25 @@ class ExecutorWithSleepThread(val exec: ExecutionContext) extends ExecutionConte
     () => { sleeper.isCancelled = true }
   }
 
-  private def consideredOverdue(d: Deadline): Boolean = d.timeLeft <= 0.milli
-
   // Sleep until the first timer is due, or .wait() otherwise
   private def sleepLoop(): Unit = this.synchronized {
     while (true) {
       sleepingUntil = sleepers.headOption.map(_.wakeTime)
-      sleepingUntil match
-        case None => this.wait()
+      val current = sleepingUntil match
+        case None =>
+          this.wait()
+          Deadline.now
         case Some(value) =>
-          if value.hasTimeLeft() then
-            this.wait(value.timeLeft.max(10.millis).toMillis)
+          val current0 = Deadline.now
+          val timeLeft = value - current0
+
+          if timeLeft.toNanos > 0 then
+            this.wait(timeLeft.toMillis.max(10))
+            Deadline.now
+          else current0
+
       // Pop sleepers until no more available
-      while (sleepers.headOption.map(_.wakeTime.isOverdue()) == Some(true)) {
+      while (sleepers.headOption.exists(_.wakeTime <= current)) {
         val task = sleepers.dequeue()
         if !task.isCancelled then execute(task.toRun)
       }
@@ -77,16 +80,12 @@ class SuspendExecutorWithSleep(exec: ExecutionContext) extends ExecutorWithSleep
   with AsyncOperations
   with NativeSuspend {
   type Scheduler = this.type
-  override def sleep(millis: Long)(using ac: Async): Unit = {
-    val sleepingFut = Promise[Unit]()
-    val innerCancellable = schedule(millis.millis, () => sleepingFut.complete(scala.util.Success(())))
-    cancellationScope(() =>
-      // we need to wrap the cancellable so that we mark the cancellation as well
-      sleepingFut.complete(scala.util.Failure(CancellationException()))
-      innerCancellable.cancel()
-    ):
-      sleepingFut.future.value
-  }
+  override def sleep(millis: Long)(using Async): Unit =
+    Future.withResolver[Unit]: resolver =>
+      val cancellable = schedule(millis.millis, () => resolver.resolve(()))
+      resolver.onCancel(cancellable.cancel)
+    .link()
+    .value
 }
 
 class ForkJoinSupport extends SuspendExecutorWithSleep(new ForkJoinPool())

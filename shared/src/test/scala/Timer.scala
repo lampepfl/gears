@@ -8,13 +8,19 @@ import java.util.concurrent.CancellationException
 class TimerTest extends munit.FunSuite {
   import gears.async.default.given
 
+  test("sleeping does sleep") {
+    Async.blocking:
+      val now1 = System.currentTimeMillis()
+      sleep(200)
+      val now2 = System.currentTimeMillis()
+      assert(now2 - now1 > 150, now2 - now1)
+  }
+
   test("TimerSleep1Second") {
     Async.blocking:
-      println("start of 1 second")
       val timer = Timer(1.second)
       Future { timer.start() }
       assert(Async.await(timer.src) == timer.TimerEvent.Tick)
-      println("end of 1 second")
   }
 
   def timeoutCancellableFuture[T](d: Duration, f: Future[T])(using Async, AsyncOperations): Future[T] =
