@@ -135,8 +135,7 @@ object Async:
     /** Create a [[Source]] containing the given values, resolved once for each. */
     def values[T](values: T*) =
       import scala.collection.JavaConverters._
-      val q = java.util.concurrent.ConcurrentLinkedQueue[T]()
-      q.addAll(values.asJavaCollection)
+      val q = java.util.concurrent.ConcurrentLinkedQueue[T](values.asJavaCollection)
       new Source[T]:
         override def poll(k: Listener[T]): Boolean =
           if q.isEmpty() then return false
@@ -174,8 +173,8 @@ object Async:
         def dropListener(k: Listener[U]): Unit =
           src.dropListener(transform(k))
 
-  def race[T](sources: Source[T]*) = raceImpl[T, T]((v, _) => v)(sources*)
-  def raceWithOrigin[T](sources: Source[T]*) =
+  def race[T](sources: Source[T]*): Source[T] = raceImpl[T, T]((v, _) => v)(sources*)
+  def raceWithOrigin[T](sources: Source[T]*): Source[(T, Source[T])] =
     raceImpl[(T, Source[T]), T]((v, src) => (v, src))(sources*)
 
   /** Pass first result from any of `sources` to the continuation */
@@ -185,13 +184,14 @@ object Async:
         val it = sources.iterator
         var found = false
 
+        val listener = new Listener.ForwardingListener[U](this, k):
+          val lock = withLock(k) { inner => new ListenerLockWrapper(inner, selfSrc) }
+          def complete(data: U, source: Async.Source[U]) =
+            k.complete(map(data, source), selfSrc)
+        end listener
+
         while it.hasNext && !found do
-          found = it.next.poll(
-            new Listener.ForwardingListener[U](this, k):
-              val lock = withLock(k) { inner => new ListenerLockWrapper(inner, selfSrc) }
-              def complete(data: U, source: Async.Source[U]) =
-                k.complete(map(data, source), selfSrc)
-          )
+          found = it.next.poll(listener)
         found
 
       def onComplete(k: Listener[T]): Unit =
@@ -245,22 +245,18 @@ object Async:
     }
   end raceImpl
 
-  /** Cases for handling async sources in a [[select]]. [[SelectCase]] can be constructed by extension methods `handle`
-    * and `handleVal` of [[Source]].
+  /** Cases for handling async sources in a [[select]]. [[SelectCase]] can be
+   *  constructed by extension methods `handle` of [[Source]].
     */
   opaque type SelectCase[T] = (Source[?], Nothing => T)
-  //                           ^ unsafe types, but we only construct SelectCase from `handle` and `handleVal` which are safe
+  //                           ^ unsafe types, but we only construct SelectCase from `handle` which is safe
 
   extension [T](src: Source[T])
     /** Attach a handler to [[src]], creating a [[SelectCase]]. */
     inline def handle[U](f: T => U): SelectCase[U] = (src, f)
 
+    /** Alias for [[handle]] */
     inline def ~~>[U](f: T => U): SelectCase[U] = src.handle(f)
-
-    // /** Attach a handler to [[src]] that takes a [[T]] and throws if [[Failure]] was returned from the source, creating
-    //   * a [[SelectCase]].
-    //   */
-    // inline def handleVal[U](f: T => U): SelectCase[U] = (src, t => f(t.get))
 
   /** Race a list of sources with the corresponding handler functions, once an item has come back. Like [[race]],
     * [[select]] guarantees exactly one of the sources are polled. Unlike `map`ping a [[Source]], the handler in

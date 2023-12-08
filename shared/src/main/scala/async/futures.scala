@@ -13,6 +13,7 @@ import java.util.concurrent.CancellationException
 import scala.annotation.tailrec
 import scala.util
 import java.util.concurrent.atomic.AtomicLong
+import scala.util.control.NonFatal
 
 /** A cancellable future that can suspend waiting for other asynchronous sources
   */
@@ -294,7 +295,7 @@ object Future:
   /** Like [[Collector]], but exposes the ability to add futures after creation. */
   class MutableCollector[T](futures: Future[T]*) extends Collector[T](futures*):
     /** Add a new [[Future]] into the collector. */
-    def add(future: Future[T]) = addFuture(future)
+    inline def add(future: Future[T]) = addFuture(future)
     inline def +=(future: Future[T]) = add(future)
 
   extension [T](fs: Seq[Future[T]])
@@ -311,7 +312,7 @@ object Future:
         for _ <- fs do collector.results.read().right.get.value
         fs.map(_.value)
       catch
-        case e: Exception =>
+        case NonFatal(e) =>
           fs.foreach(_.cancel())
           throw e
 

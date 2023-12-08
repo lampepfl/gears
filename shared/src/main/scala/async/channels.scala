@@ -20,7 +20,7 @@ private type Res[T] = Either[Closed, T]
 
 /** The part of a channel one can send values to. Blocking behavior depends on the implementation.
   */
-trait SendableChannel[T]:
+trait SendableChannel[-T]:
   /** Create an [[Async.Source]] representing the send action of value [[x]]. Note that *each* listener attached to and
     * accepting a [[Sent]] value corresponds to [[x]] being sent once.
     *
@@ -34,12 +34,12 @@ trait SendableChannel[T]:
     */
   def send(x: T)(using Async): Unit = Async.await(sendSource(x)) match
     case Right(_) => ()
-    case Left(_)  => throw channelClosedException
+    case Left(_)  => throw ChannelClosedException()
 end SendableChannel
 
 /** The part of a channel one can read values from. Blocking behavior depends on the implementation.
   */
-trait ReadableChannel[T]:
+trait ReadableChannel[+T]:
   /** An [[Async.Source]] corresponding to items being sent over the channel. Note that *each* listener attached to and
     * accepting a [[Read]] value corresponds to one value received over the channel.
     *
@@ -88,7 +88,6 @@ trait UnboundedChannel[T] extends BufferedChannel[T]:
   * subscribers when it receives a `close()` signal.
   */
 class ChannelClosedException extends Exception
-private val channelClosedException = ChannelClosedException()
 
 object SyncChannel:
   def apply[T](): SyncChannel[T] = Impl()
@@ -147,7 +146,7 @@ object UnboundedChannel:
     override def sendImmediately(x: T): Unit =
       var result: SendResult = Left(Closed)
       pollSend(CanSend(x), acceptingListener((r, _) => result = r))
-      if result.isLeft then throw channelClosedException
+      if result.isLeft then throw ChannelClosedException()
 
     override def pollRead(r: Reader): Boolean = synchronized:
       if checkClosed(readSource, r) then true
@@ -327,7 +326,7 @@ object ChannelMultiplexer:
             case Left(_) | Right(Message.Quit) =>
               ChannelMultiplexer.this.synchronized:
                 subscribersCopy = subscribers.toList
-              for (s <- subscribersCopy) s.send(Failure(channelClosedException))
+              for (s <- subscribersCopy) s.send(Failure(ChannelClosedException()))
               shouldTerminate = true
             case Right(Message.Refresh) => ()
           }) +:
@@ -359,24 +358,24 @@ object ChannelMultiplexer:
 
     override def removePublisher(c: ReadableChannel[T]): Unit =
       ChannelMultiplexer.this.synchronized:
-        if (isClosed) throw channelClosedException
+        if (isClosed) throw ChannelClosedException()
         publishers -= c
       infoChannel.sendImmediately(Message.Refresh)
 
     override def removeSubscriber(c: SendableChannel[Try[T]]): Unit =
       ChannelMultiplexer.this.synchronized:
-        if (isClosed) throw channelClosedException
+        if (isClosed) throw ChannelClosedException()
         subscribers -= c
 
     override def addPublisher(c: ReadableChannel[T]): Unit =
       ChannelMultiplexer.this.synchronized:
-        if (isClosed) throw channelClosedException
+        if (isClosed) throw ChannelClosedException()
         publishers += c
       infoChannel.sendImmediately(Message.Refresh)
 
     override def addSubscriber(c: SendableChannel[Try[T]]): Unit =
       ChannelMultiplexer.this.synchronized:
-        if (isClosed) throw channelClosedException
+        if (isClosed) throw ChannelClosedException()
         subscribers += c
 
 end ChannelMultiplexer
