@@ -287,12 +287,21 @@ class FutureBehavior extends munit.FunSuite {
   test("Promise can be cancelled") {
     Async.blocking:
       val p = Promise[Int]()
-      p.complete(Success(10))
       val f = p.future
       f.cancel()
+      p.complete(Success(10))
       f.awaitResult match
         case Failure(ex) if ex.isInstanceOf[CancellationException] => ()
         case _                                                     => assert(false)
+  }
+
+  test("Promise can't be cancelled after completion") {
+    Async.blocking:
+      val p = Promise[Int]()
+      p.complete(Success(10))
+      val f = p.future
+      f.cancel()
+      assertEquals(f.await, 10)
   }
 
   test("Nesting of cancellations") {
