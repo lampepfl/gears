@@ -7,9 +7,7 @@ import gears.async.{
   SyncChannel,
   Task,
   TaskSchedule,
-  UnboundedChannel,
-  alt,
-  altC
+  UnboundedChannel
 }
 import gears.async.default.given
 import gears.async.AsyncOperations.*

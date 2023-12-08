@@ -1,4 +1,4 @@
-import gears.async.{Async, Future, Task, TaskSchedule, alt}
+import gears.async.{Async, Future, Task, TaskSchedule}
 import gears.async.default.given
 import Future.{*:, zip}
 

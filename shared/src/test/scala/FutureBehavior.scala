@@ -1,4 +1,4 @@
-import gears.async.{Async, Future, Task, TaskSchedule, alt, altC, uninterruptible}
+import gears.async.{Async, Future, Task, TaskSchedule, uninterruptible}
 import gears.async.default.given
 import gears.async.Future.{*:, Promise, zip}
 import gears.async.AsyncOperations.*
@@ -114,32 +114,6 @@ class FutureBehavior extends munit.FunSuite {
       assertEquals(touched, 0)
   }
 
-  test("altC of multiple futures") {
-    Async.blocking {
-      var touched = java.util.concurrent.atomic.AtomicInteger(0)
-      alt(
-        Future {
-          sleep(100)
-          touched.incrementAndGet()
-        },
-        Future {
-          sleep(100)
-          touched.incrementAndGet()
-        },
-        Future {
-          5
-        }
-      ).awaitResult
-      sleep(200)
-      assertEquals(touched.get(), 2)
-    }
-    Async.blocking:
-      var touched = 0
-      altC(Future { sleep(100); touched += 1 }, Future { sleep(100); touched += 1 }, Future { 5 }).awaitResult
-      sleep(200)
-      assertEquals(touched, 0)
-  }
-
   test("zip") {
     Async.blocking:
       val error = new AssertionError()
@@ -223,25 +197,6 @@ class FutureBehavior extends munit.FunSuite {
       assertEquals(zombieModifiedThis, false)
     Thread.sleep(300)
     assertEquals(zombieModifiedThis, true)
-  }
-
-  test("n-ary alt") {
-    Async.blocking:
-      assert(
-        Set(10, 20, 30).contains(
-          alt(
-            Future {
-              10
-            },
-            Future {
-              20
-            },
-            Future {
-              30
-            }
-          ).await
-        )
-      )
   }
 
   test("zip on tuples with EmptyTuple") {
@@ -356,51 +311,6 @@ class FutureBehavior extends munit.FunSuite {
       f1.awaitResult
       assertEquals(touched1, true)
       assertEquals(touched2, false)
-  }
-
-  test("n-ary alt first success") {
-    Async.blocking:
-      for (i <- 1 to 20)
-        assertEquals(
-          alt(
-            Future {
-              sleep(Random.between(200, 300)); 10000 * i + 111
-            },
-            Future {
-              sleep(Random.between(200, 300)); 10000 * i + 222
-            },
-            Future {
-              sleep(Random.between(30, 50)); 10000 * i + 333
-            }
-          ).awaitResult,
-          Success(10000 * i + 333)
-        )
-  }
-
-  test("n-ary alt last failure") {
-    Async.blocking:
-      for (_ <- 1 to 20)
-        val e1 = AssertionError(111)
-        val e2 = AssertionError(211)
-        val e3 = AssertionError(311)
-
-        assertEquals(
-          alt(
-            Future {
-              sleep(Random.between(0, 250));
-              throw e1
-            },
-            Future {
-              sleep(Random.between(500, 1000));
-              throw e2
-            },
-            Future {
-              sleep(Random.between(0, 250));
-              throw e3
-            }
-          ).awaitResult,
-          Failure(e2)
-        )
   }
 
   test("future collector") {
