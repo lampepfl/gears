@@ -6,13 +6,14 @@ import AsyncOperations.sleep
 import scala.collection.mutable
 import mutable.ListBuffer
 
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.CancellationException
 import scala.compiletime.uninitialized
 import scala.util.{Failure, Success, Try}
 import scala.annotation.unchecked.uncheckedVariance
-import java.util.concurrent.CancellationException
 import scala.annotation.tailrec
 import scala.util
-import java.util.concurrent.atomic.AtomicLong
 import scala.util.control.NonFatal
 
 /** A cancellable future that can suspend waiting for other asynchronous sources
@@ -29,7 +30,7 @@ object Future:
   private class CoreFuture[+T] extends Future[T]:
 
     @volatile protected var hasCompleted: Boolean = false
-    protected var cancelRequest = false
+    protected var cancelRequest = AtomicBoolean(false)
     private var result: Try[T] = uninitialized // guaranteed to be set if hasCompleted = true
     private val waiting: mutable.Set[Listener[Try[T]]] = mutable.Set()
 
@@ -51,7 +52,11 @@ object Future:
     // Cancellable method implementations
 
     def cancel(): Unit =
-      cancelRequest = true
+      setCancelled()
+
+    /** Sets the cancellation state and returns `true` if the future has not been completed and cancelled before. */
+    protected def setCancelled(): Boolean =
+      !hasCompleted && cancelRequest.compareAndSet(false, true)
 
     /** Complete future with result. If future was cancelled in the meantime, return a CancellationException failure
       * instead. Note: @uncheckedVariance is safe here since `complete` is called from only two places:
@@ -80,7 +85,7 @@ object Future:
     private var innerGroup: CompletionGroup = CompletionGroup()
 
     private def checkCancellation(): Unit =
-      if cancelRequest then throw new CancellationException()
+      if cancelRequest.get() then throw new CancellationException()
 
     private class FutureAsync(val group: CompletionGroup)(using label: ac.support.Label[Unit])
         extends Async(using ac.support, ac.scheduler):
@@ -123,9 +128,7 @@ object Future:
 
       override def withGroup(group: CompletionGroup) = FutureAsync(group)
 
-    override def cancel(): Unit =
-      super.cancel()
-      this.innerGroup.cancel()
+    override def cancel(): Unit = if setCancelled() then this.innerGroup.cancel()
 
     link()
     ac.support.scheduleBoundary:
@@ -180,10 +183,10 @@ object Future:
       override def complete(result: Try[T]): Unit = super.complete(result)
 
       override def cancel(): Unit =
-        super.cancel()
-        cancelHandle()
-        reject(CancellationException())
-        this.unlink()
+        if setCancelled() then
+          cancelHandle()
+          reject(CancellationException())
+          this.unlink()
     }
     body(future)
     future
@@ -256,7 +259,10 @@ object Future:
   /** A promise defines a future that is be completed via the promise's `complete` method.
     */
   class Promise[T]:
-    private val myFuture = CoreFuture[T]()
+    private val myFuture = new CoreFuture[T]:
+      fut =>
+      override def cancel(): Unit =
+        if setCancelled() then fut.complete(Failure(new CancellationException()))
 
     /** The future defined by this promise */
     val future: Future[T] = myFuture
@@ -265,7 +271,6 @@ object Future:
       * `CancellationException` failure instead.
       */
     def complete(result: Try[T]): Unit = myFuture.complete(result)
-
   end Promise
 
   /** Collects a list of futures into a channel of futures, arriving as they finish. */

@@ -9,6 +9,7 @@ import scala.concurrent.ExecutionContext
 import scala.util.{Failure, Success, Try}
 import scala.util.Random
 import scala.collection.mutable.Set
+import java.util.concurrent.atomic.AtomicInteger
 
 class FutureBehavior extends munit.FunSuite {
   given ExecutionContext = ExecutionContext.global
@@ -302,6 +303,25 @@ class FutureBehavior extends munit.FunSuite {
       val f = p.future
       f.cancel()
       assertEquals(f.await, 10)
+  }
+
+  test("Future.withResolver cancel handler is run once") {
+    val num = AtomicInteger(0)
+    val fut = Future.withResolver { _.onCancel { () => num.incrementAndGet() } }
+    Async.blocking:
+      (1 to 20)
+        .map(_ => Future { fut.cancel() })
+        .awaitAll
+    assertEquals(num.get(), 1)
+  }
+
+  test("Future.withResolver cancel handler is not run after being completed") {
+    val num = AtomicInteger(0)
+    val fut = Future.withResolver[Int]: r =>
+      r.onCancel { () => num.incrementAndGet() }
+      r.resolve(1)
+    fut.cancel()
+    assertEquals(num.get(), 0)
   }
 
   test("Nesting of cancellations") {
