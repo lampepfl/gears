@@ -28,9 +28,9 @@ def measureIterations[T](action: () => T): Int =
       case (_: InterruptedException) => ()
     }
 
-  Thread.sleep(10*1000)
+  Thread.sleep(10 * 1000)
   counter.set(0)
-  Thread.sleep(60*1000)
+  Thread.sleep(60 * 1000)
   t1.interrupt()
   counter.get()
 
@@ -48,44 +48,42 @@ def measureIterations[T](action: () => T): Int =
         var z = 1
       f.result
 
-
   println("Thread joins per second: " + (threadJoins / 60))
   println("Future joins per second: " + (futureJoins / 60))
-  println("Overhead: " + ((threadJoins+0.0)/(futureJoins+0.0)))
+  println("Overhead: " + ((threadJoins + 0.0) / (futureJoins + 0.0)))
 
   /*
   Linux:
     Thread joins per second: 292647
     Future joins per second: 86032
     Overhead: 3.401577460379452
-  */
+   */
 
 @main def measureRaceOverhead(): Unit =
   given ExecutionContext = ExecutionContext.global
 
   val c1: Double = measureIterations: () =>
     Async.blocking:
-      Async.await(Async.race(Future{Thread.sleep(10)}, Future{Thread.sleep(100)}, Future{Thread.sleep(50)}))
-      Async.await(Async.race(Future{Thread.sleep(50)}, Future{Thread.sleep(10)}, Future{Thread.sleep(100)}))
-      Async.await(Async.race(Future{Thread.sleep(100)}, Future{Thread.sleep(50)}, Future{Thread.sleep(10)}))
+      Async.await(Async.race(Future { Thread.sleep(10) }, Future { Thread.sleep(100) }, Future { Thread.sleep(50) }))
+      Async.await(Async.race(Future { Thread.sleep(50) }, Future { Thread.sleep(10) }, Future { Thread.sleep(100) }))
+      Async.await(Async.race(Future { Thread.sleep(100) }, Future { Thread.sleep(50) }, Future { Thread.sleep(10) }))
 
   val c2: Double = measureIterations: () =>
     Async.blocking:
-      val f11 = Future {Thread.sleep(10)}
-      val f12 = Future {Thread.sleep(50)}
-      val f13 = Future {Thread.sleep(100)}
+      val f11 = Future { Thread.sleep(10) }
+      val f12 = Future { Thread.sleep(50) }
+      val f13 = Future { Thread.sleep(100) }
       f11.result
 
-      val f21 = Future {Thread.sleep(100)}
-      val f22 = Future {Thread.sleep(10)}
-      val f23 = Future {Thread.sleep(50)}
+      val f21 = Future { Thread.sleep(100) }
+      val f22 = Future { Thread.sleep(10) }
+      val f23 = Future { Thread.sleep(50) }
       f22.result
 
-      val f31 = Future {Thread.sleep(50)}
-      val f32 = Future {Thread.sleep(100)}
-      val f33 = Future {Thread.sleep(10)}
+      val f31 = Future { Thread.sleep(50) }
+      val f32 = Future { Thread.sleep(100) }
+      val f33 = Future { Thread.sleep(10) }
       f33.result
-
 
   val c1_seconds_wasted_for_waits = c1 * 0.01
   val c1_per_second_adjusted = c1 / 3 / (60 - c1_seconds_wasted_for_waits)
@@ -100,16 +98,16 @@ def measureIterations[T](action: () => T): Int =
   Raced futures awaited per second: 15.590345727332032
   Non-raced futures per second: 15.597976831457009
   Overhead: 1.0004894762604013
-  */
+   */
 
 @main def measureRaceOverheadVsJava(): Unit =
   given ExecutionContext = ExecutionContext.global
 
   val c1: Double = measureIterations: () =>
     Async.blocking:
-      Async.await(Async.race(Future{Thread.sleep(10)}, Future{Thread.sleep(100)}, Future{Thread.sleep(50)}))
-      Async.await(Async.race(Future{Thread.sleep(50)}, Future{Thread.sleep(10)}, Future{Thread.sleep(100)}))
-      Async.await(Async.race(Future{Thread.sleep(100)}, Future{Thread.sleep(50)}, Future{Thread.sleep(10)}))
+      Async.await(Async.race(Future { Thread.sleep(10) }, Future { Thread.sleep(100) }, Future { Thread.sleep(50) }))
+      Async.await(Async.race(Future { Thread.sleep(50) }, Future { Thread.sleep(10) }, Future { Thread.sleep(100) }))
+      Async.await(Async.race(Future { Thread.sleep(100) }, Future { Thread.sleep(50) }, Future { Thread.sleep(10) }))
 
   val c2: Double = measureIterations: () =>
     @volatile var i1 = true
@@ -153,7 +151,7 @@ def measureIterations[T](action: () => T): Int =
   Raced futures awaited per second: 15.411487529449996
   Java threads awaited per second: 15.671210243700953
   Overhead: 1.0168525402726147
-  */
+   */
 
 @main def channelsVsJava(): Unit =
   given ExecutionContext = ExecutionContext.global
@@ -210,7 +208,7 @@ def measureIterations[T](action: () => T): Int =
         c.read()
       }
 
-    Thread.sleep(sec*1000)
+    Thread.sleep(sec * 1000)
     f1.cancel()
     f2.cancel()
     Thread.sleep(500)
@@ -312,10 +310,10 @@ def measureIterations[T](action: () => T): Int =
     BufferedChannel sends per second: 308286.0
     ChannelMultiplexer over SyncChannels sends per second: 155737.0
     ChannelMultiplexer over BufferedChannels sends per second: 151995.0
-  */
+   */
 
 /** Warmup for 10 seconds and benchmark for 60 seconds.
- */
+  */
 def measureRunTimes[T](action: () => T): TimeMeasurementResult =
 
   var timesIn25Milliseconds: Long = 0
@@ -415,22 +413,20 @@ def measureRunTimes[T](action: () => T): TimeMeasurementResult =
     ret.append("],\n")
     ret.toString
 
-
   val bigStringBuilder = new StringBuilder()
   for (_ <- 1 to 10 * 1024 * 1024) bigStringBuilder.append("abcd")
   val bigString = bigStringBuilder.toString()
 
   def deleteFiles(): Unit =
     for (p <- Array("x", "y", "z"))
-      try
-        Files.delete(Paths.get("/tmp/FIO/" + p + ".txt"))
+      try Files.delete(Paths.get("/tmp/FIO/" + p + ".txt"))
       catch case e: NoSuchFileException => ()
 
   deleteFiles()
 
   dataAlmostJson.append("\n\t\"File writing\": {\n")
   {
-    for (size <- Seq(4, 40*1024*1024))
+    for (size <- Seq(4, 40 * 1024 * 1024))
       println("size " + size.toString)
       dataAlmostJson.append("\n\t\t\"Size " + size.toString + "\": {\n")
       {
@@ -449,8 +445,7 @@ def measureRunTimes[T](action: () => T): TimeMeasurementResult =
         println("done 2")
 
         dataAlmostJson.append(measure("Java Files.writeString", timesInner = if size < 100 then 100 else 10): () =>
-          Files.writeString(Paths.get("/tmp/FIO/z.txt"), bigString.substring(0, size))
-        )
+          Files.writeString(Paths.get("/tmp/FIO/z.txt"), bigString.substring(0, size)))
         println("done 3")
       }
       dataAlmostJson.append("},\n")
@@ -483,10 +478,8 @@ def measureRunTimes[T](action: () => T): TimeMeasurementResult =
         )
         println("done 2")
 
-
         dataAlmostJson.append(measure("Java Files.readString", timesInner = if size < 100 then 100 else 10): () =>
-          Files.readString(Paths.get("/tmp/FIO/z.txt"))
-        )
+          Files.readString(Paths.get("/tmp/FIO/z.txt")))
         println("done 3")
       }
       dataAlmostJson.append("},\n")
@@ -513,4 +506,4 @@ def measureRunTimes[T](action: () => T): TimeMeasurementResult =
   },
   },
   }
-  */
+   */

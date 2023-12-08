@@ -32,23 +32,21 @@ object VThreadSupport extends AsyncSupport:
       try
         result = Some(data)
         cond.signalAll()
-      finally
-        lock.unlock()
+      finally lock.unlock()
 
     private[VThreadSupport] def waitResult(): R =
       lock.lock()
       try
-        while result.isEmpty do
-          cond.await()
+        while result.isEmpty do cond.await()
         result.get
-      finally
-        lock.unlock()
+      finally lock.unlock()
 
   override opaque type Label[R] = VThreadLabel[R]
 
   // outside boundary: waiting on label
   //  inside boundary: waiting on suspension
-  private final class VThreadSuspension[-T, +R](using private[VThreadSupport] val l: Label[R] @uncheckedVariance) extends gears.async.Suspension[T, R]:
+  private final class VThreadSuspension[-T, +R](using private[VThreadSupport] val l: Label[R] @uncheckedVariance)
+      extends gears.async.Suspension[T, R]:
     private var nextInput: Option[T] = None
     private val lock = ReentrantLock()
     private val cond = lock.newCondition()
@@ -58,18 +56,15 @@ object VThreadSupport extends AsyncSupport:
       try
         nextInput = Some(data)
         cond.signalAll()
-      finally
-        lock.unlock()
+      finally lock.unlock()
 
     // variance is safe because the only caller created the object
     private[VThreadSupport] def waitInput(): T @uncheckedVariance =
       lock.lock()
       try
-        while nextInput.isEmpty do
-          cond.await()
+        while nextInput.isEmpty do cond.await()
         nextInput.get
-      finally
-        lock.unlock()
+      finally lock.unlock()
 
     // normal resume only tells other thread to run again -> resumeAsync may redirect here
     override def resume(arg: T): R =
@@ -88,8 +83,8 @@ object VThreadSupport extends AsyncSupport:
     label.waitResult()
 
   override private[async] def resumeAsync[T, R](suspension: Suspension[T, R])(arg: T)(using Scheduler): Unit =
-      suspension.l.clearResult()
-      suspension.setInput(arg)
+    suspension.l.clearResult()
+    suspension.setInput(arg)
 
   override def scheduleBoundary(body: (Label[Unit]) ?=> Unit)(using Scheduler): Unit =
     Thread.startVirtualThread: () =>

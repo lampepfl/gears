@@ -20,7 +20,8 @@ trait NativeSuspend extends SuspendSupport:
   override def boundary[R](body: (Label[R]) ?=> R): R =
     native.boundary(body)
 
-  override def suspend[T, R](body: Suspension[T, R] => R)(using Label[R]): T = native.suspend[T, R](f => body(NativeContinuation(f)))
+  override def suspend[T, R](body: Suspension[T, R] => R)(using Label[R]): T =
+    native.suspend[T, R](f => body(NativeContinuation(f)))
 end NativeSuspend
 
 /** Spawns a single thread that does all the sleeping. */
@@ -75,17 +76,19 @@ class ExecutorWithSleepThread(val exec: ExecutionContext) extends ExecutionConte
   sleeperThread.start()
 }
 
-class SuspendExecutorWithSleep(exec: ExecutionContext) extends ExecutorWithSleepThread(exec)
-  with AsyncSupport
-  with AsyncOperations
-  with NativeSuspend {
+class SuspendExecutorWithSleep(exec: ExecutionContext)
+    extends ExecutorWithSleepThread(exec)
+    with AsyncSupport
+    with AsyncOperations
+    with NativeSuspend {
   type Scheduler = this.type
   override def sleep(millis: Long)(using Async): Unit =
-    Future.withResolver[Unit]: resolver =>
-      val cancellable = schedule(millis.millis, () => resolver.resolve(()))
-      resolver.onCancel(cancellable.cancel)
-    .link()
-    .value
+    Future
+      .withResolver[Unit]: resolver =>
+        val cancellable = schedule(millis.millis, () => resolver.resolve(()))
+        resolver.onCancel(cancellable.cancel)
+      .link()
+      .value
 }
 
 class ForkJoinSupport extends SuspendExecutorWithSleep(new ForkJoinPool())

@@ -33,8 +33,8 @@ class TaskScheduleBehavior extends munit.FunSuite {
       f.result
       assertEquals(i, 5)
     val end = System.currentTimeMillis()
-    assert(end - start >= 50+100+200+400)
-    assert(end - start < 50+100+200+400+800)
+    assert(end - start >= 50 + 100 + 200 + 400)
+    assert(end - start < 50 + 100 + 200 + 400 + 800)
   }
 
   test("Fibonacci backoff 10ms, 6 times total schedule") {

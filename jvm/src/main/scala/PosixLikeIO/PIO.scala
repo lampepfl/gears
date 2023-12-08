@@ -13,7 +13,6 @@ import scala.Tuple.Union
 import scala.concurrent.ExecutionContext
 import scala.util.{Failure, Success, Try}
 
-
 class File(val path: String) {
   private var channel: Option[AsynchronousFileChannel] = None
 
@@ -22,8 +21,7 @@ class File(val path: String) {
   def open(options: StandardOpenOption*): File =
     assert(channel.isEmpty)
     val options1 = if (options.isEmpty) Seq(StandardOpenOption.READ) else options
-    channel = Some(
-      AsynchronousFileChannel.open(Path.of(path), options1*))
+    channel = Some(AsynchronousFileChannel.open(Path.of(path), options1*))
     this
 
   def close(): Unit =
@@ -35,10 +33,15 @@ class File(val path: String) {
     assert(channel.isDefined)
 
     val p = Promise[Int]()
-    channel.get.read(buffer, 0, buffer, new CompletionHandler[Integer, ByteBuffer] {
-      override def completed(result: Integer, attachment: ByteBuffer): Unit = p.complete(Success(result))
-      override def failed(e: Throwable, attachment: ByteBuffer): Unit = p.complete(Failure(e))
-    })
+    channel.get.read(
+      buffer,
+      0,
+      buffer,
+      new CompletionHandler[Integer, ByteBuffer] {
+        override def completed(result: Integer, attachment: ByteBuffer): Unit = p.complete(Success(result))
+        override def failed(e: Throwable, attachment: ByteBuffer): Unit = p.complete(Failure(e))
+      }
+    )
     p.future
 
   def readString(size: Int, charset: Charset = StandardCharsets.UTF_8): Future[String] =
@@ -47,23 +50,32 @@ class File(val path: String) {
 
     val buffer = ByteBuffer.allocate(size)
     val p = Promise[String]()
-    channel.get.read(buffer, 0, buffer, new CompletionHandler[Integer, ByteBuffer] {
-      override def completed(result: Integer, attachment: ByteBuffer): Unit =
-        p.complete(Success(charset.decode(attachment.slice(0, result)).toString()))
-      override def failed(e: Throwable, attachment: ByteBuffer): Unit = p.complete(Failure(e))
-    })
+    channel.get.read(
+      buffer,
+      0,
+      buffer,
+      new CompletionHandler[Integer, ByteBuffer] {
+        override def completed(result: Integer, attachment: ByteBuffer): Unit =
+          p.complete(Success(charset.decode(attachment.slice(0, result)).toString()))
+        override def failed(e: Throwable, attachment: ByteBuffer): Unit = p.complete(Failure(e))
+      }
+    )
     p.future
 
   def write(buffer: ByteBuffer): Future[Int] =
     assert(channel.isDefined)
 
     val p = Promise[Int]()
-    channel.get.write(buffer, 0, buffer, new CompletionHandler[Integer, ByteBuffer] {
-      override def completed(result: Integer, attachment: ByteBuffer): Unit = p.complete(Success(result))
-      override def failed(e: Throwable, attachment: ByteBuffer): Unit = p.complete(Failure(e))
-    })
+    channel.get.write(
+      buffer,
+      0,
+      buffer,
+      new CompletionHandler[Integer, ByteBuffer] {
+        override def completed(result: Integer, attachment: ByteBuffer): Unit = p.complete(Success(result))
+        override def failed(e: Throwable, attachment: ByteBuffer): Unit = p.complete(Failure(e))
+      }
+    )
     p.future
-
 
   def writeString(s: String, charset: Charset = StandardCharsets.UTF_8): Future[Int] =
     write(ByteBuffer.wrap(s.getBytes(charset)))
@@ -100,7 +112,8 @@ class SocketUDP() {
 
     Async.blocking:
       Future:
-        val packet: DatagramPacket = new DatagramPacket(data.array(), data.limit(), InetAddress.getByName(address), port)
+        val packet: DatagramPacket =
+          new DatagramPacket(data.array(), data.limit(), InetAddress.getByName(address), port)
         socket.get.send(packet)
 
   def receive(): Future[DatagramPacket] =
