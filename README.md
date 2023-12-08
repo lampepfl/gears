@@ -187,14 +187,14 @@ which takes two futures and if they both complete successfully returns their res
   extension [T](f1: Future[T])
 
     def zip[U](f2: Future[U])(using Async): Future[(T, U)] = Future:
-      Async.await(Async.either(f1, f2)) match
+      Async.either(f1, f2).awaitResult match
         case Left(Success(x1))    => (x1, f2.value)
         case Right(Success(x2))   => (f1.value, x2)
         case Left(Failure(ex))    => throw ex
         case Right(Failure(ex))   => throw ex
 
     def alt(f2: Future[T])(using Async): Future[T] = Future:
-      Async.await(Async.either(f1, f2)) match
+      Async.either(f1, f2).awaitResult match
         case Left(Success(x1))    => x1
         case Right(Success(x2))   => x2
         case Left(_: Failure[?])  => f2.value

@@ -27,11 +27,11 @@ class FutureBehavior extends munit.FunSuite {
         }
         val res = c
           .alt(Future {
-            val res = a.value + b.value
+            val res = a.await + b.await
             res
           })
           .alt(c)
-          .value
+          .await
         res
       val y = Future:
         val a = Future {
@@ -40,7 +40,7 @@ class FutureBehavior extends munit.FunSuite {
         val b = Future {
           11
         }
-        val res = a.zip(b).value
+        val res = a.zip(b).await
         res
       val z = Future:
         val a = Future {
@@ -49,11 +49,11 @@ class FutureBehavior extends munit.FunSuite {
         val b = Future {
           true
         }
-        val res = a.alt(b).value
+        val res = a.alt(b).await
         res
       val _: Future[Int | Boolean] = z
-      assertEquals(x.value, 33)
-      assertEquals(y.value, (22, 11))
+      assertEquals(x.await, 33)
+      assertEquals(y.await, (22, 11))
   }
 
   test("Constant returns") {
@@ -61,14 +61,14 @@ class FutureBehavior extends munit.FunSuite {
       for (i <- -5 to 5)
         val f1 = Future { i }
         val f2 = Future.now(Success(i))
-        assertEquals(f1.value, i)
-        assertEquals(f1.value, f2.value)
+        assertEquals(f1.await, i)
+        assertEquals(f1.await, f2.await)
   }
 
   test("Future.now returning") {
     Async.blocking:
       val f = Future.now(Success(116))
-      assertEquals(f.value, 116)
+      assertEquals(f.await, 116)
   }
 
   test("Constant future with timeout") {
@@ -77,7 +77,7 @@ class FutureBehavior extends munit.FunSuite {
         sleep(50)
         55
       }
-      assertEquals(f.value, 55)
+      assertEquals(f.await, 55)
   }
 
   test("alt") {
@@ -87,10 +87,10 @@ class FutureBehavior extends munit.FunSuite {
       val fail1 = Future.now(Failure(error))
       val succeed = Future.now(Success(13))
 
-      assert(Set(10, 20).contains(Future { 10 }.alt(Future { 20 }).value))
-      assertEquals(fail.alt(succeed).value, 13)
-      assertEquals(succeed.alt(fail).value, 13)
-      assertEquals(fail.alt(fail1).result, Failure(error))
+      assert(Set(10, 20).contains(Future { 10 }.alt(Future { 20 }).await))
+      assertEquals(fail.alt(succeed).await, 13)
+      assertEquals(succeed.alt(fail).await, 13)
+      assertEquals(fail.alt(fail1).awaitResult, Failure(error))
   }
 
   test("altC of 2 futures") {
@@ -101,7 +101,7 @@ class FutureBehavior extends munit.FunSuite {
         touched += 1
       }.alt(Future {
         10
-      }).result
+      }).awaitResult
       sleep(300)
       assertEquals(touched, 1)
     Async.blocking:
@@ -109,7 +109,7 @@ class FutureBehavior extends munit.FunSuite {
       Future {
         sleep(200)
         touched += 1
-      }.altWithCancel(Future { 10 }).result
+      }.altWithCancel(Future { 10 }).awaitResult
       sleep(300)
       assertEquals(touched, 0)
   }
@@ -129,13 +129,13 @@ class FutureBehavior extends munit.FunSuite {
         Future {
           5
         }
-      ).result
+      ).awaitResult
       sleep(200)
       assertEquals(touched.get(), 2)
     }
     Async.blocking:
       var touched = 0
-      altC(Future { sleep(100); touched += 1 }, Future { sleep(100); touched += 1 }, Future { 5 }).result
+      altC(Future { sleep(100); touched += 1 }, Future { sleep(100); touched += 1 }, Future { 5 }).awaitResult
       sleep(200)
       assertEquals(touched, 0)
   }
@@ -147,23 +147,23 @@ class FutureBehavior extends munit.FunSuite {
       val fail1 = Future.now(Failure(error))
       val succeed = Future.now(Success(13))
 
-      assertEquals(Future { 10 }.zip(Future { 20 }).value, (10, 20))
-      assertEquals(fail.zip(succeed).result, Failure(error))
-      assertEquals(succeed.zip(fail).result, Failure(error))
-      assertEquals(fail.zip(fail1).result, Failure(error))
+      assertEquals(Future { 10 }.zip(Future { 20 }).await, (10, 20))
+      assertEquals(fail.zip(succeed).awaitResult, Failure(error))
+      assertEquals(succeed.zip(fail).awaitResult, Failure(error))
+      assertEquals(fail.zip(fail1).awaitResult, Failure(error))
   }
 
   test("result wraps exceptions") {
     Async.blocking:
       for (i <- -5 to 5)
         val error = new AssertionError(i)
-        assertEquals(Future { throw error }.result, Failure(error))
+        assertEquals(Future { throw error }.awaitResult, Failure(error))
   }
 
   test("result wraps values") {
     Async.blocking:
       for (i <- -5 to 5)
-        assertEquals(Future { i }.result, Success(i))
+        assertEquals(Future { i }.awaitResult, Success(i))
   }
 
   test("value propagates exceptions exceptions through futures") {
@@ -173,9 +173,9 @@ class FutureBehavior extends munit.FunSuite {
         val f1 = Future {
           throw e
         }
-        (f1.value, f1.value)
+        (f1.await, f1.await)
       }
-      try f.value
+      try f.await
       catch
         case e1: AssertionError => assertEquals(e, e1)
         case z =>
@@ -191,9 +191,9 @@ class FutureBehavior extends munit.FunSuite {
           Future {
             sleep(Random.between(0, 15L))
             10
-          }.value
-        }.value
-      }.value
+          }.await
+        }.await
+      }.await
       assertEquals(z, 10)
   }
 
@@ -204,7 +204,7 @@ class FutureBehavior extends munit.FunSuite {
         10
       }
       f.cancel()
-      f.result match
+      f.awaitResult match
         case _: Failure[CancellationException] => ()
         case _                                 => assert(false)
   }
@@ -219,7 +219,7 @@ class FutureBehavior extends munit.FunSuite {
         }.unlink()
         10
       }
-      assertEquals(f.value, 10)
+      assertEquals(f.await, 10)
       assertEquals(zombieModifiedThis, false)
     Thread.sleep(300)
     assertEquals(zombieModifiedThis, true)
@@ -239,7 +239,7 @@ class FutureBehavior extends munit.FunSuite {
             Future {
               30
             }
-          ).value
+          ).await
         )
       )
   }
@@ -249,13 +249,13 @@ class FutureBehavior extends munit.FunSuite {
       val z1 = Future { sleep(500); 10 } *: Future { sleep(10); 222 } *: Future { sleep(150); 333 } *: Future {
         EmptyTuple
       }
-      assertEquals(z1.value, (10, 222, 333))
+      assertEquals(z1.await, (10, 222, 333))
   }
 
   test("zip on tuples with last zip") {
     Async.blocking:
       val z1 = Future { 10 } *: Future { 222 }.zip(Future { 333 })
-      assertEquals(z1.value, (10, 222, 333))
+      assertEquals(z1.await, (10, 222, 333))
   }
 
   test("zip(3) first error") {
@@ -274,7 +274,7 @@ class FutureBehavior extends munit.FunSuite {
           } *: Future {
             sleep(Random.between(50, 100));
             throw e3
-          } *: Future.now(Success(EmptyTuple))).result,
+          } *: Future.now(Success(EmptyTuple))).awaitResult,
           Failure(e3)
         )
   }
@@ -291,7 +291,7 @@ class FutureBehavior extends munit.FunSuite {
       futures.foreach(_.cancel())
       val exceptionSet = mutable.Set[Throwable]()
       for (f <- futures) {
-        f.result match {
+        f.awaitResult match {
           case Failure(e) => exceptionSet.add(e)
           case _          => assert(false)
         }
@@ -307,7 +307,7 @@ class FutureBehavior extends munit.FunSuite {
           j = i
         }
         val f2 = Future.now(Success(i))
-        assertEquals(j, f2.value)
+        assertEquals(j, f2.await)
         assertEquals(j, i)
   }
 
@@ -322,9 +322,9 @@ class FutureBehavior extends munit.FunSuite {
       }
       sleep(50)
       f.cancel()
-      f.result
+      f.awaitResult
       assertEquals(touched, true)
-      f.result match
+      f.awaitResult match
         case Failure(ex) if ex.isInstanceOf[CancellationException] => ()
         case _                                                     => assert(false)
   }
@@ -335,7 +335,7 @@ class FutureBehavior extends munit.FunSuite {
       p.complete(Success(10))
       val f = p.future
       f.cancel()
-      f.result match
+      f.awaitResult match
         case Failure(ex) if ex.isInstanceOf[CancellationException] => ()
         case _                                                     => assert(false)
   }
@@ -353,7 +353,7 @@ class FutureBehavior extends munit.FunSuite {
       }
       sleep(50)
       f1.cancel()
-      f1.result
+      f1.awaitResult
       assertEquals(touched1, true)
       assertEquals(touched2, false)
   }
@@ -372,7 +372,7 @@ class FutureBehavior extends munit.FunSuite {
             Future {
               sleep(Random.between(30, 50)); 10000 * i + 333
             }
-          ).result,
+          ).awaitResult,
           Success(10000 * i + 333)
         )
   }
@@ -398,7 +398,7 @@ class FutureBehavior extends munit.FunSuite {
               sleep(Random.between(0, 250));
               throw e3
             }
-          ).result,
+          ).awaitResult,
           Failure(e2)
         )
   }
@@ -410,7 +410,7 @@ class FutureBehavior extends munit.FunSuite {
       val collector = Future.Collector(futs*)
 
       var sum = 0
-      for i <- range do sum += collector.results.read().right.get.value
+      for i <- range do sum += collector.results.read().right.get.await
       assertEquals(sum, range.sum)
   }
 
@@ -427,8 +427,8 @@ class FutureBehavior extends munit.FunSuite {
           collector += r
 
       var sum = 0
-      for i <- range do sum += collector.results.read().right.get.value
-      for i <- range do sum += collector.results.read().right.get.value
+      for i <- range do sum += collector.results.read().right.get.await
+      for i <- range do sum += collector.results.read().right.get.await
       assertEquals(sum, 2 * range.sum)
   }
 

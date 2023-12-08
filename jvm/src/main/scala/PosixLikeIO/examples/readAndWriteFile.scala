@@ -13,7 +13,7 @@ import scala.concurrent.ExecutionContext
   given ExecutionContext = ExecutionContext.global
   Async.blocking:
     PIOHelper.withFile("/home/julian/Desktop/x.txt", StandardOpenOption.READ, StandardOpenOption.WRITE): f =>
-      Async.await(f.writeString("Hello world! (1)"))
-      println(Async.await(f.readString(1024)).get)
-      Async.await(f.writeString("Hello world! (2)"))
-      println(Async.await(f.readString(1024)).get)
+      f.writeString("Hello world! (1)").await
+      println(f.readString(1024).await)
+      f.writeString("Hello world! (2)").await
+      println(f.readString(1024).await)

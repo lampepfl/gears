@@ -17,19 +17,7 @@ import scala.util.control.NonFatal
 
 /** A cancellable future that can suspend waiting for other asynchronous sources
   */
-trait Future[+T] extends Async.OriginalSource[Try[T]], Cancellable:
-
-  /** Wait for this future to be completed and return its result */
-  def result(using async: Async): Try[T]
-
-  /** Wait for this future to be completed, return its value in case of success, or rethrow exception in case of
-    * failure.
-    */
-  def value(using async: Async): T = result.get
-
-  /** Eventually stop computation of this future and fail with a `Cancellation` exception.
-    */
-  def cancel(): Unit
+trait Future[+T] extends Async.OriginalSource[Try[T]], Cancellable
 
 object Future:
 
@@ -64,12 +52,7 @@ object Future:
 
     def cancel(): Unit =
       cancelRequest = true
-
-    // Future method implementations
-
-    def result(using async: Async): Try[T] =
-      val r = async.await(this)
-      if cancelRequest then Failure(new CancellationException()) else r
+      complete(Failure(new CancellationException))
 
     /** Complete future with result. If future was cancelled in the meantime, return a CancellationException failure
       * instead. Note: @uncheckedVariance is safe here since `complete` is called from only two places:
@@ -219,18 +202,18 @@ object Future:
       * fail with the failure that was returned first.
       */
     def zip[U](f2: Future[U])(using Async): Future[(T, U)] = Future:
-      Async.await(Async.either(f1, f2)) match
-        case Left(Success(x1))  => (x1, f2.value)
-        case Right(Success(x2)) => (f1.value, x2)
+      Async.either(f1, f2).awaitResult match
+        case Left(Success(x1))  => (x1, f2.await)
+        case Right(Success(x2)) => (f1.await, x2)
         case Left(Failure(ex))  => throw ex
         case Right(Failure(ex)) => throw ex
 
     /** Parallel composition of tuples of futures. Future.Success(EmptyTuple) might be treated as Nil.
       */
     def *:[U <: Tuple](f2: Future[U])(using Async): Future[T *: U] = Future:
-      Async.await(Async.either(f1, f2)) match
-        case Left(Success(x1))  => x1 *: f2.value
-        case Right(Success(x2)) => f1.value *: x2
+      Async.either(f1, f2).awaitResult match
+        case Left(Success(x1))  => x1 *: f2.await
+        case Right(Success(x2)) => f1.await *: x2
         case Left(Failure(ex))  => throw ex
         case Right(Failure(ex)) => throw ex
 
@@ -238,25 +221,25 @@ object Future:
       * success that was returned first. Otherwise, fail with the failure that was returned last.
       */
     def alt(f2: Future[T])(using Async): Future[T] = Future:
-      Async.await(Async.either(f1, f2)) match
+      Async.either(f1, f2).awaitResult match
         case Left(Success(x1))    => x1
         case Right(Success(x2))   => x2
-        case Left(_: Failure[?])  => f2.value
-        case Right(_: Failure[?]) => f1.value
+        case Left(_: Failure[?])  => f2.await
+        case Right(_: Failure[?]) => f1.await
 
     /** Like `alt` but the slower future is cancelled. If either task succeeds, succeed with the success that was
       * returned first and the other is cancelled. Otherwise, fail with the failure that was returned last.
       */
     def altWithCancel(f2: Future[T])(using Async): Future[T] = Future:
-      Async.await(Async.either(f1, f2)) match
+      Async.either(f1, f2).awaitResult match
         case Left(Success(x1)) =>
           f2.cancel()
           x1
         case Right(Success(x2)) =>
           f1.cancel()
           x2
-        case Left(_: Failure[?])  => f2.value
-        case Right(_: Failure[?]) => f1.value
+        case Left(_: Failure[?])  => f2.await
+        case Right(_: Failure[?]) => f1.await
 
   end extension
 
@@ -302,15 +285,15 @@ object Future:
     /** `.await` for all futures in the sequence, returns the results in a sequence, or throws if any futures fail. */
     def awaitAll(using Async) =
       val collector = Collector(fs*)
-      for _ <- fs do collector.results.read().right.get.value
-      fs.map(_.value)
+      for _ <- fs do collector.results.read().right.get.await
+      fs.map(_.await)
 
     /** Like [[awaitAll]], but cancels all futures as soon as one of them fails. */
     def awaitAllOrCancel(using Async) =
       val collector = Collector(fs*)
       try
-        for _ <- fs do collector.results.read().right.get.value
-        fs.map(_.value)
+        for _ <- fs do collector.results.read().right.get.await
+        fs.map(_.await)
       catch
         case NonFatal(e) =>
           fs.foreach(_.cancel())
@@ -327,7 +310,7 @@ object Future:
       val collector = Collector(fs*)
       @scala.annotation.tailrec
       def loop(attempt: Int): T =
-        collector.results.read().right.get.result match
+        collector.results.read().right.get.awaitResult match
           case Failure(exception) =>
             if attempt == fs.length then /* everything failed */ throw exception else loop(attempt + 1)
           case Success(value) =>
@@ -462,13 +445,13 @@ end Task
 private def altAndAltCImplementation[T](shouldCancel: Boolean, futures: Future[T]*)(using Async): Future[T] = Future[T]:
   val fs: Seq[Future[(Try[T], Int)]] = futures.zipWithIndex.map({ (f, i) =>
     Future:
-      try (Success(f.value), i)
+      try (Success(f.await), i)
       catch case e => (Failure(e), i)
   })
 
   @tailrec
   def helper(failed: Int, fs: Seq[(Future[(Try[T], Int)], Int)]): Try[T] =
-    Async.await(Async.race(fs.map(_._1)*)) match
+    Async.race(fs.map(_._1)*).awaitResult match
       case Success((Success(x), i)) =>
         if (shouldCancel) {
           for ((f, j) <- futures.zipWithIndex) {

@@ -24,10 +24,10 @@ class ListenerBehavior extends munit.FunSuite:
     val prom1 = Promise[Unit]()
     val prom2 = Promise[Unit]()
     Async.blocking:
-      val raced = race(Future { prom1.future.value; 10 }, Future { prom2.future.value; 20 })
+      val raced = race(Future { prom1.future.await; 10 }, Future { prom2.future.await; 20 })
       assert(!raced.poll(Listener.acceptingListener((x, _) => fail(s"race uncomplete $x"))))
       prom1.complete(Success(()))
-      assertEquals(Async.await(raced).get, 10)
+      assertEquals(raced.await, 10)
 
   test("lock two listeners"):
     val listener1 = Listener.acceptingListener[Int]((x, _) => assertEquals(x, 1))
@@ -117,7 +117,7 @@ class ListenerBehavior extends munit.FunSuite:
       source1.completeWith(1)
       assert(source1.listener.isEmpty)
       assert(source2.listener.isEmpty)
-      f.value
+      f.await
 
   test("race successful with wait"):
     val source1 = TSource()
@@ -132,8 +132,8 @@ class ListenerBehavior extends munit.FunSuite:
       listener.waitWaiter()
       listener.continue()
       val f2 = Future(l2.completeNow(1, source2))
-      assert(f1.value || f2.value)
-      assert(!f1.value || !f2.value)
+      assert(f1.await || f2.await)
+      assert(!f1.await || !f2.await)
 
     assert(source1.listener.isEmpty)
     assert(source2.listener.isEmpty)
@@ -172,7 +172,7 @@ class ListenerBehavior extends munit.FunSuite:
       other.waitWaiter()
       assert(source2.listener.get.completeNow(1, source2))
       other.continue()
-      assertEquals(f1.value, s1listener)
+      assertEquals(f1.await, s1listener)
 
   test("lockBoth ordering"):
     val ordering = Buffer[Long]()
@@ -330,7 +330,7 @@ private class NumberedTestListener private (sleep: AtomicBoolean, fail: Boolean,
       if sleep.getAndSet(false) then
         Async.blocking:
           waiter = Some(Promise())
-          waiter.get.future.value
+          waiter.get.future.await
       waiter.foreach: promise =>
         promise.complete(Success(()))
         waiter = None

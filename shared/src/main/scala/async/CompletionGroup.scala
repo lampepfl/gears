@@ -25,7 +25,7 @@ class CompletionGroup(val handleCompletion: Cancellable => Async ?=> Unit = _ =>
   private[async] def waitCompletion()(using Async): Unit =
     synchronized:
       if members.nonEmpty && cancelWait.isEmpty then cancelWait = Some(Promise())
-    cancelWait.foreach(cWait => Async.await(cWait.future))
+    cancelWait.foreach(cWait => cWait.future.await)
     signalCompletion()
 
   /** Add given member to the members set. If the group has already been cancelled, cancels that member immediately. */

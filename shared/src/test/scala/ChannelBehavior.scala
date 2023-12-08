@@ -42,8 +42,8 @@ class ChannelBehavior extends munit.FunSuite {
       val f2 = Future:
         c.read()
 
-      f1.result
-      f2.result
+      f1.awaitResult
+      f2.awaitResult
   }
 
   test("sending is nonblocking in empty BufferedChannel") {
@@ -59,8 +59,8 @@ class ChannelBehavior extends munit.FunSuite {
       val f2 = Future:
         c.read()
 
-      f1.result
-      f2.result
+      f1.awaitResult
+      f2.awaitResult
   }
 
   test("sending is blocking in full BufferedChannel") {
@@ -80,8 +80,8 @@ class ChannelBehavior extends munit.FunSuite {
       val f2 = Future:
         c.read()
 
-      f1.result
-      f2.result
+      f1.awaitResult
+      f2.awaitResult
   }
 
   test("read blocks until value is available in SyncChannel") {
@@ -100,9 +100,9 @@ class ChannelBehavior extends munit.FunSuite {
         c.read()
         assertEquals(touched, true)
 
-      f1.result
-      f11.result
-      f2.result
+      f1.awaitResult
+      f11.awaitResult
+      f2.awaitResult
   }
 
   test("read blocks until value is available in BufferedChannel") {
@@ -121,9 +121,9 @@ class ChannelBehavior extends munit.FunSuite {
         c.read()
         assertEquals(touched, true)
 
-      f1.result
-      f11.result
-      f2.result
+      f1.awaitResult
+      f11.awaitResult
+      f2.awaitResult
   }
 
   test("values arrive in order") {
@@ -199,7 +199,7 @@ class ChannelBehavior extends munit.FunSuite {
           for (i <- 1 to 10000)
             sum += c.read().right.get
 
-        f2.result
+        f2.awaitResult
         assertEquals(sum, 50005000L)
     }
   }
@@ -236,15 +236,15 @@ class ChannelBehavior extends munit.FunSuite {
             gotCount.incrementAndGet()
           }
 
-        f21.result
-        f22.result
+        f21.awaitResult
+        f22.awaitResult
         while (gotCount.get() < 30000) {
           c.read()
           gotCount.incrementAndGet()
         }
-        f11.result
-        f12.result
-        f13.result
+        f11.awaitResult
+        f12.awaitResult
+        f13.awaitResult
     }
   }
 
@@ -260,7 +260,7 @@ class ChannelBehavior extends munit.FunSuite {
         )*
       )
       var sum = 0
-      for i <- 0 until 1000 do sum += Async.await(race)
+      for i <- 0 until 1000 do sum += race.awaitResult
       assertEquals(sum, (0 until 1000).sum)
   }
 
@@ -286,7 +286,7 @@ class ChannelBehavior extends munit.FunSuite {
         (for i <- 0 until 1000 yield ch.sendSource(i))*
       )
       Future {
-        while Async.await(race).isRight do {
+        while race.awaitResult.isRight do {
           timesSent += 1
         }
       }
@@ -318,7 +318,7 @@ class ChannelBehavior extends munit.FunSuite {
 
       a.close()
       b.close()
-      assert(Async.race(a.readSource, b.readSource).await.isLeft)
+      assert(Async.race(a.readSource, b.readSource).awaitResult.isLeft)
   }
 
   test("ChannelMultiplexer multiplexes - all subscribers read the same stream") {

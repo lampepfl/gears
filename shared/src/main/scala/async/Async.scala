@@ -57,9 +57,6 @@ object Async:
   /** The currently executing Async context */
   inline def current(using async: Async): Async = async
 
-  /** Await source result in currently executing Async context */
-  inline def await[T](src: Source[T])(using async: Async): T = async.await(src)
-
   def group[T](body: Async ?=> T)(using async: Async): T =
     withNewCompletionGroup(CompletionGroup(async.group.handleCompletion).link())(body)
 
@@ -114,9 +111,15 @@ object Async:
       resultOpt
 
     /** Utility method for direct waiting with `Async`. */
-    def await(using Async) = Async.await(this)
-
+    final def awaitResult(using ac: Async) = ac.await(this)
   end Source
+
+  extension [T](src: Source[scala.util.Try[T]])
+    /** Waits for an item to arrive from the source, then automatically unwraps it. */
+    inline def await(using Async) = src.awaitResult.get
+  extension [E, T](src: Source[Either[E, T]])
+    /** Waits for an item to arrive from the source, then automatically unwraps it. */
+    inline def await(using Async) = src.awaitResult.right.get
 
   /** An original source has a standard definition of `onComplete` in terms of `poll` and `addListener`. Implementations
     * should be the resource owner to handle listener queue and completion using an object monitor on the instance.
@@ -263,7 +266,7 @@ object Async:
     * [[select]] is run in the same async context as the calling context of [[select]].
     */
   def select[T](cases: SelectCase[T]*)(using Async) =
-    val (input, which) = raceWithOrigin(cases.map(_._1)*).await
+    val (input, which) = raceWithOrigin(cases.map(_._1)*).awaitResult
     val (_, handler) = cases.find(_._1 == which).get
     handler.asInstanceOf[input.type => T](input)
 

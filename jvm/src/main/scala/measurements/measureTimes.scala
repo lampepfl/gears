@@ -46,7 +46,7 @@ def measureIterations[T](action: () => T): Int =
     Async.blocking:
       val f = Future:
         var z = 1
-      f.result
+      f.awaitResult
 
   println("Thread joins per second: " + (threadJoins / 60))
   println("Future joins per second: " + (futureJoins / 60))
@@ -64,26 +64,26 @@ def measureIterations[T](action: () => T): Int =
 
   val c1: Double = measureIterations: () =>
     Async.blocking:
-      Async.await(Async.race(Future { Thread.sleep(10) }, Future { Thread.sleep(100) }, Future { Thread.sleep(50) }))
-      Async.await(Async.race(Future { Thread.sleep(50) }, Future { Thread.sleep(10) }, Future { Thread.sleep(100) }))
-      Async.await(Async.race(Future { Thread.sleep(100) }, Future { Thread.sleep(50) }, Future { Thread.sleep(10) }))
+      Async.race(Future { Thread.sleep(10) }, Future { Thread.sleep(100) }, Future { Thread.sleep(50) }).await
+      Async.race(Future { Thread.sleep(50) }, Future { Thread.sleep(10) }, Future { Thread.sleep(100) }).await
+      Async.race(Future { Thread.sleep(100) }, Future { Thread.sleep(50) }, Future { Thread.sleep(10) }).await
 
   val c2: Double = measureIterations: () =>
     Async.blocking:
       val f11 = Future { Thread.sleep(10) }
       val f12 = Future { Thread.sleep(50) }
       val f13 = Future { Thread.sleep(100) }
-      f11.result
+      f11.awaitResult
 
       val f21 = Future { Thread.sleep(100) }
       val f22 = Future { Thread.sleep(10) }
       val f23 = Future { Thread.sleep(50) }
-      f22.result
+      f22.awaitResult
 
       val f31 = Future { Thread.sleep(50) }
       val f32 = Future { Thread.sleep(100) }
       val f33 = Future { Thread.sleep(10) }
-      f33.result
+      f33.awaitResult
 
   val c1_seconds_wasted_for_waits = c1 * 0.01
   val c1_per_second_adjusted = c1 / 3 / (60 - c1_seconds_wasted_for_waits)
@@ -105,9 +105,9 @@ def measureIterations[T](action: () => T): Int =
 
   val c1: Double = measureIterations: () =>
     Async.blocking:
-      Async.await(Async.race(Future { Thread.sleep(10) }, Future { Thread.sleep(100) }, Future { Thread.sleep(50) }))
-      Async.await(Async.race(Future { Thread.sleep(50) }, Future { Thread.sleep(10) }, Future { Thread.sleep(100) }))
-      Async.await(Async.race(Future { Thread.sleep(100) }, Future { Thread.sleep(50) }, Future { Thread.sleep(10) }))
+      Async.race(Future { Thread.sleep(10) }, Future { Thread.sleep(100) }, Future { Thread.sleep(50) }).await
+      Async.race(Future { Thread.sleep(50) }, Future { Thread.sleep(10) }, Future { Thread.sleep(100) }).await
+      Async.race(Future { Thread.sleep(100) }, Future { Thread.sleep(50) }, Future { Thread.sleep(10) }).await
 
   val c2: Double = measureIterations: () =>
     @volatile var i1 = true
@@ -433,7 +433,7 @@ def measureRunTimes[T](action: () => T): TimeMeasurementResult =
         dataAlmostJson.append(measure("PosixLikeIO", timesInner = if size < 100 then 100 else 10): () =>
           Async.blocking:
             PIOHelper.withFile("/tmp/FIO/x.txt", StandardOpenOption.CREATE, StandardOpenOption.WRITE): f =>
-              f.writeString(bigString.substring(0, size)).result
+              f.writeString(bigString.substring(0, size)).awaitResult
         )
         println("done 1")
 
@@ -466,7 +466,7 @@ def measureRunTimes[T](action: () => T): TimeMeasurementResult =
         dataAlmostJson.append(measure("PosixLikeIO", timesInner = if size < 100 then 100 else 10): () =>
           Async.blocking:
             PIOHelper.withFile("/tmp/FIO/x.txt", StandardOpenOption.READ): f =>
-              f.readString(size).result
+              f.readString(size).awaitResult
         )
         println("done 1")
 
