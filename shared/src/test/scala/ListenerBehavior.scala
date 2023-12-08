@@ -24,7 +24,7 @@ class ListenerBehavior extends munit.FunSuite:
     val prom1 = Promise[Unit]()
     val prom2 = Promise[Unit]()
     Async.blocking:
-      val raced = race(Future { prom1.future.value ; 10 }, Future { prom2.future.value ; 20 })
+      val raced = race(Future { prom1.future.value; 10 }, Future { prom2.future.value; 20 })
       assert(!raced.poll(Listener.acceptingListener((x, _) => fail(s"race uncomplete $x"))))
       prom1.complete(Success(()))
       assertEquals(Async.await(raced).get, 10)
@@ -149,7 +149,6 @@ class ListenerBehavior extends munit.FunSuite:
     assert(Async.race(source1, source2).poll(listener))
     assert(Async.race(source2, source1).poll(listener))
 
-
   test("race failed without wait"):
     val source1 = TSource()
     val source2 = TSource()
@@ -250,10 +249,12 @@ class ListenerBehavior extends munit.FunSuite:
     Async.race(source1).onComplete(NumberedTestListener(false, false, 1))
     val wrapped = source1.listener.get
 
-    Thread.ofPlatform().start: () =>
-      val result = wrapped.lock.lockSelf(source1).asInstanceOf[Listener.PartialLock]
-      wrapped.releaseLock(result)
-    .join()
+    Thread
+      .ofPlatform()
+      .start: () =>
+        val result = wrapped.lock.lockSelf(source1).asInstanceOf[Listener.PartialLock]
+        wrapped.releaseLock(result)
+      .join()
 
     assert(wrapped.completeNow(1, source1))
 
@@ -292,15 +293,15 @@ def lockChain[T](buf: Buffer[Long], inner: Listener[T])(numbers: Long*) =
     override val lock: ListenerLock | Null = new ListenerLock {
       override val selfNumber: Long = num
       var heldSrc: Source[?] = null
-      val partialLock = Listener.withLock(inner):
-        innerLock => new PartialLock:
+      val partialLock = Listener.withLock(inner): innerLock =>
+        new PartialLock:
           override val nextNumber: Long = innerLock.selfNumber
           override def lockNext(): LockResult = innerLock.lockSelf(heldSrc)
       override def lockSelf(source: Source[?]): LockResult =
         heldSrc = source
         buf += num
         partialLock match
-          case null => Locked
+          case null            => Locked
           case pl: PartialLock => pl
       override protected def release(to: LockMarker): ListenerLock | Null =
         if to == partialLock then null else inner.lock
@@ -315,7 +316,9 @@ private class TestListener(expected: Int)(using asst: munit.Assertions) extends 
   def complete(data: Int, source: Source[Int]): Unit =
     asst.assertEquals(data, expected)
 
-private class NumberedTestListener private(sleep: AtomicBoolean, fail: Boolean, expected: Int)(using munit.Assertions) extends TestListener(expected) with Listener.NumberedLock:
+private class NumberedTestListener private (sleep: AtomicBoolean, fail: Boolean, expected: Int)(using munit.Assertions)
+    extends TestListener(expected)
+    with Listener.NumberedLock:
   private var waiter: Option[Promise[Unit]] = None
 
   def this(sleep: Boolean, fail: Boolean, expected: Int)(using munit.Assertions) =
@@ -342,9 +345,9 @@ private class NumberedTestListener private(sleep: AtomicBoolean, fail: Boolean, 
 
 /** Dummy source that never completes */
 private object Dummy extends Async.Source[Nothing]:
-    def poll(k: Listener[Nothing]): Boolean = false
-    def onComplete(k: Listener[Nothing]): Unit = ()
-    def dropListener(k: Listener[Nothing]): Unit = ()
+  def poll(k: Listener[Nothing]): Boolean = false
+  def onComplete(k: Listener[Nothing]): Unit = ()
+  def dropListener(k: Listener[Nothing]): Unit = ()
 
 private class TSource(using asst: munit.Assertions) extends Async.Source[Int]:
   var listener: Option[Listener[Int]] = None
@@ -355,7 +358,7 @@ private class TSource(using asst: munit.Assertions) extends Async.Source[Int]:
   def dropListener(k: Listener[Int]): Unit =
     if listener.isDefined then
       asst.assertEquals(k, listener.get)
-        listener = None
+      listener = None
   def lockListener() =
     val r = listener.get.lockCompletely(this)
     if r == Listener.Gone then listener = None

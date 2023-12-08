@@ -1,4 +1,15 @@
-import gears.async.{Async, BufferedChannel, ChannelClosedException, ChannelMultiplexer, Future, SyncChannel, Task, TaskSchedule, alt, altC}
+import gears.async.{
+  Async,
+  BufferedChannel,
+  ChannelClosedException,
+  ChannelMultiplexer,
+  Future,
+  SyncChannel,
+  Task,
+  TaskSchedule,
+  alt,
+  altC
+}
 import gears.async.default.given
 import gears.async.AsyncOperations.*
 import Future.{*:, zip}
@@ -113,9 +124,10 @@ abstract class ChannelBehavior extends munit.FunSuite {
   }
 
   test("values arrive in order") {
-      val c1 = SyncChannel[Int]()
-      val c2 = BufferedChannel[Int]()
-      for (c <- List(c1, c2)) do Async.blocking {
+    val c1 = SyncChannel[Int]()
+    val c2 = BufferedChannel[Int]()
+    for (c <- List(c1, c2)) do
+      Async.blocking {
         val f1 = Future:
           for (i <- 0 to 1000)
             c.send(i)
@@ -127,7 +139,6 @@ abstract class ChannelBehavior extends munit.FunSuite {
         val f3 = Future:
           for (i <- 4000 to 5000)
             c.send(i)
-
 
         var i1 = 0
         var i2 = 2000
@@ -158,11 +169,11 @@ abstract class ChannelBehavior extends munit.FunSuite {
       c2.close()
       c1.read() match {
         case Failure(_: ChannelClosedException) => ()
-        case _ => assert(false)
+        case _                                  => assert(false)
       }
       c2.read() match {
         case Failure(_: ChannelClosedException) => ()
-        case _ => assert(false)
+        case _                                  => assert(false)
       }
   }
 
@@ -277,7 +288,7 @@ abstract class ChannelBehavior extends munit.FunSuite {
         l += cr.read().get.get
         l += cr.read().get.get
         l += cr.read().get.get
-        assertEquals(l, ArrayBuffer[Int](1,2,3,4))
+        assertEquals(l, ArrayBuffer[Int](1, 2, 3, 4))
 
       val (f2, f3) = (mkFuture, mkFuture)
 

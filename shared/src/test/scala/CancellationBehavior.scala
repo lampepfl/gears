@@ -24,17 +24,17 @@ class CancellationBehavior extends munit.FunSuite:
       synchronized:
         state match
           case State.Ready =>
-              state = State.RunningEarly
+            state = State.RunningEarly
           case State.Initialized(f) =>
-              state = State.Running(f)
+            state = State.Running(f)
           case _ => fail(s"running failed, state is $state")
     def initialize(f: Future[?]) =
       synchronized:
         state match
           case State.Ready =>
-              state = State.Initialized(f)
+            state = State.Initialized(f)
           case State.RunningEarly =>
-              state = State.Running(f)
+            state = State.Running(f)
           case _ => fail(s"initializing failed, state is $state")
 
   private def startFuture(info: Info, body: Async ?=> Unit = {})(using Async) =
@@ -85,14 +85,16 @@ class CancellationBehavior extends munit.FunSuite:
     val (promise1, promise2) = (Future.Promise[Unit](), Future.Promise[Unit]())
     Async.blocking:
       Async.group:
-        startFuture(info1, {
+        startFuture(
+          info1, {
             Async.group:
-                startFuture(info2, promise2.complete(Success(())))
-                Async.await(promise2.future)
+              startFuture(info2, promise2.complete(Success(())))
+              Async.await(promise2.future)
             info2.assertCancelled()
             Future.now(Success(())).value // check cancellation
             promise1.complete(Success(()))
-        })
+          }
+        )
         Async.await(promise1.future)
       info1.assertCancelled()
       info2.assertCancelled()

@@ -7,18 +7,18 @@ import Async.await
 
 import scala.util.control.Breaks.{break, breakable}
 
-/** The part of a channel one can send values to. Blocking behavior depends on the implementation.
- *  Note that while sending is a special (potentially) blocking operation similar to await, reading is
- *  done using Async.Sources of channel values.
- */
+/** The part of a channel one can send values to. Blocking behavior depends on the implementation. Note that while
+  * sending is a special (potentially) blocking operation similar to await, reading is done using Async.Sources of
+  * channel values.
+  */
 trait SendableChannel[T]:
   def send(x: T)(using Async): Unit
 end SendableChannel
 
-/** The part of a channel one can read values from. Blocking behavior depends on the implementation.
- *  Note that while sending is a special (potentially) blocking operation similar to await, reading is
- *  done using Async.Sources of channel values.
- */
+/** The part of a channel one can read values from. Blocking behavior depends on the implementation. Note that while
+  * sending is a special (potentially) blocking operation similar to await, reading is done using Async.Sources of
+  * channel values.
+  */
 trait ReadableChannel[T]:
 
   val canRead: Async.Source[Try[T]]
@@ -33,32 +33,32 @@ trait Channel[T] extends SendableChannel[T], ReadableChannel[T], java.io.Closeab
 end Channel
 
 /** SyncChannel, sometimes called a rendez-vous channel has the following semantics:
- *  - send to an unclosed channel blocks until a reader willing to accept this value (which is indicated by the
- *    reader's listener returning true after sampling the value) is found and this reader reads the value.
- *  - reading is done via the canRead async source of potential values (wrapped in a Try). Note that only reading
- *    is represented as an async source, sending is a blocking operations that is implemented similarly to how await is implemented.
- */
+  *   - send to an unclosed channel blocks until a reader willing to accept this value (which is indicated by the
+  *     reader's listener returning true after sampling the value) is found and this reader reads the value.
+  *   - reading is done via the canRead async source of potential values (wrapped in a Try). Note that only reading is
+  *     represented as an async source, sending is a blocking operations that is implemented similarly to how await is
+  *     implemented.
+  */
 trait SyncChannel[T] extends Channel[T]
 
 /** BufferedChannel(size: Int) is a version of a channel with an internal value buffer (represented internally as an
- *  array with positive size). It has the following semantics:
- *  - send() if the buffer is not full appends the value to the buffer and returns immediately.
- *  - send() if the buffer is full sleeps until some buffer slot is freed, then writes the value there
- *    and immediately returns.
- *  - reading is done via the canRead async source that awaits the buffer being nonempty and the reader accepting
- *    the first value in the buffer. Because readers can refuse a value, it is possible that many readers await
- *    on canRead while the buffer is non-empty if all of them refused the first value in the buffer. At no point
- *    a reader is allowed to sample/read anything but the first entry in the buffer.
- */
+  * array with positive size). It has the following semantics:
+  *   - send() if the buffer is not full appends the value to the buffer and returns immediately.
+  *   - send() if the buffer is full sleeps until some buffer slot is freed, then writes the value there and immediately
+  *     returns.
+  *   - reading is done via the canRead async source that awaits the buffer being nonempty and the reader accepting the
+  *     first value in the buffer. Because readers can refuse a value, it is possible that many readers await on canRead
+  *     while the buffer is non-empty if all of them refused the first value in the buffer. At no point a reader is
+  *     allowed to sample/read anything but the first entry in the buffer.
+  */
 trait BufferedChannel[T] extends Channel[T]
 
-/** This exception is being raised by send()s on closed channel, it is also returned wrapped in Failure
- *  when reading form a closed channel. ChannelMultiplexer sends Failure(ChannelClosedException) to all
- *  subscribers when it receives a close() signal.
- */
+/** This exception is being raised by send()s on closed channel, it is also returned wrapped in Failure when reading
+  * form a closed channel. ChannelMultiplexer sends Failure(ChannelClosedException) to all subscribers when it receives
+  * a close() signal.
+  */
 class ChannelClosedException extends Exception
 private val channelClosedException = ChannelClosedException()
-
 
 object SyncChannel:
 
@@ -247,19 +247,18 @@ object BufferedChannel:
 
 end BufferedChannel
 
-
-/** Channel multiplexer is an object where one can register publisher and subscriber channels.
- *  Internally a multiplexer has a thread that continuously races the set of publishers and once it reads
- *  a value, it sends a copy to each subscriber.
- *
- *  For an unchanging set of publishers and subscribers and assuming that the multiplexer is the only reader of
- *  the publisher channels, every subscriber will receive the same set of messages, in the same order and it will be
- *  exactly all messages sent by the publishers. The only guarantee on the order of the values the subscribers see is
- *  that values from the same publisher will arrive in order.
- *
- *  Channel multiplexer can also be closed, in that case all subscribers will receive Failure(ChannelClosedException)
- *  but no attempt at closing either publishers or subscribers will be made.
- */
+/** Channel multiplexer is an object where one can register publisher and subscriber channels. Internally a multiplexer
+  * has a thread that continuously races the set of publishers and once it reads a value, it sends a copy to each
+  * subscriber.
+  *
+  * For an unchanging set of publishers and subscribers and assuming that the multiplexer is the only reader of the
+  * publisher channels, every subscriber will receive the same set of messages, in the same order and it will be exactly
+  * all messages sent by the publishers. The only guarantee on the order of the values the subscribers see is that
+  * values from the same publisher will arrive in order.
+  *
+  * Channel multiplexer can also be closed, in that case all subscribers will receive Failure(ChannelClosedException)
+  * but no attempt at closing either publishers or subscribers will be made.
+  */
 trait ChannelMultiplexer[T] extends java.io.Closeable:
   def addPublisher(c: ReadableChannel[T]): Unit
   def removePublisher(c: ReadableChannel[T]): Unit
@@ -268,7 +267,6 @@ trait ChannelMultiplexer[T] extends java.io.Closeable:
 
   def removeSubscriber(c: SendableChannel[Try[T]]): Unit
 end ChannelMultiplexer
-
 
 object ChannelMultiplexer:
   private enum Message:
@@ -287,7 +285,7 @@ object ChannelMultiplexer:
         ChannelMultiplexer.this.synchronized:
           publishersCopy = publishers.toList
 
-        val got = Async.await(Async.either(infoChannel.canRead, Async.race(publishersCopy.map(c => c.canRead) *)))
+        val got = Async.await(Async.either(infoChannel.canRead, Async.race(publishersCopy.map(c => c.canRead)*)))
         got match {
           case Left(Success(Message.Quit)) => {
             ChannelMultiplexer.this.synchronized:
@@ -296,7 +294,7 @@ object ChannelMultiplexer:
             shouldTerminate = true
           }
           case Left(Success(Message.Refresh)) => ()
-          case Left(Failure(_)) => shouldTerminate = true // ?
+          case Left(Failure(_))               => shouldTerminate = true // ?
           case Right(v) => {
             ChannelMultiplexer.this.synchronized:
               subscribersCopy = subscribers.toList
@@ -342,4 +340,3 @@ object ChannelMultiplexer:
         subscribers += c
 
 end ChannelMultiplexer
-

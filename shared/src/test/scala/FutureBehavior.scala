@@ -25,10 +25,13 @@ class FutureBehavior extends munit.FunSuite {
         val c = Future {
           assert(false); 1
         }
-        val res = c.alt(Future {
-          val res = a.value + b.value
-          res
-        }).alt(c).value
+        val res = c
+          .alt(Future {
+            val res = a.value + b.value
+            res
+          })
+          .alt(c)
+          .value
         res
       val y = Future:
         val a = Future {
@@ -84,7 +87,7 @@ class FutureBehavior extends munit.FunSuite {
       val fail1 = Future.now(Failure(error))
       val succeed = Future.now(Success(13))
 
-      assert(Set(10, 20).contains(Future {10}.alt(Future {20}).value))
+      assert(Set(10, 20).contains(Future { 10 }.alt(Future { 20 }).value))
       assertEquals(fail.alt(succeed).value, 13)
       assertEquals(succeed.alt(fail).value, 13)
       assertEquals(fail.alt(fail1).result, Failure(error))
@@ -126,8 +129,7 @@ class FutureBehavior extends munit.FunSuite {
         Future {
           5
         }
-      )
-      .result
+      ).result
       sleep(200)
       assertEquals(touched.get(), 2)
     }
@@ -145,7 +147,7 @@ class FutureBehavior extends munit.FunSuite {
       val fail1 = Future.now(Failure(error))
       val succeed = Future.now(Success(13))
 
-      assertEquals(Future {10}.zip(Future {20}).value, (10, 20))
+      assertEquals(Future { 10 }.zip(Future { 20 }).value, (10, 20))
       assertEquals(fail.zip(succeed).result, Failure(error))
       assertEquals(succeed.zip(fail).result, Failure(error))
       assertEquals(fail.zip(fail1).result, Failure(error))
@@ -161,7 +163,7 @@ class FutureBehavior extends munit.FunSuite {
   test("result wraps values") {
     Async.blocking:
       for (i <- -5 to 5)
-        assertEquals(Future {i}.result, Success(i))
+        assertEquals(Future { i }.result, Success(i))
   }
 
   test("value propagates exceptions exceptions through futures") {
@@ -173,8 +175,7 @@ class FutureBehavior extends munit.FunSuite {
         }
         (f1.value, f1.value)
       }
-      try
-        f.value
+      try f.value
       catch
         case e1: AssertionError => assertEquals(e, e1)
         case z =>
@@ -183,11 +184,11 @@ class FutureBehavior extends munit.FunSuite {
 
   test("futures can be nested") {
     Async.blocking:
-      val z = Future{
+      val z = Future {
         sleep(Random.between(0, 15L))
-        Future{
+        Future {
           sleep(Random.between(0, 15L))
-          Future{
+          Future {
             sleep(Random.between(0, 15L))
             10
           }.value
@@ -205,7 +206,7 @@ class FutureBehavior extends munit.FunSuite {
       f.cancel()
       f.result match
         case _: Failure[CancellationException] => ()
-        case _ => assert(false)
+        case _                                 => assert(false)
   }
 
   test("zombie threads exist and run to completion after the Async.blocking barrier") {
@@ -226,27 +227,35 @@ class FutureBehavior extends munit.FunSuite {
 
   test("n-ary alt") {
     Async.blocking:
-      assert(Set(10, 20, 30).contains(alt(Future {
-        10
-      }, Future {
-        20
-      }, Future {
-        30
-      }).value))
+      assert(
+        Set(10, 20, 30).contains(
+          alt(
+            Future {
+              10
+            },
+            Future {
+              20
+            },
+            Future {
+              30
+            }
+          ).value
+        )
+      )
   }
 
   test("zip on tuples with EmptyTuple") {
     Async.blocking:
-      val z1 = Future{ sleep(500); 10} *: Future {sleep(10); 222} *: Future{sleep(150); 333} *: Future{EmptyTuple}
-      assertEquals(
-        z1.value, (10, 222, 333))
+      val z1 = Future { sleep(500); 10 } *: Future { sleep(10); 222 } *: Future { sleep(150); 333 } *: Future {
+        EmptyTuple
+      }
+      assertEquals(z1.value, (10, 222, 333))
   }
 
   test("zip on tuples with last zip") {
     Async.blocking:
-      val z1 = Future {10} *: Future {222}.zip(Future {333})
-      assertEquals(
-        z1.value, (10, 222, 333))
+      val z1 = Future { 10 } *: Future { 222 }.zip(Future { 333 })
+      assertEquals(z1.value, (10, 222, 333))
   }
 
   test("zip(3) first error") {
@@ -260,29 +269,31 @@ class FutureBehavior extends munit.FunSuite {
             sleep(Random.between(200, 300));
             throw e1
           } *: Future {
-              sleep(Random.between(200, 300));
-              throw e2
-            } *: Future {
-              sleep(Random.between(50, 100));
-              throw e3
-            } *: Future.now(Success(EmptyTuple))).result, Failure(e3))
+            sleep(Random.between(200, 300));
+            throw e2
+          } *: Future {
+            sleep(Random.between(50, 100));
+            throw e3
+          } *: Future.now(Success(EmptyTuple))).result,
+          Failure(e3)
+        )
   }
 
   test("cancelled futures return the same constant CancellationException with no stack attached".ignore) {
     Async.blocking:
       val futures = List(
-        Future{sleep(100); 1},
-        Future{sleep(100); 1},
-        Future{sleep(100); 1},
-        Future{sleep(100); 1},
-        Future{sleep(100); 1}
+        Future { sleep(100); 1 },
+        Future { sleep(100); 1 },
+        Future { sleep(100); 1 },
+        Future { sleep(100); 1 },
+        Future { sleep(100); 1 }
       )
       futures.foreach(_.cancel())
       val exceptionSet = mutable.Set[Throwable]()
       for (f <- futures) {
         f.result match {
           case Failure(e) => exceptionSet.add(e)
-          case _ => assert(false)
+          case _          => assert(false)
         }
       }
       assertEquals(exceptionSet.size, 1)
@@ -315,7 +326,7 @@ class FutureBehavior extends munit.FunSuite {
       assertEquals(touched, true)
       f.result match
         case Failure(ex) if ex.isInstanceOf[CancellationException] => ()
-        case _ => assert(false)
+        case _                                                     => assert(false)
   }
 
   test("Promise can be cancelled") {
@@ -326,7 +337,7 @@ class FutureBehavior extends munit.FunSuite {
       f.cancel()
       f.result match
         case Failure(ex) if ex.isInstanceOf[CancellationException] => ()
-        case _ => assert(false)
+        case _                                                     => assert(false)
   }
 
   test("Nesting of cancellations") {
@@ -351,16 +362,19 @@ class FutureBehavior extends munit.FunSuite {
     Async.blocking:
       for (i <- 1 to 20)
         assertEquals(
-          alt(Future {
-            sleep(Random.between(200, 300)); 10000 * i + 111
-          },
+          alt(
+            Future {
+              sleep(Random.between(200, 300)); 10000 * i + 111
+            },
             Future {
               sleep(Random.between(200, 300)); 10000 * i + 222
             },
             Future {
               sleep(Random.between(30, 50)); 10000 * i + 333
             }
-          ).result, Success(10000 * i + 333))
+          ).result,
+          Success(10000 * i + 333)
+        )
   }
 
   test("n-ary alt last failure") {
@@ -371,10 +385,11 @@ class FutureBehavior extends munit.FunSuite {
         val e3 = AssertionError(311)
 
         assertEquals(
-          alt(Future {
-            sleep(Random.between(0, 250));
-            throw e1
-          },
+          alt(
+            Future {
+              sleep(Random.between(0, 250));
+              throw e1
+            },
             Future {
               sleep(Random.between(500, 1000));
               throw e2
@@ -382,7 +397,10 @@ class FutureBehavior extends munit.FunSuite {
             Future {
               sleep(Random.between(0, 250));
               throw e3
-            }).result, Failure(e2))
+            }
+          ).result,
+          Failure(e2)
+        )
   }
 
 }

@@ -9,7 +9,6 @@ import java.nio.charset.StandardCharsets
 import java.nio.file.StandardOpenOption
 import scala.concurrent.ExecutionContext
 
-
 @main def readAndWriteFile(): Unit =
   given ExecutionContext = ExecutionContext.global
   Async.blocking:

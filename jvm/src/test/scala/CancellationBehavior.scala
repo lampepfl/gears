@@ -18,4 +18,3 @@ class JVMCancellationBehavior extends munit.FunSuite:
         Thread.sleep(5000)
         1
       f.result
-
