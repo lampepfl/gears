@@ -173,7 +173,9 @@ object Channel:
 
     var isClosed = false
     val cells = CellBuf()
+    // Poll a reader, returning false if it should be put into queue
     def pollRead(r: Reader): Boolean
+    // Poll a reader, returning false if it should be put into queue
     def pollSend(src: CanSend, s: Sender): Boolean
 
     protected final def checkClosed[T](src: Async.Source[Res[T]], l: Listener[Res[T]]): Boolean =
@@ -196,6 +198,7 @@ object Channel:
         isClosed = true
         cells.cancel()
 
+    /** Complete a pair of locked sender and reader. */
     protected final def complete(src: CanSend, reader: Listener[ReadResult], sender: Listener[SendResult]) =
       reader.complete(Right(src.item), readSource)
       sender.complete(Right(()), src)
@@ -208,11 +211,18 @@ object Channel:
         if !isClosed then cells.dropSender(item, k)
     }
 
+    /** CellBuf is a queue of cells, which consists of a sleeping sender or reader. The queue always guarantees that
+      * there are *only* all readers or all senders.
+      */
     private[async] class CellBuf():
       type Cell = Reader | (CanSend, Sender)
+      // reader == 0 || sender == 0 always
       private var reader = 0
       private var sender = 0
+
       private val pending = mutable.Queue[Cell]()
+
+      /* Boring push/pop methods */
 
       def hasReader = reader > 0
       def hasSender = sender > 0
@@ -242,31 +252,37 @@ object Channel:
         if sender > 0 then if pending.removeFirst(_ == (item, s)).isDefined then sender -= 1
         this
 
+      /** Match a possible reader to a queue of senders: try to go through the queue with lock pairing, stopping when
+        * finding a good pair.
+        */
       def matchReader(r: Reader): Boolean =
         while hasSender do
-          val (canSend, sender) = nextSender
-          lockBoth(readSource, canSend)(r, sender) match
-            case Listener.Locked =>
-              Impl.this.complete(canSend, r, sender)
-              dequeue()
-              return true
-            case listener: (r.type | sender.type) =>
-              if listener == r then return true
-              else dequeue()
+          val (src, s) = nextSender
+          tryComplete(src, s)(r) match
+            case ()               => return true
+            case listener: r.type => return true
+            case _                => dequeue()
         false
 
+      /** Match a possible sender to a queue of readers: try to go through the queue with lock pairing, stopping when
+        * finding a good pair.
+        */
       def matchSender(src: CanSend, s: Sender): Boolean =
         while hasReader do
-          val reader = nextReader
-          lockBoth(readSource, src)(reader, s) match
-            case Listener.Locked =>
-              Impl.this.complete(src, reader, s)
-              dequeue()
-              return true
-            case listener: (reader.type | s.type) =>
-              if listener == s then return true
-              else dequeue()
+          val r = nextReader
+          tryComplete(src, s)(r) match
+            case ()               => return true
+            case listener: s.type => return true
+            case _                => dequeue()
         false
+
+      private inline def tryComplete(src: CanSend, s: Sender)(r: Reader): s.type | r.type | Unit =
+        lockBoth(readSource, src)(r, s) match
+          case Listener.Locked =>
+            Impl.this.complete(src, r, s)
+            dequeue()
+            ()
+          case listener: (r.type | s.type) => listener
 
       def cancel() =
         pending.foreach {

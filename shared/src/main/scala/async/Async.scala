@@ -190,8 +190,7 @@ object Async:
             k.complete(map(data, source), selfSrc)
         end listener
 
-        while it.hasNext && !found do
-          found = it.next.poll(listener)
+        while it.hasNext && !found do found = it.next.poll(listener)
         found
 
       def onComplete(k: Listener[T]): Unit =
@@ -245,8 +244,8 @@ object Async:
     }
   end raceImpl
 
-  /** Cases for handling async sources in a [[select]]. [[SelectCase]] can be
-   *  constructed by extension methods `handle` of [[Source]].
+  /** Cases for handling async sources in a [[select]]. [[SelectCase]] can be constructed by extension methods `handle`
+    * of [[Source]].
     */
   opaque type SelectCase[T] = (Source[?], Nothing => T)
   //                           ^ unsafe types, but we only construct SelectCase from `handle` which is safe
