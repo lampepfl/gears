@@ -135,17 +135,18 @@ object Async:
     /** Create a [[Source]] containing the given values, resolved once for each. */
     def values[T](values: T*) =
       import scala.collection.JavaConverters._
-      val q = java.util.concurrent.ConcurrentLinkedQueue[T](values.asJavaCollection)
+      val q = java.util.concurrent.ConcurrentLinkedQueue[T]()
+      q.addAll(values.asJavaCollection)
       new Source[T]:
         override def poll(k: Listener[T]): Boolean =
-          if q.isEmpty() then return false
+          if q.isEmpty() then false
           else
             k.lockCompletely(this) match
               case Listener.Gone => true
-              case v: Listener.LockMarker =>
+              case Listener.Locked =>
                 val item = q.poll()
                 if item == null then
-                  k.releaseLock(v)
+                  k.releaseLock(Listener.Locked)
                   false
                 else
                   k.complete(item, this)
