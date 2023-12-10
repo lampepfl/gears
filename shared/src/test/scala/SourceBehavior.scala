@@ -127,12 +127,12 @@ class SourceBehavior extends munit.FunSuite {
       assertEquals(bRan, true)
   }
 
-  test("map") {
+  test("transform values with") {
     Async.blocking:
       val f: Future[Int] = Future { 10 }
-      assertEquals(f.map({ case Success(i) => i + 1 }).awaitResult, 11)
+      assertEquals(f.transformValuesWith({ case Success(i) => i + 1 }).awaitResult, 11)
       val g: Future[Int] = Future.now(Failure(AssertionError(1123)))
-      assertEquals(g.map({ case Failure(_) => 17 }).awaitResult, 17)
+      assertEquals(g.transformValuesWith({ case Failure(_) => 17 }).awaitResult, 17)
   }
 
   test("all listeners in chain fire") {
@@ -143,7 +143,7 @@ class SourceBehavior extends munit.FunSuite {
         sleep(50)
         10
       }
-      val g = f.map(identity)
+      val g = f.transformValuesWith(identity)
       f.onComplete(Listener.acceptingListener { (_, _) => aRan.complete(Success(())) })
       g.onComplete(Listener.acceptingListener { (_, _) => bRan.complete(Success(())) })
       assertEquals(aRan.future.poll(), None)
