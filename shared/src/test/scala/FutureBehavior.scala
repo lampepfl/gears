@@ -184,6 +184,19 @@ class FutureBehavior extends munit.FunSuite {
         case _                                 => assert(false)
   }
 
+  test("future should cancel its group when the main body is completed") {
+    Async.blocking:
+      var touched = false
+      val fut = Future:
+        Future:
+          sleep(2000)
+          touched = true
+        10
+      assertEquals(fut.await, 10)
+      sleep(2000)
+      assertEquals(touched, false)
+  }
+
   test("zombie threads exist and run to completion after the Async.blocking barrier") {
     var zombieModifiedThis = false
     Async.blocking:

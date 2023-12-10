@@ -56,7 +56,7 @@ object Future:
       // though hasCompleted is accessible without "synchronized",
       // we want it not to be run while the future was trying to complete.
       synchronized:
-        if group == CompletionGroup.Unlinked || !hasCompleted then super.link(group)
+        if !hasCompleted || group == CompletionGroup.Unlinked then super.link(group)
         else this
 
     /** Sets the cancellation state and returns `true` if the future has not been completed and cancelled before. */
@@ -138,13 +138,14 @@ object Future:
 
     link()
     ac.support.scheduleBoundary:
-      Async.withNewCompletionGroup(innerGroup)(complete(Try({
+      val result = Async.withNewCompletionGroup(innerGroup)(Try({
         val r = body
         checkCancellation()
         r
       }).recoverWith { case _: InterruptedException | _: CancellationException =>
         Failure(new CancellationException())
-      }))(using FutureAsync(CompletionGroup.Unlinked))
+      })(using FutureAsync(CompletionGroup.Unlinked))
+      complete(result)
 
   end RunnableFuture
 
