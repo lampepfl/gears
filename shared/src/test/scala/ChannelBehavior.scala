@@ -356,10 +356,12 @@ class ChannelBehavior extends munit.FunSuite {
   test("ChannelMultiplexer multiple readers and writers") {
     Async.blocking:
       val m = ChannelMultiplexer[Int]()
+      val start = java.util.concurrent.CountDownLatch(5)
 
       val f11 = Future:
         val cc = SyncChannel[Int]()
         m.addPublisher(cc)
+        start.countDown()
         sleep(200)
         for (i <- 0 to 3)
           cc.send(i)
@@ -368,6 +370,7 @@ class ChannelBehavior extends munit.FunSuite {
       val f12 = Future:
         val cc = SyncChannel[Int]()
         m.addPublisher(cc)
+        start.countDown()
         sleep(200)
         for (i <- 10 to 13)
           cc.send(i)
@@ -376,6 +379,7 @@ class ChannelBehavior extends munit.FunSuite {
       val f13 = Future:
         val cc = SyncChannel[Int]()
         m.addPublisher(cc)
+        start.countDown()
         for (i <- 20 to 23)
           cc.send(i)
         m.removePublisher(cc)
@@ -383,6 +387,7 @@ class ChannelBehavior extends munit.FunSuite {
       val f21 = Future:
         val cr = SyncChannel[Try[Int]]()
         m.addSubscriber(cr)
+        start.countDown()
         sleep(200)
         val l = ArrayBuffer[Int]()
         sleep(1000)
@@ -393,12 +398,14 @@ class ChannelBehavior extends munit.FunSuite {
       val f22 = Future:
         val cr = SyncChannel[Try[Int]]()
         m.addSubscriber(cr)
+        start.countDown()
         sleep(1500)
         val l = ArrayBuffer[Int]()
         for (i <- 1 to 12) {
           l += cr.read().right.get.get
         }
 
+      start.await()
       Future { m.run() }
 
       f21.result
