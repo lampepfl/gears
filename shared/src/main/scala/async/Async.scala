@@ -58,14 +58,7 @@ object Async:
   inline def current(using async: Async): Async = async
 
   def group[T](body: Async ?=> T)(using async: Async): T =
-    withNewCompletionGroup(CompletionGroup(async.group.handleCompletion).link())(body)
-
-  def withCompletionHandler[T](handler: Cancellable => Async ?=> Unit)(body: Async ?=> T)(using async: Async): T =
-    val combined = (c: Cancellable) =>
-      (async: Async) ?=>
-        handler(c)
-        async.group.handleCompletion(c)
-    withNewCompletionGroup(CompletionGroup(combined).link())(body)
+    withNewCompletionGroup(CompletionGroup().link())(body)
 
   /** Runs a body within another completion group. When the body returns, the group is cancelled and its completion
     * awaited with the `Unlinked` group.
