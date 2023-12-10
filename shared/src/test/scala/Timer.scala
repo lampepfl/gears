@@ -19,7 +19,7 @@ class TimerTest extends munit.FunSuite {
   test("TimerSleep1Second") {
     Async.blocking:
       val timer = Timer(1.second)
-      Future { timer.start() }
+      Future { timer.run() }
       assert(Async.await(timer.src) == timer.TimerEvent.Tick)
   }
 

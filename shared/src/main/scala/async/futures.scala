@@ -12,6 +12,8 @@ import scala.annotation.unchecked.uncheckedVariance
 import java.util.concurrent.CancellationException
 import scala.annotation.tailrec
 import scala.util
+import java.util.concurrent.atomic.AtomicLong
+import scala.util.control.NonFatal
 
 /** A cancellable future that can suspend waiting for other asynchronous sources
   */
@@ -245,7 +247,7 @@ object Future:
     /** Like `alt` but the slower future is cancelled. If either task succeeds, succeed with the success that was
       * returned first and the other is cancelled. Otherwise, fail with the failure that was returned last.
       */
-    def altC(f2: Future[T])(using Async): Future[T] = Future:
+    def altWithCancel(f2: Future[T])(using Async): Future[T] = Future:
       Async.await(Async.either(f1, f2)) match
         case Left(Success(x1)) =>
           f2.cancel()
@@ -272,6 +274,66 @@ object Future:
     def complete(result: Try[T]): Unit = myFuture.complete(result)
 
   end Promise
+
+  /** Collects a list of futures into a channel of futures, arriving as they finish. */
+  class Collector[T](futures: Future[T]*):
+    private val ch = UnboundedChannel[Future[T]]()
+
+    /** Output channels of all finished futures. */
+    final def results = ch.asReadable
+
+    private val listener = Listener((_, fut) =>
+      // safe, as we only attach this listener to Future[T]
+      ch.sendImmediately(fut.asInstanceOf[Future[T]])
+    )
+
+    protected final def addFuture(future: Future[T]) = future.onComplete(listener)
+
+    futures.foreach(addFuture)
+  end Collector
+
+  /** Like [[Collector]], but exposes the ability to add futures after creation. */
+  class MutableCollector[T](futures: Future[T]*) extends Collector[T](futures*):
+    /** Add a new [[Future]] into the collector. */
+    inline def add(future: Future[T]) = addFuture(future)
+    inline def +=(future: Future[T]) = add(future)
+
+  extension [T](fs: Seq[Future[T]])
+    /** `.await` for all futures in the sequence, returns the results in a sequence, or throws if any futures fail. */
+    def awaitAll(using Async) =
+      val collector = Collector(fs*)
+      for _ <- fs do collector.results.read().right.get.value
+      fs.map(_.value)
+
+    /** Like [[awaitAll]], but cancels all futures as soon as one of them fails. */
+    def awaitAllOrCancel(using Async) =
+      val collector = Collector(fs*)
+      try
+        for _ <- fs do collector.results.read().right.get.value
+        fs.map(_.value)
+      catch
+        case NonFatal(e) =>
+          fs.foreach(_.cancel())
+          throw e
+
+    /** Race all futures, returning the first successful value. Throws the last exception received, if everything fails.
+      */
+    def altAll(using Async): T = altImpl(false)
+
+    /** Like [[altAll]], but cancels all other futures as soon as the first future succeeds. */
+    def altAllWithCancel(using Async): T = altImpl(true)
+
+    private inline def altImpl(withCancel: Boolean)(using Async): T =
+      val collector = Collector(fs*)
+      @scala.annotation.tailrec
+      def loop(attempt: Int): T =
+        collector.results.read().right.get.result match
+          case Failure(exception) =>
+            if attempt == fs.length then /* everything failed */ throw exception else loop(attempt + 1)
+          case Success(value) =>
+            inline if withCancel then fs.foreach(_.cancel())
+            value
+      loop(1)
 end Future
 
 /** TaskSchedule describes the way in which a task should be repeated. Tasks can be set to run for example every 100

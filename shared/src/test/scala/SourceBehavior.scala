@@ -163,4 +163,24 @@ class SourceBehavior extends munit.FunSuite {
       sleep(350)
       assertEquals(touched, true)
   }
+
+  test("source values") {
+    Async.blocking:
+      val src = Async.Source.values(1, 2)
+      assertEquals(src.await, 1)
+      assertEquals(src.await, 2)
+
+    Async.blocking:
+      val src = Async.Source.values(1)
+      assertEquals(src.await, 1)
+      assertEquals(
+        Async
+          .race(
+            src, // this should block forever, so never resolve!
+            Future { sleep(200); 0 }
+          )
+          .await,
+        Success(0)
+      )
+  }
 }

@@ -7,6 +7,7 @@ import gears.async.{
   SyncChannel,
   Task,
   TaskSchedule,
+  UnboundedChannel,
   alt,
   altC
 }
@@ -21,8 +22,10 @@ import scala.util.{Failure, Success, Try}
 import scala.util.Random
 import scala.collection.mutable.{ArrayBuffer, Set}
 import java.util.concurrent.atomic.AtomicInteger
+import java.nio.ByteBuffer
+import scala.collection.Stepper.UnboxingFloatStepper
 
-abstract class ChannelBehavior extends munit.FunSuite {
+class ChannelBehavior extends munit.FunSuite {
 
   given ExecutionContext = ExecutionContext.global
 
@@ -124,9 +127,7 @@ abstract class ChannelBehavior extends munit.FunSuite {
   }
 
   test("values arrive in order") {
-    val c1 = SyncChannel[Int]()
-    val c2 = BufferedChannel[Int]()
-    for (c <- List(c1, c2)) do
+    for c <- getChannels do
       Async.blocking {
         val f1 = Future:
           for (i <- 0 to 1000)
@@ -145,7 +146,7 @@ abstract class ChannelBehavior extends munit.FunSuite {
         var i3 = 4000
 
         for (i <- 1 to (3 * 1001)) {
-          val got = c.read().get
+          val got = c.read().right.get
           if (i1 == got) {
             i1 += 1
           } else if (i2 == got) {
@@ -163,47 +164,32 @@ abstract class ChannelBehavior extends munit.FunSuite {
 
   test("reading a closed channel returns Failure(ChannelClosedException)") {
     Async.blocking:
-      val c1 = SyncChannel[Int]()
-      val c2 = SyncChannel[Int]()
-      c1.close()
-      c2.close()
-      c1.read() match {
-        case Failure(_: ChannelClosedException) => ()
-        case _                                  => assert(false)
-      }
-      c2.read() match {
-        case Failure(_: ChannelClosedException) => ()
-        case _                                  => assert(false)
-      }
+      val channels = getChannels
+      channels.foreach(_.close())
+      for c <- channels do
+        c.read() match {
+          case Left(_) => ()
+          case _       => assert(false)
+        }
   }
 
   test("writing to a closed channel throws ChannelClosedException") {
     Async.blocking:
-      val c1 = SyncChannel[Int]()
-      val c2 = SyncChannel[Int]()
-      c1.close()
-      c2.close()
-      var thrown1 = false
-      var thrown2 = true
-      try {
-        c1.send(1)
-      } catch {
-        case _: ChannelClosedException => thrown1 = true
-      }
-      try {
-        c2.send(1)
-      } catch {
-        case _: ChannelClosedException => thrown2 = true
-      }
-      assertEquals(thrown1, true)
-      assertEquals(thrown2, true)
+      val channels = getChannels
+      channels.foreach(_.close())
+      for c <- channels do
+        var thrown = false
+        try {
+          c.send(1)
+        } catch {
+          case _: ChannelClosedException => thrown = true
+        }
+        assertEquals(thrown, true)
   }
 
   test("send a lot of values via a channel and check their sum") {
-    val c1 = SyncChannel[Int]()
-    val c2 = BufferedChannel[Int](1024)
-    for (c <- List(c1, c2)) {
-      var sum = 0
+    for (c <- getChannels) {
+      var sum = 0L
       Async.blocking:
         val f1 = Future:
           for (i <- 1 to 10000)
@@ -211,17 +197,15 @@ abstract class ChannelBehavior extends munit.FunSuite {
 
         val f2 = Future:
           for (i <- 1 to 10000)
-            sum += c.read().get
+            sum += c.read().right.get
 
         f2.result
-        assertEquals(sum, 50005000)
+        assertEquals(sum, 50005000L)
     }
   }
 
   test("multiple writers, multiple readers") {
-    val c1 = BufferedChannel[Int](713)
-    val c2 = SyncChannel[Int]()
-    for (c <- List(c1, c2)) {
+    for (c <- getChannels) {
       Async.blocking:
         val f11 = Future:
           for (i <- 1 to 10000)
@@ -264,88 +248,140 @@ abstract class ChannelBehavior extends munit.FunSuite {
     }
   }
 
-  test("ChannelMultiplexer multiplexes - all subscribers read the same stream".ignore) {
+  test("race reads") {
+    Async.blocking:
+      val channels = (0 until 1000).map(_ => SyncChannel[Int]()).toArray
+      val sends = channels.toIterator.zipWithIndex.foreach { case (ch, idx) =>
+        Future { ch.send(idx) }
+      }
+      val race = Async.race(
+        (0 until 100).map(i =>
+          Async.race((10 * i until 10 * i + 10).map(idx => channels(idx).readSource.map(_.right.get))*)
+        )*
+      )
+      var sum = 0
+      for i <- 0 until 1000 do sum += Async.await(race)
+      assertEquals(sum, (0 until 1000).sum)
+  }
+
+  test("unbounded channels with sync sending") {
+    val ch = UnboundedChannel[Int]()
+    for i <- 0 to 10 do ch.sendImmediately(i)
+    Async.blocking:
+      for i <- 0 to 10 do assertEquals(ch.read().right.get, i)
+    ch.close()
+    try {
+      ch.sendImmediately(0)
+      assert(false)
+    } catch {
+      case _: ChannelClosedException => ()
+    }
+  }
+
+  test("race sends") {
+    Async.blocking:
+      val ch = SyncChannel[Int]()
+      var timesSent = 0
+      val race = Async.race(
+        (for i <- 0 until 1000 yield ch.sendSource(i))*
+      )
+      Future {
+        while Async.await(race).isRight do {
+          timesSent += 1
+        }
+      }
+      for i <- 0 until 10 do {
+        ch.read().right.get
+      }
+      sleep(100)
+      assertEquals(timesSent, 10)
+  }
+
+  test("race syntax") {
+    Async.blocking:
+      val a = SyncChannel[Int]()
+      val b = SyncChannel[Int]()
+
+      Future { a.send(0) }
+      Future { assertEquals(b.read().right.get, 10) }
+      var valuesSent = 0
+      for i <- 1 to 2 do
+        Async.select(
+          a.readSource handle { case Right(v) =>
+            assertEquals(v, 0)
+          },
+          b.sendSource(10) handle { case Right(_) =>
+            valuesSent += 1
+            assertEquals(valuesSent, 1)
+          }
+        )
+
+      a.close()
+      b.close()
+      assert(Async.race(a.readSource, b.readSource).await.isLeft)
+  }
+
+  test("ChannelMultiplexer multiplexes - all subscribers read the same stream") {
     Async.blocking:
       val m = ChannelMultiplexer[Int]()
       val c = SyncChannel[Int]()
       m.addPublisher(c)
 
-      val start = java.util.concurrent.CountDownLatch(2)
-
-      val f1 = Future:
-        start.await()
-        c.send(1)
-        c.send(2)
-        c.send(3)
-        c.send(4)
-
-      def mkFuture = Future:
+      val receivers = (1 to 3).map { _ =>
         val cr = SyncChannel[Try[Int]]()
         m.addSubscriber(cr)
-        start.countDown()
-        val l = ArrayBuffer[Int]()
-        l += cr.read().get.get
-        l += cr.read().get.get
-        l += cr.read().get.get
-        l += cr.read().get.get
-        assertEquals(l, ArrayBuffer[Int](1, 2, 3, 4))
+        () =>
+          (ac: Async) ?=>
+            val l = ArrayBuffer[Int]()
+            for i <- 1 to 4 do l += cr.read().right.get.get
+            assertEquals(l, ArrayBuffer[Int](1, 2, 3, 4))
+      }
 
-      val (f2, f3) = (mkFuture, mkFuture)
+      Future { m.run() }
+      Future {
+        for i <- 1 to 4 do c.send(i)
+      }
 
-      f2.result
-      f3.result
+      receivers.map(v => Future(v())).awaitAll
   }
 
-  test("ChannelMultiplexer multiple readers and writers".ignore) {
+  test("ChannelMultiplexer multiple readers and writers") {
     Async.blocking:
       val m = ChannelMultiplexer[Int]()
+      val start = java.util.concurrent.CountDownLatch(5)
 
-      val f11 = Future:
+      val sendersCount = 3
+      val sendersMessage = 4
+      val receiversCount = 3
+
+      val senders = (0 until sendersCount).map { idx =>
         val cc = SyncChannel[Int]()
         m.addPublisher(cc)
-        sleep(200)
-        for (i <- 0 to 3)
-          cc.send(i)
-        m.removePublisher(cc)
+        () =>
+          (ac: Async) ?=>
+            for (i <- 0 until sendersMessage)
+              cc.send(i)
+            m.removePublisher(cc)
+      }
 
-      val f12 = Future:
-        val cc = SyncChannel[Int]()
-        m.addPublisher(cc)
-        sleep(200)
-        for (i <- 10 to 13)
-          cc.send(i)
-        m.removePublisher(cc)
-
-      val f13 = Future:
-        val cc = SyncChannel[Int]()
-        m.addPublisher(cc)
-        for (i <- 20 to 23)
-          cc.send(i)
-        m.removePublisher(cc)
-
-      val f21 = Future:
+      val receivers = (0 until receiversCount).map { idx =>
         val cr = SyncChannel[Try[Int]]()
         m.addSubscriber(cr)
-        sleep(200)
-        val l = ArrayBuffer[Int]()
-        sleep(1000)
-        for (i <- 1 to 12) {
-          l += cr.read().get.get
-        }
+        () =>
+          (ac: Async) ?=>
+            sleep(idx * 500)
+            var sum = 0
+            for (i <- 0 until sendersCount * sendersMessage) {
+              sum += cr.read().right.get.get
+            }
+            assertEquals(sum, sendersMessage * (sendersMessage - 1) / 2 * sendersCount)
+      }
+      Future { m.run() }
 
-      val f22 = Future:
-        val cr = SyncChannel[Try[Int]]()
-        m.addSubscriber(cr)
-        sleep(1500)
-        val l = ArrayBuffer[Int]()
-        for (i <- 1 to 12) {
-          l += cr.read().get.get
-        }
-
-      f21.result
-      f22.result
-      f11.result
-      f12.result
-      f13.result
+      (senders ++ receivers)
+        .map(v => Future(v()))
+        .awaitAll
   }
+
+  def getChannels = List(SyncChannel[Int](), BufferedChannel[Int](1024), UnboundedChannel[Int]())
 }
