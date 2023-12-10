@@ -344,7 +344,7 @@ class ChannelBehavior extends munit.FunSuite {
 
       start.await()
 
-      Future { m.start() }
+      Future { m.run() }
       Future {
         for i <- 1 to 4 do c.send(i)
       }
@@ -399,7 +399,7 @@ class ChannelBehavior extends munit.FunSuite {
           l += cr.read().right.get.get
         }
 
-      Future { m.start() }
+      Future { m.run() }
 
       f21.result
       f22.result

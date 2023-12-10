@@ -300,9 +300,8 @@ object Channel:
   end Impl
 end Channel
 
-/** Channel multiplexer is an object where one can register publisher and subscriber channels. Internally a multiplexer
-  * has a thread that continuously races the set of publishers and once it reads a value, it sends a copy to each
-  * subscriber.
+/** Channel multiplexer is an object where one can register publisher and subscriber channels. When it is run, it
+  * continuously races the set of publishers and once it reads a value, it sends a copy to each subscriber.
   *
   * When a publisher or subscriber channel is closed, it will be removed from the multiplexer's set.
   *
@@ -315,7 +314,8 @@ end Channel
   * but no attempt at closing either publishers or subscribers will be made.
   */
 trait ChannelMultiplexer[T] extends java.io.Closeable:
-  def start()(using Async): Unit
+  /** Run the multiplexer synchronously. This call only returns after this multiplexer has been cancelled. */
+  def run()(using Async): Unit
 
   def addPublisher(c: ReadableChannel[T]): Unit
   def removePublisher(c: ReadableChannel[T]): Unit
@@ -336,19 +336,15 @@ object ChannelMultiplexer:
     private val subscribers = ArrayBuffer[SendableChannel[Try[T]]]()
     private val infoChannel = UnboundedChannel[Message]()
 
-    def start()(using Async) = {
+    def run()(using Async) = {
       var shouldTerminate = false
-      var publishersCopy: Seq[ReadableChannel[T]] = null
-      var subscribersCopy: List[SendableChannel[Try[T]]] = null
       while (!shouldTerminate) {
-        synchronized:
-          publishersCopy = publishers.toSeq
+        val publishersCopy = synchronized(publishers.toSeq)
 
         Async.select(
           (infoChannel.readSource ~~> {
             case Left(_) | Right(Message.Quit) =>
-              synchronized:
-                subscribersCopy = subscribers.toList
+              val subscribersCopy = synchronized(subscribers.toList)
               for (s <- subscribersCopy) s.send(Failure(ChannelClosedException()))
               shouldTerminate = true
             case Right(Message.Refresh) => ()
@@ -356,8 +352,7 @@ object ChannelMultiplexer:
             publishersCopy.map { pub =>
               pub.readSource ~~> {
                 case Right(v) =>
-                  synchronized:
-                    subscribersCopy = subscribers.toList
+                  val subscribersCopy = synchronized(subscribers.toList)
                   var c = 0
                   for (s <- subscribersCopy) {
                     c += 1
