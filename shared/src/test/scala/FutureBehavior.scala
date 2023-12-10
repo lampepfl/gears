@@ -189,11 +189,12 @@ class FutureBehavior extends munit.FunSuite {
       var touched = false
       val fut = Future:
         Future:
-          sleep(2000)
+          sleep(1000)
           touched = true
+        sleep(500)
         10
       assertEquals(fut.await, 10)
-      sleep(2000)
+      sleep(1000)
       assertEquals(touched, false)
   }
 
