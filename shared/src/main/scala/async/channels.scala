@@ -3,7 +3,6 @@ import scala.collection.mutable
 import mutable.{ArrayBuffer, ListBuffer}
 
 import scala.util.{Failure, Success, Try}
-import Async.await
 
 import scala.util.control.Breaks.{break, breakable}
 import gears.async.Async.Source
@@ -26,7 +25,7 @@ trait SendableChannel[-T]:
   /** Send [[x]] over the channel, blocking (asynchronously with [[Async]]) until the item has been sent or, if the
     * channel is buffered, queued. Throws [[ChannelClosedException]] if the channel was closed.
     */
-  def send(x: T)(using Async): Unit = Async.await(sendSource(x)) match
+  def send(x: T)(using Async): Unit = sendSource(x).awaitResult match
     case Right(_) => ()
     case Left(_)  => throw ChannelClosedException()
 end SendableChannel
@@ -45,7 +44,7 @@ trait ReadableChannel[+T]:
   /** Read an item from the channel, blocking (asynchronously with [[Async]]) until the item has been received. Returns
     * `Failure(ChannelClosedException)` if the channel was closed.
     */
-  def read()(using Async): Res[T] = await(readSource)
+  def read()(using Async): Res[T] = readSource.awaitResult
 end ReadableChannel
 
 /** A generic channel that can be sent to, received from and closed. */

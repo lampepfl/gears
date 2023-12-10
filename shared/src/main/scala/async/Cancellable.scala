@@ -25,12 +25,6 @@ trait Cancellable:
   def unlink(): this.type =
     link(CompletionGroup.Unlinked)
 
-  /** Signal completion of this cancellable to its group. */
-  def signalCompletion()(using Async): this.type =
-    this.group.handleCompletion(this)
-    this.unlink()
-    this
-
 end Cancellable
 
 object Cancellable:

@@ -1,4 +1,4 @@
-import gears.async.{Async, Future, Task, TaskSchedule, alt}
+import gears.async.{Async, Future, Task, TaskSchedule}
 import gears.async.default.given
 import Future.{*:, zip}
 
@@ -16,7 +16,7 @@ class TaskScheduleBehavior extends munit.FunSuite {
       val f = Task {
         i += 1
       }.schedule(TaskSchedule.Every(100, 3)).run
-      f.result
+      f.awaitResult
       assertEquals(i, 3)
     val end = System.currentTimeMillis()
     assert(end - start >= 200)
@@ -30,7 +30,7 @@ class TaskScheduleBehavior extends munit.FunSuite {
       val f = Task {
         i += 1
       }.schedule(TaskSchedule.ExponentialBackoff(50, 2, 5)).run
-      f.result
+      f.awaitResult
       assertEquals(i, 5)
     val end = System.currentTimeMillis()
     assert(end - start >= 50 + 100 + 200 + 400)
@@ -44,7 +44,7 @@ class TaskScheduleBehavior extends munit.FunSuite {
       val f = Task {
         i += 1
       }.schedule(TaskSchedule.FibonacciBackoff(10, 6)).run
-      f.result
+      f.awaitResult
       assertEquals(i, 6)
     val end = System.currentTimeMillis()
     assert(end - start >= 0 + 10 + 10 + 20 + 30 + 50)
@@ -61,7 +61,7 @@ class TaskScheduleBehavior extends munit.FunSuite {
           Failure(AssertionError())
         } else Success(i)
       }
-      val ret = t.schedule(TaskSchedule.RepeatUntilSuccess(150)).run.result
+      val ret = t.schedule(TaskSchedule.RepeatUntilSuccess(150)).run.awaitResult
       assertEquals(ret.get.get, 4)
     val end = System.currentTimeMillis()
     assert(end - start >= 4 * 150)
@@ -79,7 +79,7 @@ class TaskScheduleBehavior extends munit.FunSuite {
           Success(i)
         } else Failure(ex)
       }
-      val ret = t.schedule(TaskSchedule.RepeatUntilFailure(150)).run.result
+      val ret = t.schedule(TaskSchedule.RepeatUntilFailure(150)).run.awaitResult
       assertEquals(ret.get, Failure(ex))
     val end = System.currentTimeMillis()
     assert(end - start >= 4 * 150)

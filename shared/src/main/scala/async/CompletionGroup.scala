@@ -5,10 +5,8 @@ import scala.util.Success
 
 /** A group of cancellable objects that are completed together. Cancelling the group means cancelling all its
   * uncompleted members.
-  * @param handleCompletion
-  *   a function that gets applied to every member when it is completed or cancelled
   */
-class CompletionGroup(val handleCompletion: Cancellable => Async ?=> Unit = _ => {}) extends Cancellable.Tracking:
+class CompletionGroup extends Cancellable.Tracking:
   private val members: mutable.Set[Cancellable] = mutable.Set()
   private var canceled: Boolean = false
   private var cancelWait: Option[Promise[Unit]] = None
@@ -25,8 +23,8 @@ class CompletionGroup(val handleCompletion: Cancellable => Async ?=> Unit = _ =>
   private[async] def waitCompletion()(using Async): Unit =
     synchronized:
       if members.nonEmpty && cancelWait.isEmpty then cancelWait = Some(Promise())
-    cancelWait.foreach(cWait => Async.await(cWait.future))
-    signalCompletion()
+    cancelWait.foreach(cWait => cWait.future.await)
+    unlink()
 
   /** Add given member to the members set. If the group has already been cancelled, cancels that member immediately. */
   def add(member: Cancellable): Unit =

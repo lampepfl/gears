@@ -88,7 +88,7 @@ class SuspendExecutorWithSleep(exec: ExecutionContext)
         val cancellable = schedule(millis.millis, () => resolver.resolve(()))
         resolver.onCancel(cancellable.cancel)
       .link()
-      .value
+      .await
 }
 
 class ForkJoinSupport extends SuspendExecutorWithSleep(new ForkJoinPool())

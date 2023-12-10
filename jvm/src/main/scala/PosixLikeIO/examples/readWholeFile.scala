@@ -14,11 +14,11 @@ import scala.concurrent.ExecutionContext
   Async.blocking:
     PIOHelper.withFile("/home/julian/Desktop/x.txt", StandardOpenOption.READ): f =>
       val b = ByteBuffer.allocate(1024)
-      val retCode = f.read(b).result.get
+      val retCode = f.read(b).awaitResult.get
       assert(retCode >= 0)
       val s = StandardCharsets.UTF_8.decode(b.slice(0, retCode)).toString()
       println("Read size with read(): " + retCode.toString())
       println("Data: " + s)
 
       println("Read with readString():")
-      println(Async.await(f.readString(1000)).get)
+      println(f.readString(1000).awaitResult)

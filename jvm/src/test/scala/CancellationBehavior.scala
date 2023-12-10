@@ -17,4 +17,4 @@ class JVMCancellationBehavior extends munit.FunSuite:
       val f = Future:
         Thread.sleep(5000)
         1
-      f.result
+      f.awaitResult

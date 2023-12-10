@@ -5,7 +5,7 @@ import scala.util.{Success, Failure}
 import java.util.concurrent.TimeoutException
 import java.util.concurrent.CancellationException
 
-class TimerTest extends munit.FunSuite {
+class TimerBehavior extends munit.FunSuite {
   import gears.async.default.given
 
   test("sleeping does sleep") {
@@ -16,17 +16,17 @@ class TimerTest extends munit.FunSuite {
       assert(now2 - now1 > 150, now2 - now1)
   }
 
-  test("TimerSleep1Second") {
+  test("timer does sleep") {
     Async.blocking:
       val timer = Timer(1.second)
       Future { timer.run() }
-      assert(Async.await(timer.src) == timer.TimerEvent.Tick)
+      assert(timer.src.awaitResult == timer.TimerEvent.Tick)
   }
 
-  def timeoutCancellableFuture[T](d: Duration, f: Future[T])(using Async, AsyncOperations): Future[T] =
+  def `cancel future after timeout`[T](d: Duration, f: Future[T])(using Async, AsyncOperations): Future[T] =
     val t = Future { sleep(d.toMillis) }
     Future:
-      val g = Async.await(Async.either(t, f))
+      val g = Async.either(t, f).awaitResult
       g match
         case Left(_) =>
           f.cancel()
@@ -35,16 +35,16 @@ class TimerTest extends munit.FunSuite {
           t.cancel()
           v.get
 
-  test("testTimeoutFuture") {
+  test("racing with a sleeping future") {
     var touched = false
     Async.blocking:
-      val t = timeoutCancellableFuture(
+      val t = `cancel future after timeout`(
         250.millis,
         Future:
           sleep(1000)
           touched = true
       )
-      Async.await(t)
+      assert(t.awaitResult.isFailure)
       assert(!touched)
       sleep(2000)
       assert(!touched)
