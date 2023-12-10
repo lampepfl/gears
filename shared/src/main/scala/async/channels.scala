@@ -10,12 +10,7 @@ import gears.async.Async.Source
 import gears.async.listeners.lockBoth
 import gears.async.Listener.acceptingListener
 
-/** Signals that the channel is closed. */
-case object Closed
-
-type Closed = Closed.type
-
-private type Res[T] = Either[Closed, T]
+import Channel.{Closed, Res}
 
 /** The part of a channel one can send values to. Blocking behavior depends on the implementation.
   */
@@ -157,15 +152,22 @@ object UnboundedChannel:
       else false
 
     override def pollSend(src: CanSend, s: Sender): Boolean = synchronized:
-      if !checkClosed(src, s)
-        && !cells.matchSender(src, s)
-        && s.completeNow(Right(()), src)
-      then buf += src.item
-      true
+      if checkClosed(src, s) || cells.matchSender(src, s) then true
+      else if s.completeNow(Right(()), src) then
+        buf += src.item
+        true
+      else false
   }
 end UnboundedChannel
 
 object Channel:
+  /** Signals that the channel is closed. */
+  case object Closed
+
+  type Closed = Closed.type
+
+  private[async] type Res[T] = Either[Closed, T]
+
   private[async] abstract class Impl[T] extends Channel[T]:
     protected type ReadResult = Res[T]
     protected type SendResult = Res[Unit]
@@ -261,9 +263,9 @@ object Channel:
         while hasSender do
           val (src, s) = nextSender
           tryComplete(src, s)(r) match
-            case ()               => return true
-            case listener: r.type => return true
-            case _                => dequeue() // drop gone sender from queue
+            case ()                        => return true
+            case listener if listener == r => return true
+            case _                         => dequeue() // drop gone sender from queue
         false
 
       /** Match a possible sender to a queue of readers: try to go through the queue with lock pairing, stopping when
@@ -273,9 +275,9 @@ object Channel:
         while hasReader do
           val r = nextReader
           tryComplete(src, s)(r) match
-            case ()               => return true
-            case listener: s.type => return true
-            case _                => dequeue() // drop gone reader from queue
+            case ()                        => return true
+            case listener if listener == s => return true
+            case _                         => dequeue() // drop gone reader from queue
         false
 
       private inline def tryComplete(src: CanSend, s: Sender)(r: Reader): s.type | r.type | Unit =
@@ -301,7 +303,7 @@ end Channel
 /** Channel multiplexer is an object where one can register publisher and subscriber channels. Internally a multiplexer
   * has a thread that continuously races the set of publishers and once it reads a value, it sends a copy to each
   * subscriber.
-  * 
+  *
   * When a publisher or subscriber channel is closed, it will be removed from the multiplexer's set.
   *
   * For an unchanging set of publishers and subscribers and assuming that the multiplexer is the only reader of the
