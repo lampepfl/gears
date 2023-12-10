@@ -7,7 +7,6 @@ import scala.collection.mutable
 import mutable.ListBuffer
 
 import java.util.concurrent.atomic.AtomicBoolean
-import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.CancellationException
 import scala.compiletime.uninitialized
 import scala.util.{Failure, Success, Try}
@@ -61,7 +60,7 @@ object Future:
         else this
 
     /** Sets the cancellation state and returns `true` if the future has not been completed and cancelled before. */
-    protected def setCancelled(): Boolean =
+    protected final def setCancelled(): Boolean =
       !hasCompleted && cancelRequest.compareAndSet(false, true)
 
     /** Complete future with result. If future was cancelled in the meantime, return a CancellationException failure
