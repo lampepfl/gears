@@ -53,6 +53,13 @@ object Future:
     def cancel(): Unit =
       setCancelled()
 
+    override def link(group: CompletionGroup): this.type =
+      // though hasCompleted is accessible without "synchronized",
+      // we want it not to be run while the future was trying to complete.
+      synchronized:
+        if group == CompletionGroup.Unlinked || !hasCompleted then super.link(group)
+        else this
+
     /** Sets the cancellation state and returns `true` if the future has not been completed and cancelled before. */
     protected def setCancelled(): Boolean =
       !hasCompleted && cancelRequest.compareAndSet(false, true)
@@ -72,6 +79,7 @@ object Future:
           hasCompleted = true
           val ws = waiting.toList
           waiting.clear()
+          unlink()
           ws
       for listener <- toNotify do listener.completeNow(result, this)
 
@@ -138,7 +146,6 @@ object Future:
       }).recoverWith { case _: InterruptedException | _: CancellationException =>
         Failure(new CancellationException())
       }))(using FutureAsync(CompletionGroup.Unlinked))
-      signalCompletion()(using ac)
 
   end RunnableFuture
 
@@ -185,7 +192,6 @@ object Future:
         if setCancelled() then
           cancelHandle()
           reject(CancellationException())
-        this.unlink()
     }
     body(future)
     future
