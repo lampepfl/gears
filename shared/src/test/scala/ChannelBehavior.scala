@@ -254,7 +254,7 @@ class ChannelBehavior extends munit.FunSuite {
       }
       val race = Async.race(
         (0 until 100).map(i =>
-          Async.race((10 * i until 10 * i + 10).map(idx => channels(idx).readSource.map(_.right.get))*)
+          Async.race((10 * i until 10 * i + 10).map(idx => channels(idx).readSource.transformValuesWith(_.right.get))*)
         )*
       )
       var sum = 0

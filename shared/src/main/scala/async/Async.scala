@@ -153,8 +153,11 @@ object Async:
     end values
 
   extension [T](src: Source[T])
-    /** Pass on data transformed by `f` */
-    def map[U](f: T => U) =
+    /** Create a new source that requires the original source to run the given transformation function on every value
+      * received. Note that [[f]] is **always** run on the computation that produces the values from the original
+      * source, so this is very likely to run **sequentially** and be a performance bottleneck.
+      */
+    def transformValuesWith[U](f: T => U) =
       new Source[U]:
         selfSrc =>
         def transform(k: Listener[U]) =
@@ -267,5 +270,5 @@ object Async:
     * continuation.
     */
   def either[T1, T2](src1: Source[T1], src2: Source[T2]): Source[Either[T1, T2]] =
-    race(src1.map(Left(_)), src2.map(Right(_)))
+    race(src1.transformValuesWith(Left(_)), src2.transformValuesWith(Right(_)))
 end Async
