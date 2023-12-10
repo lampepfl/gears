@@ -186,7 +186,7 @@ object Future:
         if setCancelled() then
           cancelHandle()
           reject(CancellationException())
-          this.unlink()
+        this.unlink()
     }
     body(future)
     future
