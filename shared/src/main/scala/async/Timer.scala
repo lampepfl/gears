@@ -49,7 +49,7 @@ class Timer(tickDuration: Duration) extends Cancellable {
   inline final def src: Async.Source[this.TimerEvent] = Source
 
   /** Starts the timer. Suspends until the timer is cancelled. */
-  def start()(using Async, AsyncOperations): Unit =
+  def run()(using Async, AsyncOperations): Unit =
     cancellationScope(this):
       loop()
 
