@@ -26,6 +26,6 @@ lazy val root =
         nativeConfig ~= { c =>
           c.withMultithreadingSupport(true)
         },
-        libraryDependencies += "org.scalameta" %%% "munit" % "1.0.0-M10+15-3940023e-SNAPSHOT" % Test
+        libraryDependencies += "org.scalameta" %%% "munit" % "1.0.0-M10+16-4e2ab919-SNAPSHOT" % Test
       )
     )
