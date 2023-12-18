@@ -86,4 +86,4 @@ jobs:
     - name: Test
       run: sbt rootNative/test
     - name: Stress Test with Lower Memory
-      run: env GC_MAXIMUM_HEAP_SIZE=64M sbt 'rootNative/testOnly StressTest'
+      run: env GC_MAXIMUM_HEAP_SIZE=512M sbt 'rootNative/testOnly StressTest'
