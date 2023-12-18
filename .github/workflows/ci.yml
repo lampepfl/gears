@@ -85,3 +85,5 @@ jobs:
       run: sudo apt-get install clang libstdc++-12-dev libgc-dev
     - name: Test
       run: sbt rootNative/test
+    - name: Stress Test with Lower Memory
+      run: env GC_MAXIMUM_HEAP_SIZE=64M sbt 'rootNative/testOnly StressTest'
