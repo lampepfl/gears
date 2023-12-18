@@ -267,7 +267,7 @@ object Future:
     *
     * If the external operation supports cancellation, the body can register one handler using [[Resolver.onCancel]].
     */
-  def withResolver[T](body: Resolver[T] => Unit): Promise[T] =
+  def withResolver[T](body: Resolver[T] => Unit): Future[T] =
     val future = new CoreFuture[T] with Resolver[T] with Promise[T] {
       @volatile var cancelHandle = () => ()
       override def onCancel(handler: () => Unit): Unit = cancelHandle = handler

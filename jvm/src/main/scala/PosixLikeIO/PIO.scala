@@ -15,7 +15,7 @@ import scala.util.{Failure, Success, Try}
 
 object File:
   extension (resolver: Future.Resolver[Int])
-    def toCompletionHandler = new CompletionHandler[Integer, ByteBuffer] {
+    private[File] def toCompletionHandler = new CompletionHandler[Integer, ByteBuffer] {
       override def completed(result: Integer, attachment: ByteBuffer): Unit = resolver.resolve(result)
       override def failed(e: Throwable, attachment: ByteBuffer): Unit = resolver.reject(e)
     }
