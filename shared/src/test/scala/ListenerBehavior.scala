@@ -24,7 +24,7 @@ class ListenerBehavior extends munit.FunSuite:
     val prom1 = Promise[Unit]()
     val prom2 = Promise[Unit]()
     Async.blocking:
-      val raced = race(Future { prom1.future.await; 10 }, Future { prom2.future.await; 20 })
+      val raced = race(Future { prom1.await; 10 }, Future { prom2.await; 20 })
       assert(!raced.poll(Listener.acceptingListener((x, _) => fail(s"race uncomplete $x"))))
       prom1.complete(Success(()))
       assertEquals(raced.await, 10)
@@ -330,7 +330,7 @@ private class NumberedTestListener private (sleep: AtomicBoolean, fail: Boolean,
       if sleep.getAndSet(false) then
         Async.blocking:
           waiter = Some(Promise())
-          waiter.get.future.await
+          waiter.get.await
       waiter.foreach: promise =>
         promise.complete(Success(()))
         waiter = None

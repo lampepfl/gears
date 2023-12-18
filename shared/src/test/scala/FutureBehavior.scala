@@ -302,7 +302,7 @@ class FutureBehavior extends munit.FunSuite {
   test("Promise can be cancelled") {
     Async.blocking:
       val p = Promise[Int]()
-      val f = p.future
+      val f = p.asFuture
       f.cancel()
       p.complete(Success(10))
       f.awaitResult match
@@ -314,7 +314,7 @@ class FutureBehavior extends munit.FunSuite {
     Async.blocking:
       val p = Promise[Int]()
       p.complete(Success(10))
-      val f = p.future
+      val f = p.asFuture
       f.cancel()
       assertEquals(f.await, 10)
   }

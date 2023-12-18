@@ -146,11 +146,11 @@ class SourceBehavior extends munit.FunSuite {
       val g = f.transformValuesWith(identity)
       f.onComplete(Listener.acceptingListener { (_, _) => aRan.complete(Success(())) })
       g.onComplete(Listener.acceptingListener { (_, _) => bRan.complete(Success(())) })
-      assertEquals(aRan.future.poll(), None)
-      assertEquals(bRan.future.poll(), None)
+      assertEquals(aRan.poll(), None)
+      assertEquals(bRan.poll(), None)
       f.await
       Thread.sleep(100) // onComplete of await and manual may be scheduled
-      aRan.future.zip(bRan.future).alt(Future(sleep(600))).await
+      aRan.zip(bRan).alt(Future(sleep(600))).await
   }
 
   test("either") {
