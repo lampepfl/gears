@@ -251,11 +251,15 @@ object Future:
     /** Complete the future with a failure */
     def reject(exc: Throwable): Unit = complete(Failure(exc))
 
+    /** Complete the future with a [[CancellationException]] */
+    def rejectCancelled(): Unit = complete(Failure(new CancellationException()))
+
     /** Complete the future with the result, be it Success or Failure */
     def complete(result: Try[T]): Unit
 
     /** Register a cancellation handler to be called when the created future is cancelled. Note that only one handler
-      * may be used.
+      * may be used. The handler should eventually complete the Future using one of complete/resolve/reject*. The
+      * default handler is set up to [[rejectCancelled]] immediately.
       */
     def onCancel(handler: () => Unit): Unit
   end Resolver
@@ -269,14 +273,12 @@ object Future:
     */
   def withResolver[T](body: Resolver[T] => Unit): Future[T] =
     val future = new CoreFuture[T] with Resolver[T] with Promise[T] {
-      @volatile var cancelHandle = () => ()
+      @volatile var cancelHandle = () => rejectCancelled()
       override def onCancel(handler: () => Unit): Unit = cancelHandle = handler
       override def complete(result: Try[T]): Unit = super.complete(result)
 
       override def cancel(): Unit =
-        if setCancelled() then
-          cancelHandle()
-          reject(CancellationException())
+        if setCancelled() then cancelHandle()
     }
     body(future)
     future

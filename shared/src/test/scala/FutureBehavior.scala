@@ -10,6 +10,7 @@ import scala.util.{Failure, Success, Try}
 import scala.util.Random
 import scala.collection.mutable.Set
 import java.util.concurrent.atomic.AtomicInteger
+import gears.async.Listener
 
 class FutureBehavior extends munit.FunSuite {
   given ExecutionContext = ExecutionContext.global
@@ -336,6 +337,18 @@ class FutureBehavior extends munit.FunSuite {
       r.resolve(1)
     fut.cancel()
     assertEquals(num.get(), 0)
+  }
+
+  test("Future.withResolver is only completed after handler decides") {
+    val prom = Future.Promise[Unit]()
+    val fut = Future.withResolver[Unit]: r =>
+      r.onCancel(() => prom.onComplete(Listener { (_, _) => r.rejectCancelled() }))
+
+    assert(fut.poll().isEmpty)
+    fut.cancel()
+    assert(fut.poll().isEmpty)
+    prom.complete(Success(()))
+    assert(fut.poll().isDefined)
   }
 
   test("Nesting of cancellations") {
