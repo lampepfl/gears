@@ -86,7 +86,9 @@ class SuspendExecutorWithSleep(exec: ExecutionContext)
     Future
       .withResolver[Unit]: resolver =>
         val cancellable = schedule(millis.millis, () => resolver.resolve(()))
-        resolver.onCancel(cancellable.cancel)
+        resolver.onCancel: () =>
+          cancellable.cancel()
+          resolver.rejectAsCancelled()
       .link()
       .await
 }

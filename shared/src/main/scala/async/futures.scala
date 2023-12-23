@@ -21,10 +21,11 @@ trait Future[+T] extends Async.OriginalSource[Try[T]], Cancellable
 
 object Future:
 
-  /** A future that is completed explicitly by calling its `complete` method. There are two public implementations
+  /** A future that is completed explicitly by calling its `complete` method. There are three public implementations
     *
     *   - RunnableFuture: Completion is done by running a block of code
-    *   - Promise.future: Completion is done by external request.
+    *   - Promise.apply: Completion is done by external request.
+    *   - withResolver: Completion is done by external request set up from a block of code.
     */
   private class CoreFuture[+T] extends Future[T]:
 
@@ -156,47 +157,6 @@ object Future:
   def apply[T](body: Async ?=> T)(using Async): Future[T] =
     RunnableFuture(body)
 
-  /** The group of handlers to be used in [[withResolver]]. As a Future is completed only once, only one of
-    * resolve/reject/complete may be used and only once.
-    */
-  trait Resolver[-T]:
-    /** Complete the future with a data item successfully */
-    def resolve(item: T): Unit = complete(Success(item))
-
-    /** Complete the future with a failure */
-    def reject(exc: Throwable): Unit = complete(Failure(exc))
-
-    /** Complete the future with the result, be it Success or Failure */
-    def complete(result: Try[T]): Unit
-
-    /** Register a cancellation handler to be called when the created future is cancelled. Note that only one handler
-      * may be used.
-      */
-    def onCancel(handler: () => Unit): Unit
-  end Resolver
-
-  /** Create a future that may be completed asynchronously using external means.
-    *
-    * The body is run synchronously on the callers thread to setup an external asynchronous operation whose
-    * success/failure it communicates using the [[Resolver]] to complete the future.
-    *
-    * If the external operation supports cancellation, the body can register one handler using [[Resolver.onCancel]].
-    */
-  def withResolver[T](body: Resolver[T] => Unit): Future[T] =
-    val future = new CoreFuture[T] with Resolver[T] {
-      @volatile var cancelHandle = () => ()
-      override def onCancel(handler: () => Unit): Unit = cancelHandle = handler
-      override def complete(result: Try[T]): Unit = super.complete(result)
-
-      override def cancel(): Unit =
-        if setCancelled() then
-          cancelHandle()
-          reject(CancellationException())
-    }
-    body(future)
-    future
-  end withResolver
-
   /** A future that immediately terminates with the given result */
   def now[T](result: Try[T]): Future[T] =
     val f = CoreFuture[T]()
@@ -261,22 +221,68 @@ object Future:
 
   end extension
 
-  /** A promise defines a future that is be completed via the promise's `complete` method.
+  /** A promise defines a future that is be completed via the `complete` method.
     */
-  class Promise[T]:
-    private val myFuture = new CoreFuture[T]:
-      fut =>
-      override def cancel(): Unit =
-        if setCancelled() then fut.complete(Failure(new CancellationException()))
+  trait Promise[T] extends Future[T]:
+    inline def asFuture: Future[T] = this
 
-    /** The future defined by this promise */
-    val future: Future[T] = myFuture
+    /** Define the result value of `future`. */
+    def complete(result: Try[T]): Unit
 
-    /** Define the result value of `future`. However, if `future` was cancelled in the meantime complete with a
-      * `CancellationException` failure instead.
-      */
-    def complete(result: Try[T]): Unit = myFuture.complete(result)
+  object Promise:
+    def apply[T](): Promise[T] =
+      new CoreFuture[T] with Promise[T]:
+        override def cancel(): Unit =
+          if setCancelled() then complete(Failure(new CancellationException()))
+
+        /** Define the result value of `future`. However, if `future` was cancelled in the meantime complete with a
+          * `CancellationException` failure instead.
+          */
+        override def complete(result: Try[T]): Unit = super[CoreFuture].complete(result)
   end Promise
+
+  /** The group of handlers to be used in [[withResolver]]. As a Future is completed only once, only one of
+    * resolve/reject/complete may be used and only once.
+    */
+  trait Resolver[-T]:
+    /** Complete the future with a data item successfully */
+    def resolve(item: T): Unit = complete(Success(item))
+
+    /** Complete the future with a failure */
+    def reject(exc: Throwable): Unit = complete(Failure(exc))
+
+    /** Complete the future with a [[CancellationException]] */
+    def rejectAsCancelled(): Unit = complete(Failure(new CancellationException()))
+
+    /** Complete the future with the result, be it Success or Failure */
+    def complete(result: Try[T]): Unit
+
+    /** Register a cancellation handler to be called when the created future is cancelled. Note that only one handler
+      * may be used. The handler should eventually complete the Future using one of complete/resolve/reject*. The
+      * default handler is set up to [[rejectAsCancelled]] immediately.
+      */
+    def onCancel(handler: () => Unit): Unit
+  end Resolver
+
+  /** Create a promise that may be completed asynchronously using external means.
+    *
+    * The body is run synchronously on the callers thread to setup an external asynchronous operation whose
+    * success/failure it communicates using the [[Resolver]] to complete the future.
+    *
+    * If the external operation supports cancellation, the body can register one handler using [[Resolver.onCancel]].
+    */
+  def withResolver[T](body: Resolver[T] => Unit): Future[T] =
+    val future = new CoreFuture[T] with Resolver[T] with Promise[T] {
+      @volatile var cancelHandle = () => rejectAsCancelled()
+      override def onCancel(handler: () => Unit): Unit = cancelHandle = handler
+      override def complete(result: Try[T]): Unit = super.complete(result)
+
+      override def cancel(): Unit =
+        if setCancelled() then cancelHandle()
+    }
+    body(future)
+    future
+  end withResolver
 
   /** Collects a list of futures into a channel of futures, arriving as they finish. */
   class Collector[T](futures: Future[T]*):

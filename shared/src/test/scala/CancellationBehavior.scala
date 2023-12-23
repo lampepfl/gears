@@ -77,7 +77,7 @@ class CancellationBehavior extends munit.FunSuite:
       val promise = Future.Promise[Unit]()
       Async.group:
         startFuture(info, promise.complete(Success(())))
-        promise.future.await
+        promise.await
       info.assertCancelled()
 
   test("nested link group"):
@@ -89,13 +89,13 @@ class CancellationBehavior extends munit.FunSuite:
           info1, {
             Async.group:
               startFuture(info2, promise2.complete(Success(())))
-              promise2.future.await
+              promise2.await
             info2.assertCancelled()
             Future.now(Success(())).await // check cancellation
             promise1.complete(Success(()))
           }
         )
-        promise1.future.await
+        promise1.await
       info1.assertCancelled()
       info2.assertCancelled()
 
@@ -123,6 +123,6 @@ class CancellationBehavior extends munit.FunSuite:
       Async.group:
         Async.current.group.cancel() // cancel now
         val f = startFuture(info, promise.complete(Success(())))
-        promise.future.awaitResult
+        promise.awaitResult
         f.awaitResult
         info.assertCancelled()
