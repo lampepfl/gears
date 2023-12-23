@@ -5,12 +5,18 @@ import java.util.concurrent.locks.ReentrantLock
 import scala.concurrent.duration.FiniteDuration
 
 object VThreadScheduler extends Scheduler:
-  override def execute(body: Runnable): Unit = Thread.startVirtualThread(body)
+  private val VTFactory = Thread
+    .ofVirtual()
+    .name("gears.async.VThread-", 0L)
+    .factory()
+
+  override def execute(body: Runnable): Unit = VTFactory.newThread(body)
 
   override def schedule(delay: FiniteDuration, body: Runnable): Cancellable =
-    val th = Thread.startVirtualThread: () =>
+    val th = VTFactory.newThread: () =>
       Thread.sleep(delay.toMillis)
       execute(body)
+    th.start()
     () => th.interrupt()
 
 object VThreadSupport extends AsyncSupport:
