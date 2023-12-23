@@ -342,7 +342,7 @@ class FutureBehavior extends munit.FunSuite {
   test("Future.withResolver is only completed after handler decides") {
     val prom = Future.Promise[Unit]()
     val fut = Future.withResolver[Unit]: r =>
-      r.onCancel(() => prom.onComplete(Listener { (_, _) => r.rejectCancelled() }))
+      r.onCancel(() => prom.onComplete(Listener { (_, _) => r.rejectAsCancelled() }))
 
     assert(fut.poll().isEmpty)
     fut.cancel()
