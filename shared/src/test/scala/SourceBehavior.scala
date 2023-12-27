@@ -183,4 +183,22 @@ class SourceBehavior extends munit.FunSuite {
         Success(0)
       )
   }
+
+  test("transformValuesWith unsubscribes") {
+    val base = Future.Promise[Unit]()
+    val derived = base.transformValuesWith(_ => ())
+
+    var touched = false
+    val listener = Listener { (_data, _src) => touched = true }
+
+    derived.onComplete(listener)
+    assert(!touched)
+
+    derived.dropListener(listener)
+    base.complete(Success(()))
+    assert(!touched)
+
+    derived.onComplete(listener)
+    assert(touched)
+  }
 }

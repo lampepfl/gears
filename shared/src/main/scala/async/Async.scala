@@ -161,7 +161,7 @@ object Async:
       new Source[U]:
         selfSrc =>
         def transform(k: Listener[U]) =
-          new Listener[T]:
+          new Listener.ForwardingListener[T](selfSrc, k):
             val lock = withLock(k) { inner => new ListenerLockWrapper(inner, selfSrc) }
             def complete(data: T, source: Async.Source[T]) =
               k.complete(f(data), selfSrc)
