@@ -3,6 +3,7 @@ package gears.async
 import scala.annotation.unchecked.uncheckedVariance
 import java.util.concurrent.locks.ReentrantLock
 import scala.concurrent.duration.FiniteDuration
+import java.util.concurrent.atomic.AtomicBoolean
 
 object VThreadScheduler extends Scheduler:
   private val VTFactory = Thread
@@ -13,11 +14,14 @@ object VThreadScheduler extends Scheduler:
   override def execute(body: Runnable): Unit = VTFactory.newThread(body)
 
   override def schedule(delay: FiniteDuration, body: Runnable): Cancellable =
+    val interruptGuard = AtomicBoolean(true) // to avoid interrupting the body
+
     val th = VTFactory.newThread: () =>
       Thread.sleep(delay.toMillis)
-      execute(body)
+      if interruptGuard.getAndSet(false) then body.run()
     th.start()
-    () => th.interrupt()
+
+    () => if interruptGuard.getAndSet(false) then th.interrupt()
 
 object VThreadSupport extends AsyncSupport:
 
