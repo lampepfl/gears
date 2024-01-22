@@ -3,7 +3,6 @@ package gears.async
 import scala.annotation.unchecked.uncheckedVariance
 import java.util.concurrent.locks.ReentrantLock
 import scala.concurrent.duration.FiniteDuration
-import java.util.concurrent.atomic.AtomicBoolean
 import java.lang.invoke.{VarHandle, MethodHandles}
 
 object VThreadScheduler extends Scheduler:
