@@ -13,27 +13,27 @@ object VThreadScheduler extends Scheduler:
 
   override def execute(body: Runnable): Unit = VTFactory.newThread(body)
 
-  override def schedule(delay: FiniteDuration, body: Runnable): Cancellable = ScheduleRunner(delay, body)
+  override def schedule(delay: FiniteDuration, body: Runnable): Cancellable = ScheduledRunnable(delay, body)
 
-  private class ScheduleRunner(val delay: FiniteDuration, val body: Runnable) extends Cancellable {
+  private class ScheduledRunnable(val delay: FiniteDuration, val body: Runnable) extends Cancellable {
     @volatile var interruptGuard = true // to avoid interrupting the body
 
     val th = VTFactory.newThread: () =>
       try Thread.sleep(delay.toMillis)
       catch case e: InterruptedException => () /* we got cancelled, don't propagate */
-      if ScheduleRunner.interruptGuardVar.getAndSet(this, false) then body.run()
+      if ScheduledRunnable.interruptGuardVar.getAndSet(this, false) then body.run()
     th.start()
 
     final override def cancel(): Unit =
-      if ScheduleRunner.interruptGuardVar.getAndSet(this, false) then th.interrupt()
+      if ScheduledRunnable.interruptGuardVar.getAndSet(this, false) then th.interrupt()
   }
 
-  private object ScheduleRunner:
+  private object ScheduledRunnable:
     val interruptGuardVar =
       MethodHandles
         .lookup()
-        .in(classOf[ScheduleRunner])
-        .findVarHandle(classOf[ScheduleRunner], "interruptGuard", classOf[Boolean])
+        .in(classOf[ScheduledRunnable])
+        .findVarHandle(classOf[ScheduledRunnable], "interruptGuard", classOf[Boolean])
 
 object VThreadSupport extends AsyncSupport:
 
