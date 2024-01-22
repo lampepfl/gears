@@ -4,6 +4,7 @@ import scala.annotation.unchecked.uncheckedVariance
 import java.util.concurrent.locks.ReentrantLock
 import scala.concurrent.duration.FiniteDuration
 import java.util.concurrent.atomic.AtomicBoolean
+import java.lang.invoke.{VarHandle, MethodHandles}
 
 object VThreadScheduler extends Scheduler:
   private val VTFactory = Thread
@@ -13,15 +14,27 @@ object VThreadScheduler extends Scheduler:
 
   override def execute(body: Runnable): Unit = VTFactory.newThread(body)
 
-  override def schedule(delay: FiniteDuration, body: Runnable): Cancellable =
-    val interruptGuard = AtomicBoolean(true) // to avoid interrupting the body
+  override def schedule(delay: FiniteDuration, body: Runnable): Cancellable = ScheduleRunner(delay, body)
+
+  private class ScheduleRunner(val delay: FiniteDuration, val body: Runnable) extends Cancellable {
+    var interruptGuard = true // to avoid interrupting the body
 
     val th = VTFactory.newThread: () =>
-      Thread.sleep(delay.toMillis)
-      if interruptGuard.getAndSet(false) then body.run()
+      try Thread.sleep(delay.toMillis)
+      catch case e: InterruptedException => () /* we got cancelled, don't propagate */
+      if ScheduleRunner.interruptGuardVar.getAndSet(this, false) then body.run()
     th.start()
 
-    () => if interruptGuard.getAndSet(false) then th.interrupt()
+    override def cancel(): Unit =
+      if ScheduleRunner.interruptGuardVar.getAndSet(this, false) then th.interrupt()
+  }
+
+  private object ScheduleRunner:
+    val interruptGuardVar =
+      MethodHandles
+        .lookup()
+        .in(classOf[ScheduleRunner])
+        .findVarHandle(classOf[ScheduleRunner], "interruptGuard", classOf[Boolean])
 
 object VThreadSupport extends AsyncSupport:
 
