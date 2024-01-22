@@ -16,7 +16,7 @@ object VThreadScheduler extends Scheduler:
   override def schedule(delay: FiniteDuration, body: Runnable): Cancellable = ScheduleRunner(delay, body)
 
   private class ScheduleRunner(val delay: FiniteDuration, val body: Runnable) extends Cancellable {
-    var interruptGuard = true // to avoid interrupting the body
+    @volatile var interruptGuard = true // to avoid interrupting the body
 
     val th = VTFactory.newThread: () =>
       try Thread.sleep(delay.toMillis)
@@ -24,7 +24,7 @@ object VThreadScheduler extends Scheduler:
       if ScheduleRunner.interruptGuardVar.getAndSet(this, false) then body.run()
     th.start()
 
-    override def cancel(): Unit =
+    final override def cancel(): Unit =
       if ScheduleRunner.interruptGuardVar.getAndSet(this, false) then th.interrupt()
   }
 
