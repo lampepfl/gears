@@ -252,7 +252,7 @@ class ListenerBehavior extends munit.FunSuite:
     Thread
       .ofPlatform()
       .start: () =>
-        val result = wrapped.lock.lockSelf(source1).asInstanceOf[Listener.PartialLock]
+        val result = wrapped.lock.lockSelf(source1).asInstanceOf[Listener.LockMarker]
         wrapped.releaseLock(result)
       .join()
 
