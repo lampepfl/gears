@@ -280,8 +280,8 @@ object Channel:
         false
 
       private inline def tryComplete(src: CanSend, s: Sender)(r: Reader): s.type | r.type | Unit =
-        lockBoth(readSource, src)(r, s) match
-          case Listener.Locked =>
+        lockBoth(r, s) match
+          case true =>
             Impl.this.complete(src, r, s)
             dequeue() // drop completed reader/sender from queue
             ()
