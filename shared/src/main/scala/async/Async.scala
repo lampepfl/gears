@@ -202,9 +202,10 @@ object Async:
                 override def acquire() =
                   if found then false // already completed
                   else if !k.lock.acquire() then
-                    if !found && synchronized { // getAndSet alternative, avoid racing only with self here.
-                        if !found then { found = false; true }
-                        else false
+                    if !found && !synchronized { // getAndSet alternative, avoid racing only with self here.
+                        val old = found
+                        found = true
+                        old
                       }
                     then sources.foreach(_.dropListener(self)) // same as dropListener(k), but avoids an allocation
                     false
