@@ -3,6 +3,7 @@ package gears.async
 import scala.annotation.unchecked.uncheckedVariance
 import java.util.concurrent.locks.ReentrantLock
 import scala.concurrent.duration.FiniteDuration
+import java.lang.invoke.{VarHandle, MethodHandles}
 
 object VThreadScheduler extends Scheduler:
   private val VTFactory = Thread
@@ -12,12 +13,27 @@ object VThreadScheduler extends Scheduler:
 
   override def execute(body: Runnable): Unit = VTFactory.newThread(body)
 
-  override def schedule(delay: FiniteDuration, body: Runnable): Cancellable =
+  override def schedule(delay: FiniteDuration, body: Runnable): Cancellable = ScheduledRunnable(delay, body)
+
+  private class ScheduledRunnable(val delay: FiniteDuration, val body: Runnable) extends Cancellable {
+    @volatile var interruptGuard = true // to avoid interrupting the body
+
     val th = VTFactory.newThread: () =>
-      Thread.sleep(delay.toMillis)
-      execute(body)
+      try Thread.sleep(delay.toMillis)
+      catch case e: InterruptedException => () /* we got cancelled, don't propagate */
+      if ScheduledRunnable.interruptGuardVar.getAndSet(this, false) then body.run()
     th.start()
-    () => th.interrupt()
+
+    final override def cancel(): Unit =
+      if ScheduledRunnable.interruptGuardVar.getAndSet(this, false) then th.interrupt()
+  }
+
+  private object ScheduledRunnable:
+    val interruptGuardVar =
+      MethodHandles
+        .lookup()
+        .in(classOf[ScheduledRunnable])
+        .findVarHandle(classOf[ScheduledRunnable], "interruptGuard", classOf[Boolean])
 
 object VThreadSupport extends AsyncSupport:
 
