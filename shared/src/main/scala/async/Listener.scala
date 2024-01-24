@@ -35,7 +35,7 @@ trait Listener[-T]:
     * [[release]] is automatically called.
     */
   def completeNow(data: T, source: Async.Source[T]): Boolean =
-    if lockCompletely() then
+    if acquireLock() then
       this.complete(data, source)
       true
     else false
@@ -44,10 +44,10 @@ trait Listener[-T]:
   inline final def releaseLock(): Unit = if lock != null then lock.release()
 
   /** Attempts to completely lock the listener, if such a lock exists. Succeeds with [[true]] immediately if there is no
-    * [[Listener.ListenerLock]]. If locking fails, [[releaseAll]] is automatically called.
+    * [[Listener.ListenerLock]]. If locking fails, [[release]] is automatically called.
     */
-  inline final def lockCompletely(): Boolean =
-    if lock != null then lock.lockSelf() else true
+  inline final def acquireLock(): Boolean =
+    if lock != null then lock.acquire() else true
 
 object Listener:
   /** A simple [[Listener]] that always accepts the item and sends it to the consumer. */
@@ -89,7 +89,7 @@ object Listener:
 
     /** Attempt to lock the current [[ListenerLock]]. Locks are guaranteed to be held as short as possible.
       */
-    def lockSelf(): Boolean
+    def acquire(): Boolean
 
     /** Release the current lock without resolving the listener with any items, if the current listener lock is before
       * or the same as the current [[Listener.LockMarker]].

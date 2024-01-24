@@ -25,16 +25,16 @@ def lockBoth[T, U](
     lt: Listener[T],
     lu: Listener[U]
 ): lt.type | lu.type | true =
-  val lockT = if lt.lock == null then return (if lu.lockCompletely() then true else lu) else lt.lock
-  val lockU = if lu.lock == null then return (if lt.lockCompletely() then true else lt) else lu.lock
+  val lockT = if lt.lock == null then return (if lu.acquireLock() then true else lu) else lt.lock
+  val lockU = if lu.lock == null then return (if lt.acquireLock() then true else lt) else lu.lock
 
   inline def doLock[T, U](lt: Listener[T], lu: Listener[U])(
       lockT: ListenerLock,
       lockU: ListenerLock
   ): lt.type | lu.type | true =
     // assert(lockT.number > lockU.number)
-    if !lockT.lockSelf() then lt
-    else if !lockU.lockSelf() then
+    if !lockT.acquire() then lt
+    else if !lockU.acquire() then
       lockT.release()
       lu
     else true

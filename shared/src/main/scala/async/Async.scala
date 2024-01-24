@@ -136,7 +136,7 @@ object Async:
       new Source[T]:
         override def poll(k: Listener[T]): Boolean =
           if q.isEmpty() then false
-          else if !k.lockCompletely() then true
+          else if !k.acquireLock() then true
           else
             val item = q.poll()
             if item == null then
@@ -199,9 +199,9 @@ object Async:
               // if the upstream listener holds a lock already, we can utilize it.
               new Listener.ListenerLock:
                 val selfNumber = k.lock.selfNumber
-                override def lockSelf() =
+                override def acquire() =
                   if found then false // already completed
-                  else if !k.lock.lockSelf() then
+                  else if !k.lock.acquire() then
                     if !found && synchronized { // getAndSet alternative, avoid racing only with self here.
                         if !found then { found = false; true }
                         else false
@@ -216,7 +216,7 @@ object Async:
             else
               new Listener.ListenerLock with NumberedLock:
                 val selfNumber: Long = number
-                def lockSelf() =
+                def acquire() =
                   if found then false
                   else
                     acquireLock()

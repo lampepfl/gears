@@ -102,12 +102,12 @@ class ListenerBehavior extends munit.FunSuite:
     assert(source1.listener.isDefined)
     assert(source2.listener.isDefined)
 
-    val lock = source1.listener.get.lockCompletely()
+    val lock = source1.listener.get.acquireLock()
     assertEquals(lock, true)
 
     Async.blocking:
       val l2 = source2.listener.get
-      val f = Future(assertEquals(l2.lockCompletely(), false))
+      val f = Future(assertEquals(l2.acquireLock(), false))
       source1.completeWith(1)
       assert(source1.listener.isEmpty)
       assert(source2.listener.isEmpty)
@@ -254,7 +254,7 @@ private class NumberedTestListener private (sleep: AtomicBoolean, fail: Boolean,
 
   override val lock = new ListenerLock with Listener.NumberedLock:
     val selfNumber = this.number
-    def lockSelf() =
+    def acquire() =
       if sleep.getAndSet(false) then
         Async.blocking:
           waiter = Some(Promise())
@@ -288,7 +288,7 @@ private class TSource(using asst: munit.Assertions) extends Async.Source[Int]:
       asst.assertEquals(k, listener.get)
       listener = None
   def lockListener() =
-    val r = listener.get.lockCompletely()
+    val r = listener.get.acquireLock()
     if !r then listener = None
     r
   def completeWith(value: Int) =
