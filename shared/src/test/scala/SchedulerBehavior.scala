@@ -39,4 +39,14 @@ class SchedulerBehavior extends munit.FunSuite {
 
       assert(bodyRan)
   }
+
+  test("execute works") {
+    Async.blocking:
+      val fut = Promise[Int]()
+
+      Async.current.scheduler.execute: () =>
+        fut.complete(Success(10))
+
+      assertEquals(fut.await, 10)
+  }
 }

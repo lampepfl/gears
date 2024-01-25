@@ -11,7 +11,9 @@ object VThreadScheduler extends Scheduler:
     .name("gears.async.VThread-", 0L)
     .factory()
 
-  override def execute(body: Runnable): Unit = VTFactory.newThread(body)
+  override def execute(body: Runnable): Unit =
+    val th = VTFactory.newThread(body)
+    th.start()
 
   override def schedule(delay: FiniteDuration, body: Runnable): Cancellable = ScheduledRunnable(delay, body)
 
@@ -98,7 +100,7 @@ object VThreadSupport extends AsyncSupport:
 
   override def boundary[R](body: (Label[R]) ?=> R): R =
     val label = VThreadLabel[R]()
-    Thread.startVirtualThread: () =>
+    VThreadScheduler.execute: () =>
       val result = body(using label)
       label.setResult(result)
 
@@ -109,7 +111,7 @@ object VThreadSupport extends AsyncSupport:
     suspension.setInput(arg)
 
   override def scheduleBoundary(body: (Label[Unit]) ?=> Unit)(using Scheduler): Unit =
-    Thread.startVirtualThread: () =>
+    VThreadScheduler.execute: () =>
       val label = VThreadLabel[Unit]()
       body(using label)
 
