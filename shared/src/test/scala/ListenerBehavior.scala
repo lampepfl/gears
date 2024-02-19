@@ -7,13 +7,8 @@ import gears.async.default.given
 import scala.util.Success
 import java.util.concurrent.atomic.AtomicBoolean
 import gears.async.listeners.lockBoth
-import gears.async.Listener.Locked
-import gears.async.Listener.Gone
 import gears.async.Listener.ListenerLock
 import gears.async.Async.Source
-import gears.async.Listener.LockMarker
-import gears.async.Listener.LockResult
-import gears.async.Listener.PartialLock
 import scala.collection.mutable.Buffer
 import gears.async.listeners.ConflictingLocksException
 
@@ -32,7 +27,7 @@ class ListenerBehavior extends munit.FunSuite:
   test("lock two listeners"):
     val listener1 = Listener.acceptingListener[Int]((x, _) => assertEquals(x, 1))
     val listener2 = Listener.acceptingListener[Int]((x, _) => assertEquals(x, 2))
-    assertEquals(lockBoth(Dummy, Dummy)(listener1, listener2), Locked)
+    assertEquals(lockBoth(listener1, listener2), true)
     listener1.complete(1, Dummy)
     listener2.complete(2, Dummy)
 
@@ -42,15 +37,14 @@ class ListenerBehavior extends munit.FunSuite:
       val lock = null
       def complete(data: Nothing, src: Async.Source[Nothing]): Unit =
         fail("should not succeed")
-      def release(until: Listener.LockMarker) =
+      def release() =
         listener1Locked = false
-        null
     val listener2 = NumberedTestListener(false, true, 1)
 
-    assertEquals(lockBoth(Dummy, Dummy)(listener1, listener2), listener2)
+    assertEquals(lockBoth(listener1, listener2), listener2)
     assert(!listener1Locked)
 
-    assertEquals(lockBoth(Dummy, Dummy)(listener2, listener1), listener2)
+    assertEquals(lockBoth(listener2, listener1), listener2)
     assert(!listener1Locked)
 
   test("lock two races"):
@@ -60,7 +54,7 @@ class ListenerBehavior extends munit.FunSuite:
     Async.race(source1).onComplete(Listener.acceptingListener[Int]((x, _) => assertEquals(x, 1)))
     Async.race(source2).onComplete(Listener.acceptingListener[Int]((x, _) => assertEquals(x, 2)))
 
-    assertEquals(lockBoth(source1, source2)(source1.listener.get, source2.listener.get), Locked)
+    assertEquals(lockBoth(source1.listener.get, source2.listener.get), true)
     source1.completeWith(1)
     source2.completeWith(2)
 
@@ -71,7 +65,7 @@ class ListenerBehavior extends munit.FunSuite:
     Async.race(source1).onComplete(Listener.acceptingListener[Int]((x, _) => assertEquals(x, 1)))
     Async.race(source2).onComplete(Listener.acceptingListener[Int]((x, _) => assertEquals(x, 2)))
 
-    assertEquals(lockBoth(source1, source2)(source2.listener.get, source1.listener.get), Locked)
+    assertEquals(lockBoth(source2.listener.get, source1.listener.get), true)
     source1.completeWith(1)
     source2.completeWith(2)
 
@@ -83,7 +77,7 @@ class ListenerBehavior extends munit.FunSuite:
     Async.race(Async.race(source2)).onComplete(Listener.acceptingListener[Int]((x, _) => assertEquals(x, 2)))
     Async.race(race1).onComplete(Listener.acceptingListener[Int]((x, _) => assertEquals(x, 1)))
 
-    assertEquals(lockBoth(source1, source2)(source1.listener.get, source2.listener.get), Locked)
+    assertEquals(lockBoth(source1.listener.get, source2.listener.get), true)
     source1.completeWith(1)
     source2.completeWith(2)
 
@@ -95,7 +89,7 @@ class ListenerBehavior extends munit.FunSuite:
     Async.race(Async.race(source2)).onComplete(Listener.acceptingListener[Int]((x, _) => assertEquals(x, 2)))
     Async.race(race1).onComplete(Listener.acceptingListener[Int]((x, _) => assertEquals(x, 1)))
 
-    assertEquals(lockBoth(source2, source1)(source2.listener.get, source1.listener.get), Locked)
+    assertEquals(lockBoth(source2.listener.get, source1.listener.get), true)
     source1.completeWith(1)
     source2.completeWith(2)
 
@@ -108,12 +102,12 @@ class ListenerBehavior extends munit.FunSuite:
     assert(source1.listener.isDefined)
     assert(source2.listener.isDefined)
 
-    val lock = source1.listener.get.lockCompletely(source1)
-    assertEquals(lock, Locked)
+    val lock = source1.listener.get.acquireLock()
+    assertEquals(lock, true)
 
     Async.blocking:
       val l2 = source2.listener.get
-      val f = Future(assertEquals(l2.lockCompletely(source2), Gone))
+      val f = Future(assertEquals(l2.acquireLock(), false))
       source1.completeWith(1)
       assert(source1.listener.isEmpty)
       assert(source2.listener.isEmpty)
@@ -155,7 +149,7 @@ class ListenerBehavior extends munit.FunSuite:
     val listener = NumberedTestListener(false, true, 1)
     Async.race(source1, source2).onComplete(listener)
 
-    assertEquals(source1.lockListener(), Gone)
+    assertEquals(source1.lockListener(), false)
     assert(source1.listener.isEmpty)
     assert(source2.listener.isEmpty)
 
@@ -168,34 +162,11 @@ class ListenerBehavior extends munit.FunSuite:
     val s1listener = source1.listener.get
 
     Async.blocking:
-      val f1 = Future(lockBoth(source1, Dummy)(s1listener, other))
+      val f1 = Future(lockBoth(s1listener, other))
       other.waitWaiter()
       assert(source2.listener.get.completeNow(1, source2))
       other.continue()
       assertEquals(f1.await, s1listener)
-
-  test("lockBoth ordering"):
-    val ordering = Buffer[Long]()
-    val src = TSource()
-    val l = TestListener(1)
-    val s1 = lockChain(ordering, l)(5, 3, 1)
-    val s2 = lockChain(ordering, l)(4, 2)
-
-    assertEquals(lockBoth(src, src)(s1, s2), Locked)
-    assertEquals(ordering.toSeq, Seq(5L, 4, 3, 2, 1))
-    ordering.clear()
-    assertEquals(lockBoth(src, src)(s2, s1), Locked)
-    assertEquals(ordering.toSeq, Seq(5L, 4, 3, 2, 1))
-
-    val s3 = lockChain(ordering, l)(5, 4, 1)
-    val s4 = lockChain(ordering, l)(3, 2)
-
-    ordering.clear()
-    assertEquals(lockBoth(src, src)(s3, s4), Locked)
-    assertEquals(ordering.toSeq, Seq(5L, 4, 3, 2, 1))
-    ordering.clear()
-    assertEquals(lockBoth(src, src)(s4, s3), Locked)
-    assertEquals(ordering.toSeq, Seq(5L, 4, 3, 2, 1))
 
   test("conflicting locks"):
     val l = NumberedTestListener(false, false, 1)
@@ -207,56 +178,36 @@ class ListenerBehavior extends munit.FunSuite:
       r.onComplete(l)
       src.listener.get
     })
-    val (k1, k2) =
-      try
-        lockBoth(s1, s2)(l1, l2)
-        ???
-      catch
-        case ConflictingLocksException(base, conflict) =>
-          assertEquals(base, (l1, l2))
-          conflict
     try
-      lockBoth(s2, s1)(l2, l1)
+      lockBoth(l1, l2)
       ???
     catch
-      case ConflictingLocksException(base, conflict) =>
+      case ConflictingLocksException(base) =>
+        assertEquals(base, (l1, l2))
+    try
+      lockBoth(l2, l1)
+      ???
+    catch
+      case ConflictingLocksException(base) =>
         assertEquals(base, (l2, l1))
-        assertEquals(conflict, (k2, k1))
     try
-      lockBoth(s1, s2)(l, l2)
+      lockBoth(l, l2)
       ???
     catch
-      case ConflictingLocksException(base, conflict) =>
+      case ConflictingLocksException(base) =>
         assertEquals(base, (l, l2))
-        assertEquals(conflict, (l.lock, k2))
     try
-      lockBoth(s1, s2)(l1, l)
+      lockBoth(l1, l)
       ???
     catch
-      case ConflictingLocksException(base, conflict) =>
+      case ConflictingLocksException(base) =>
         assertEquals(base, (l1, l))
-        assertEquals(conflict, (k1, l.lock))
     try
-      lockBoth(s1, s2)(l, l)
+      lockBoth(l, l)
       ???
     catch
-      case ConflictingLocksException(base, conflict) =>
+      case ConflictingLocksException(base) =>
         assertEquals(base, (l, l))
-        assertEquals(conflict, (l.lock, l.lock))
-
-  test("unlocking midway releases locks"):
-    val source1 = TSource()
-    Async.race(source1).onComplete(NumberedTestListener(false, false, 1))
-    val wrapped = source1.listener.get
-
-    Thread
-      .ofPlatform()
-      .start: () =>
-        val result = wrapped.lock.lockSelf(source1).asInstanceOf[Listener.PartialLock]
-        wrapped.releaseLock(result)
-      .join()
-
-    assert(wrapped.completeNow(1, source1))
 
   test("failing downstream listener is dropped in race"):
     val source1 = TSource()
@@ -288,28 +239,6 @@ class ListenerBehavior extends munit.FunSuite:
     assert(source2.listener.isEmpty)
     assert(source3.listener.isEmpty)
 
-def lockChain[T](buf: Buffer[Long], inner: Listener[T])(numbers: Long*) =
-  def wrap(num: Long, inner: Listener[T]) = new Listener[T] {
-    override val lock: ListenerLock | Null = new ListenerLock {
-      override val selfNumber: Long = num
-      var heldSrc: Source[?] = null
-      val partialLock = Listener.withLock(inner): innerLock =>
-        new PartialLock:
-          override val nextNumber: Long = innerLock.selfNumber
-          override def lockNext(): LockResult = innerLock.lockSelf(heldSrc)
-      override def lockSelf(source: Source[?]): LockResult =
-        heldSrc = source
-        buf += num
-        partialLock match
-          case null            => Locked
-          case pl: PartialLock => pl
-      override protected def release(to: LockMarker): ListenerLock | Null =
-        if to == partialLock then null else inner.lock
-    }
-    override def complete(data: T, source: Source[T]): Unit = ???
-  }
-  numbers.foldRight(inner)(wrap)
-
 private class TestListener(expected: Int)(using asst: munit.Assertions) extends Listener[Int]:
   val lock = null
 
@@ -317,16 +246,15 @@ private class TestListener(expected: Int)(using asst: munit.Assertions) extends 
     asst.assertEquals(data, expected)
 
 private class NumberedTestListener private (sleep: AtomicBoolean, fail: Boolean, expected: Int)(using munit.Assertions)
-    extends TestListener(expected)
-    with Listener.NumberedLock:
+    extends TestListener(expected):
   private var waiter: Option[Promise[Unit]] = None
 
   def this(sleep: Boolean, fail: Boolean, expected: Int)(using munit.Assertions) =
     this(AtomicBoolean(sleep), fail, expected)
 
-  override val lock = new ListenerLock:
-    val selfNumber = NumberedTestListener.this.number
-    def lockSelf(source: Source[?]) =
+  override val lock = new ListenerLock with Listener.NumberedLock:
+    val selfNumber = this.number
+    def acquire() =
       if sleep.getAndSet(false) then
         Async.blocking:
           waiter = Some(Promise())
@@ -334,9 +262,9 @@ private class NumberedTestListener private (sleep: AtomicBoolean, fail: Boolean,
       waiter.foreach: promise =>
         promise.complete(Success(()))
         waiter = None
-      if fail then Listener.Gone
-      else Listener.Locked
-    protected def release(to: LockMarker): ListenerLock | Null = null
+      if fail then false
+      else true
+    def release() = ()
 
   def waitWaiter() =
     while waiter.isEmpty do Thread.`yield`()
@@ -360,8 +288,8 @@ private class TSource(using asst: munit.Assertions) extends Async.Source[Int]:
       asst.assertEquals(k, listener.get)
       listener = None
   def lockListener() =
-    val r = listener.get.lockCompletely(this)
-    if r == Listener.Gone then listener = None
+    val r = listener.get.acquireLock()
+    if !r then listener = None
     r
   def completeWith(value: Int) =
     val l = listener.get
