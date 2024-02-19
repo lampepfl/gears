@@ -4,8 +4,14 @@ Scala Native requires some libraries to be compiled from source and `publishLoca
 
 ### TL; DR
 
+You need to have all the [dependencies to build Scala Native](https://scala-native.org/en/stable/user/setup.html). Run:
 ```bash
 ./publish-deps.sh
+```
+
+Or if you have `nix` with `flake` enabled, run the following from this repo's root:
+```
+nix develop .#dependencies -c dependencies/publish-deps.sh
 ```
 
 ### What are included?
