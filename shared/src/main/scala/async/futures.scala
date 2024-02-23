@@ -157,11 +157,20 @@ object Future:
   def apply[T](body: Async ?=> T)(using Async): Future[T] =
     RunnableFuture(body)
 
-  /** A future that immediately terminates with the given result */
+  /** A future that immediately terminates with the given result. */
   def now[T](result: Try[T]): Future[T] =
     val f = CoreFuture[T]()
     f.complete(result)
     f
+
+  /** An alias to [[now]]. */
+  inline def completed[T](result: Try[T]) = now(result)
+
+  /** A future that immediately resolves with the given result. Similar to `Future.now(Success(result))`. */
+  inline def resolved[T](result: T): Future[T] = now(Success(result))
+
+  /** A future that immediately rejects with the given exception. Similar to `Future.now(Failure(exception))`. */
+  inline def rejected(exception: Throwable): Future[Nothing] = now(Failure(exception))
 
   extension [T](f1: Future[T])
 
