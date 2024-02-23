@@ -200,14 +200,14 @@ object Future:
     /** Alternative parallel composition of this task with `other` task. If either task succeeds, succeed with the
       * success that was returned first. Otherwise, fail with the failure that was returned last.
       */
-    def alt(f2: Future[T]): Future[T] = altImpl(false)(f2)
+    def or(f2: Future[T]): Future[T] = orImpl(false)(f2)
 
-    /** Like `alt` but the slower future is cancelled. If either task succeeds, succeed with the success that was
+    /** Like `or` but the slower future is cancelled. If either task succeeds, succeed with the success that was
       * returned first and the other is cancelled. Otherwise, fail with the failure that was returned last.
       */
-    def altWithCancel(f2: Future[T]): Future[T] = altImpl(true)(f2)
+    def orWithCancel(f2: Future[T]): Future[T] = orImpl(true)(f2)
 
-    inline def altImpl(inline withCancel: Boolean)(f2: Future[T]): Future[T] = Future.withResolver: r =>
+    inline def orImpl(inline withCancel: Boolean)(f2: Future[T]): Future[T] = Future.withResolver: r =>
       Async
         .raceWithOrigin(f1, f2)
         .onComplete(Listener { case ((v, which), _) =>
