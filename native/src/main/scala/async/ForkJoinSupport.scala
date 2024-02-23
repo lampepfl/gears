@@ -1,7 +1,7 @@
 package gears.async.native
 
 import gears.async._
-import scala.scalanative.runtime.{Continuations => native}
+import scala.scalanative.runtime.{Continuations => nativeContinuations}
 import java.util.concurrent.ForkJoinPool
 import scala.concurrent.ExecutionContext
 import scala.concurrent.JavaConversions._
@@ -14,14 +14,14 @@ class NativeContinuation[-T, +R] private[native] (val cont: T => R) extends Susp
   def resume(arg: T): R = cont(arg)
 
 trait NativeSuspend extends SuspendSupport:
-  type Label[R] = native.BoundaryLabel[R]
+  type Label[R] = nativeContinuations.BoundaryLabel[R]
   type Suspension[T, R] = NativeContinuation[T, R]
 
   override def boundary[R](body: (Label[R]) ?=> R): R =
-    native.boundary(body)
+    nativeContinuations.boundary(body)
 
   override def suspend[T, R](body: Suspension[T, R] => R)(using Label[R]): T =
-    native.suspend[T, R](f => body(NativeContinuation(f)))
+    nativeContinuations.suspend[T, R](f => body(NativeContinuation(f)))
 end NativeSuspend
 
 /** Spawns a single thread that does all the sleeping. */
