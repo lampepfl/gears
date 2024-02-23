@@ -327,12 +327,12 @@ object Future:
 
     /** Race all futures, returning the first successful value. Throws the last exception received, if everything fails.
       */
-    def altAll(using Async): T = altImpl(false)
+    def awaitFirst(using Async): T = awaitFirstImpl(false)
 
-    /** Like [[altAll]], but cancels all other futures as soon as the first future succeeds. */
-    def altAllWithCancel(using Async): T = altImpl(true)
+    /** Like [[awaitFirst]], but cancels all other futures as soon as the first future succeeds. */
+    def awaitFirstWithCancel(using Async): T = awaitFirstImpl(true)
 
-    private inline def altImpl(withCancel: Boolean)(using Async): T =
+    private inline def awaitFirstImpl(withCancel: Boolean)(using Async): T =
       val collector = Collector(fs*)
       @scala.annotation.tailrec
       def loop(attempt: Int): T =
