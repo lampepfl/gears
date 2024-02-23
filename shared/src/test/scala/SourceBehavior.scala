@@ -150,7 +150,7 @@ class SourceBehavior extends munit.FunSuite {
       assertEquals(bRan.poll(), None)
       f.await
       Thread.sleep(100) // onComplete of await and manual may be scheduled
-      aRan.zip(bRan).alt(Future(sleep(600))).await
+      aRan.zip(bRan).or(Future(sleep(600))).await
   }
 
   test("either") {
