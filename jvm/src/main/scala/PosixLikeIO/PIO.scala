@@ -12,6 +12,8 @@ import java.nio.file.{Path, StandardOpenOption}
 import scala.Tuple.Union
 import scala.concurrent.ExecutionContext
 import scala.util.{Failure, Success, Try}
+import gears.async.Scheduler
+import java.util.concurrent.CancellationException
 
 object File:
   extension (resolver: Future.Resolver[Int])
@@ -88,6 +90,7 @@ class File(val path: String) {
 }
 
 class SocketUDP() {
+  import SocketUDP._
   private var socket: Option[DatagramSocket] = None
 
   def isOpened: Boolean = socket.isDefined && !socket.get.isClosed
@@ -110,8 +113,8 @@ class SocketUDP() {
   def send(data: ByteBuffer, address: String, port: Int): Future[Unit] =
     assert(socket.isDefined)
 
-    Async.blocking:
-      Future:
+    Future.withResolver: resolver =>
+      resolver.spawn:
         val packet: DatagramPacket =
           new DatagramPacket(data.array(), data.limit(), InetAddress.getByName(address), port)
         socket.get.send(packet)
@@ -119,8 +122,8 @@ class SocketUDP() {
   def receive(): Future[DatagramPacket] =
     assert(socket.isDefined)
 
-    Async.blocking:
-      Future[DatagramPacket]:
+    Future.withResolver: resolver =>
+      resolver.spawn:
         val buffer = Array.fill[Byte](10 * 1024)(0)
         val packet: DatagramPacket = DatagramPacket(buffer, 10 * 1024)
         socket.get.receive(packet)
@@ -132,6 +135,15 @@ class SocketUDP() {
       socket.get.close()
   }
 }
+
+object SocketUDP:
+  extension [T](resolver: Future.Resolver[T])
+    private[SocketUDP] inline def spawn(body: => T)(using s: Scheduler) =
+      s.execute(() =>
+        resolver.complete(Try(body).recover { case _: InterruptedException =>
+          throw CancellationException()
+        })
+      )
 
 object PIOHelper {
   def withFile[T](path: String, options: StandardOpenOption*)(f: File => T): T =
