@@ -4,6 +4,7 @@ import scala.concurrent.duration._
 import scala.util.{Success, Failure}
 import java.util.concurrent.TimeoutException
 import java.util.concurrent.CancellationException
+import scala.util.Try
 
 class TimerBehavior extends munit.FunSuite {
   import gears.async.default.given
@@ -23,17 +24,17 @@ class TimerBehavior extends munit.FunSuite {
       assert(timer.src.awaitResult == timer.TimerEvent.Tick)
   }
 
-  def `cancel future after timeout`[T](d: Duration, f: Future[T])(using Async, AsyncOperations): Future[T] =
-    val t = Future { sleep(d.toMillis) }
-    Future:
-      val g = Async.either(t, f).awaitResult
-      g match
-        case Left(_) =>
-          f.cancel()
-          throw TimeoutException()
-        case Right(v) =>
-          t.cancel()
-          v.get
+  def `cancel future after timeout`[T](d: Duration, f: Future[T])(using Async, AsyncOperations): Try[T] =
+    Async.spawning:
+      f.link()
+      val t = Future { sleep(d.toMillis) }
+      Try:
+        Async.select(
+          t handle: _ =>
+            throw TimeoutException(),
+          f handle: v =>
+            v.get
+        )
 
   test("racing with a sleeping future") {
     var touched = false
@@ -44,7 +45,7 @@ class TimerBehavior extends munit.FunSuite {
           sleep(1000)
           touched = true
       )
-      assert(t.awaitResult.isFailure)
+      assert(t.isFailure)
       assert(!touched)
       sleep(2000)
       assert(!touched)

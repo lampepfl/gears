@@ -20,7 +20,6 @@ trait Async(using val support: AsyncSupport, val scheduler: support.Scheduler):
   def withGroup(group: CompletionGroup): Async
 
 object Async:
-
   private class Blocking(val group: CompletionGroup)(using support: AsyncSupport, scheduler: support.Scheduler)
       extends Async(using support, scheduler):
     private val lock = ReentrantLock()
@@ -51,11 +50,25 @@ object Async:
   /** Execute asynchronous computation `body` on currently running thread. The thread will suspend when the computation
     * waits.
     */
-  def blocking[T](body: Async ?=> T)(using support: AsyncSupport, scheduler: support.Scheduler): T =
+  def blocking[T](body: Async.Spawnable ?=> T)(using support: AsyncSupport, scheduler: support.Scheduler): T =
     group(body)(using Blocking(CompletionGroup.Unlinked))
 
   /** The currently executing Async context */
   inline def current(using async: Async): Async = async
+
+  /** [[Async.Spawnable]] is a special subtype of [[Async]], also capable of spawning runnable [[Future]]s.
+    *
+    * Most functions should not take [[Spawnable]] as a parameter, unless the function explicitly wants to spawn
+    * "dangling" runnable [[Future]]s. Instead, functions should take [[Async]] and spawn scoped futures within
+    * [[Async.spawning]].
+    */
+  opaque type Spawnable <: Async = Async
+
+  /** Runs [[body]] inside a spawnable context where it is allowed to spawning concurrently runnable [[Future]]s. When
+    * the body returns, all spawned futures are cancelled and waited for (similar to [[Async.group]]).
+    */
+  inline def spawning[T](inline body: Async.Spawnable ?=> T)(using Async): T =
+    Async.group(body)
 
   def group[T](body: Async ?=> T)(using async: Async): T =
     withNewCompletionGroup(CompletionGroup().link())(body)
@@ -63,7 +76,9 @@ object Async:
   /** Runs a body within another completion group. When the body returns, the group is cancelled and its completion
     * awaited with the `Unlinked` group.
     */
-  private[async] def withNewCompletionGroup[T](group: CompletionGroup)(body: Async ?=> T)(using async: Async): T =
+  private[async] def withNewCompletionGroup[T](group: CompletionGroup)(body: Async.Spawnable ?=> T)(using
+      async: Async
+  ): T =
     val completionAsync =
       if CompletionGroup.Unlinked == async.group
       then async
