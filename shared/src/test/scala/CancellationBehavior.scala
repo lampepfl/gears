@@ -65,7 +65,7 @@ class CancellationBehavior extends munit.FunSuite:
   test("group cancel"):
     var x = 0
     Async.blocking:
-      Async.spawning:
+      Async.group:
         Future:
           sleep(400)
           x = 1
@@ -75,7 +75,7 @@ class CancellationBehavior extends munit.FunSuite:
     val info = Info()
     Async.blocking:
       val promise = Future.Promise[Unit]()
-      Async.spawning:
+      Async.group:
         startFuture(info, promise.complete(Success(())))
         promise.await
       info.assertCancelled()
@@ -84,10 +84,10 @@ class CancellationBehavior extends munit.FunSuite:
     val (info1, info2) = (Info(), Info())
     val (promise1, promise2) = (Future.Promise[Unit](), Future.Promise[Unit]())
     Async.blocking:
-      Async.spawning:
+      Async.group:
         startFuture(
           info1, {
-            Async.spawning:
+            Async.group:
               startFuture(info2, promise2.complete(Success(())))
               promise2.await
             info2.assertCancelled()
@@ -120,7 +120,7 @@ class CancellationBehavior extends munit.FunSuite:
     val info = Info()
     Async.blocking:
       val promise = Future.Promise[Unit]()
-      Async.spawning:
+      Async.group:
         Async.current.group.cancel() // cancel now
         val f = startFuture(info, promise.complete(Success(())))
         promise.awaitResult

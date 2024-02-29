@@ -60,17 +60,14 @@ object Async:
     *
     * Most functions should not take [[Spawnable]] as a parameter, unless the function explicitly wants to spawn
     * "dangling" runnable [[Future]]s. Instead, functions should take [[Async]] and spawn scoped futures within
-    * [[Async.spawning]].
+    * [[Async.group]].
     */
   opaque type Spawnable <: Async = Async
 
   /** Runs [[body]] inside a spawnable context where it is allowed to spawning concurrently runnable [[Future]]s. When
-    * the body returns, all spawned futures are cancelled and waited for (similar to [[Async.group]]).
+    * the body returns, all spawned futures are cancelled and waited for.
     */
-  inline def spawning[T](inline body: Async.Spawnable ?=> T)(using Async): T =
-    Async.group(body)
-
-  def group[T](body: Async ?=> T)(using async: Async): T =
+  def group[T](body: Async.Spawnable ?=> T)(using Async): T =
     withNewCompletionGroup(CompletionGroup().link())(body)
 
   /** Runs a body within another completion group. When the body returns, the group is cancelled and its completion
