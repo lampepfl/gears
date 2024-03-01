@@ -1,6 +1,3 @@
-[submodule "dependencies/scala-native"]
-	path = dependencies/scala-native
-	url = https://github.com/scala-native/scala-native.git
 [submodule "dependencies/munit"]
 	path = dependencies/munit
 	url = https://github.com/natsukagami/munit.git

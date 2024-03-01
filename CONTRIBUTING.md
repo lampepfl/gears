@@ -4,7 +4,7 @@
 
 `gears` currently require:
 - **On the JVM**: JVM with support for virtual threads. This usually means JVM 21+, or 19+ with `--enable-preview`.
-- **On Scala Native**: Scala Native with delimited continuations support. See the pinned versions in [`dependencies`](./dependencies/README.md).
+- **On Scala Native**: Scala Native with delimited continuations support. Right now we are using `0.5-RC1`.
 
 All of the needed dependencies can be loaded by the included Nix Flake. If you have `nix` with `flake` enabled, run
 ```
