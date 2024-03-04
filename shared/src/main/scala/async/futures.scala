@@ -87,7 +87,7 @@ object Future:
 
   /** A future that is completed by evaluating `body` as a separate asynchronous operation in the given `scheduler`
     */
-  private class RunnableFuture[+T](body: Async.Spawnable ?=> T)(using ac: Async) extends CoreFuture[T]:
+  private class RunnableFuture[+T](body: Async.Spawn ?=> T)(using ac: Async) extends CoreFuture[T]:
 
     private var innerGroup: CompletionGroup = CompletionGroup()
 
@@ -153,7 +153,7 @@ object Future:
   /** Create a future that asynchronously executes [[body]] that defines its result value in a [[Try]] or returns
     * [[Failure]] if an exception was thrown.
     */
-  def apply[T](body: Async.Spawnable ?=> T)(using async: Async, spawnable: Async.Spawnable & async.type): Future[T] =
+  def apply[T](body: Async.Spawn ?=> T)(using async: Async, spawnable: Async.Spawn & async.type): Future[T] =
     RunnableFuture(body)
 
   /** A future that immediately terminates with the given result */
@@ -362,7 +362,7 @@ enum TaskSchedule:
 class Task[+T](val body: (Async, AsyncOperations) ?=> T):
 
   /** Start a future computed from the `body` of this task */
-  def run(using Async.Spawnable, AsyncOperations) = Future(body)
+  def run(using Async.Spawn, AsyncOperations) = Future(body)
 
   def schedule(s: TaskSchedule): Task[T] =
     s match {
