@@ -1,14 +1,13 @@
 package gears.async
 
-import gears.async.Async
-import scala.concurrent.duration._
-import scala.util.Try
-import scala.util.control.NonFatal
-import scala.util.Failure
-import scala.util.Success
-import gears.async.AsyncOperations.sleep
 import scala.util.Random
-import java.util.concurrent.TimeoutException
+import scala.util.{Try, Success, Failure}
+import scala.util.boundary
+import scala.util.control.NonFatal
+import scala.concurrent.duration._
+
+import gears.async.Async
+import gears.async.AsyncOperations.sleep
 import gears.async.Retry.Delay
 
 /** Utility class to perform asynchronous actions with retrying policies on exceptions.
@@ -144,22 +143,3 @@ object Retry:
       def jitterDelay(last: Duration, maximum: Duration): Duration =
         val base = maximum.toMillis / 2
         (base + Random.between(0, maximum.toMillis - base + 1)).millis
-
-/** Runs [[op]] with a timeout. When the timeout occurs, [[op]] is cancelled through the given [[Async]] context, and
-  * [[TimeoutException]] is thrown.
-  */
-def withTimeout[T](timeout: Duration)(op: Async ?=> T)(using Async, AsyncOperations): T =
-  Async.select(
-    Future(op).handle(_.get),
-    Future(sleep(timeout.toMillis)).handle: _ =>
-      throw TimeoutException()
-  )
-
-/** Runs [[op]] with a timeout. When the timeout occurs, [[op]] is cancelled through the given [[Async]] context, and
-  * [[None]] is returned.
-  */
-def withTimeoutOption[T](timeout: Duration)(op: Async ?=> T)(using Async, AsyncOperations): Option[T] =
-  Async.select(
-    Future(op).handle(v => Some(v.get)),
-    Future(sleep(timeout.toMillis)).handle(_ => None)
-  )
