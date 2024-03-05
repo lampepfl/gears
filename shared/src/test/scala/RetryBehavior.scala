@@ -1,4 +1,5 @@
-import gears.async.{Async, Future, Task, TaskSchedule, Retry, Delay}
+import gears.async.{Async, Future, Task, TaskSchedule, Retry}
+import Retry.Delay
 import scala.concurrent.duration.*
 import gears.async.default.given
 import Future.{*:, zip}

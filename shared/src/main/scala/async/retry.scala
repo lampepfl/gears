@@ -1,5 +1,6 @@
 package gears.async
 
+import gears.async.Async
 import scala.concurrent.duration._
 import scala.util.Try
 import scala.util.control.NonFatal
@@ -7,12 +8,20 @@ import scala.util.Failure
 import scala.util.Success
 import gears.async.AsyncOperations.sleep
 import scala.util.Random
+import java.util.concurrent.TimeoutException
+import gears.async.Retry.Delay
 
+/** Utility class to perform asynchronous actions with retrying policies on exceptions.
+  *
+  * See [[Retry]] companion object for common policies as a starting point.
+  */
 case class Retry(
     retryOnSuccess: Boolean = false,
     maximumFailures: Option[Int] = None,
     delay: Delay = Delay.none
 ):
+  /** Runs [[body]] with the current policy in its own scope, returning the result or the last failure as an exception.
+    */
   def apply[T](op: => T)(using Async, AsyncOperations): T =
     @scala.annotation.tailrec
     def loop(failures: Int, lastDelay: Duration): T =
@@ -32,46 +41,123 @@ case class Retry(
 
     loop(0, 0.seconds)
 
+  /** Set the maximum failure count. */
   def withMaximumFailures(max: Int) =
     assert(max >= 0)
     this.copy(maximumFailures = Some(max))
 
+  /** Set the delay policy between runs. See [[Delay]]. */
   def withDelay(delay: Delay) = this.copy(delay = delay)
 
 object Retry:
+  /** Ignores the result and attempt the action in an infinite loop. [[Retry.withMaximumFailures]] can be useful for
+    * bailing on multiple failures. [[scala.util.boundary]] can be used for manually breaking.
+    */
   val forever = Retry(retryOnSuccess = true)
+
+  /** Returns the result, or attempt to retry if an exception is raised. */
   val untilSuccess = Retry(retryOnSuccess = false)
+
+  /** Attempt to retry the operation *until* an exception is raised. In this mode, [[Retry]] always throws an exception
+    * on return.
+    */
   val untilFailure = Retry(retryOnSuccess = true).withMaximumFailures(0)
 
-trait Delay:
-  def delayFor(failuresCount: Int, lastDelay: Duration): Duration
+  /** Defines a delay policy based on the number of successive failures and the duration of the last delay. See
+    * [[Delay]] companion object for some provided delay policies.
+    */
+  trait Delay:
+    /** Return the expected duration to delay the next attempt from the current attempt.
+      *
+      * @param failuresCount
+      *   The number of successive failures until the current attempt. Note that if the last attempt was a success,
+      *   [[failuresCount]] is `0`.
+      * @param lastDelay
+      *   The duration of the last delay, if there were any successive failures. Otherwise this is `0`.
+      */
+    def delayFor(failuresCount: Int, lastDelay: Duration): Duration
 
-object Delay:
-  val none = constant(0.second)
+  object Delay:
+    /** No delays. */
+    val none = constant(0.second)
 
-  def constant(duration: Duration) = new Delay:
-    def delayFor(failuresCount: Int, lastDelay: Duration): Duration = duration
+    /** A fixed amount of delays, whether the last attempt was a success or failure. */
+    def constant(duration: Duration) = new Delay:
+      def delayFor(failuresCount: Int, lastDelay: Duration): Duration = duration
 
+    /** Returns a delay policy for exponential backoff.
+      * @param maximum
+      *   The maximum duration possible for a delay.
+      * @param starting
+      *   The delay duration between successful attempts, and after the first failures.
+      * @param multiplier
+      *   Scale the delay duration by this multiplier for each successive failure. Defaults to `2`.
+      * @param jitter
+      *   An additional jitter to randomize the delay duration. Defaults to none. See [[Jitter]].
+      */
+    def backoff(maximum: Duration, starting: Duration, multiplier: Double = 2, jitter: Jitter = Jitter.none) =
+      new Delay:
+        def delayFor(failuresCount: Int, lastDelay: Duration): Duration =
+          jitter
+            .jitterDelay(
+              lastDelay,
+              if failuresCount <= 1 then starting
+              else (lastDelay.toMillis * multiplier).toLong.millis
+            )
+            .min(maximum)
+
+    /** Decorrelated exponential backoff: randomize between the last delay duration and a multiple of that duration. */
+    def deccorelated(maximum: Duration, starting: Duration, multiplier: Double = 3) =
+      new Delay:
+        def delayFor(failuresCount: Int, lastDelay: Duration): Duration =
+          val upperBound =
+            if failuresCount <= 1 then starting
+            else multiplier * lastDelay
+          Random.between(lastDelay.toMillis, upperBound.min(maximum).toMillis).millis
+
+  /** A randomizer for the delay duration, to avoid accidental coordinated DoS on failures. See [[Jitter]] companion
+    * objects for some provided jitter implementations.
+    */
   trait Jitter:
+    /** Returns the *actual* duration to delay between attempts, given the theoretical given delay and actual last delay
+      * duration, possibly with some randomization.
+      * @param last
+      *   The last delay duration performed, with jitter applied.
+      * @param maximum
+      *   The theoretical amount of delay governed by the [[Delay]] policy, serving as an upper bound.
+      */
     def jitterDelay(last: Duration, maximum: Duration): Duration
 
   object Jitter:
+    /** No jitter, always return the exact duration suggested by the policy. */
     val none = new Jitter:
       def jitterDelay(last: Duration, maximum: Duration): Duration = maximum
+
+    /** Full jitter: randomize between 0 and the suggested delay duration. */
+    val full = new Jitter:
+      def jitterDelay(last: Duration, maximum: Duration): Duration = Random.between(0, maximum.toMillis).millis
+
+    /** Equal jitter: randomize between the last delay duration and the suggested delay duration. */
     val equal = new Jitter:
       def jitterDelay(last: Duration, maximum: Duration): Duration =
         val base = maximum.toMillis / 2
         (base + Random.between(0, base)).millis
-    def decorrelated(base: Duration, multiplier: Double = 3) = new Jitter:
-      def jitterDelay(last: Duration, maximum: Duration): Duration =
-        Random.between(base.toMillis, (last.toMillis * multiplier).toLong).millis
 
-  def backoff(maximum: Duration, starting: Duration, multiplier: Double = 2, jitter: Jitter = Jitter.none) = new Delay:
-    def delayFor(failuresCount: Int, lastDelay: Duration): Duration =
-      jitter
-        .jitterDelay(
-          lastDelay,
-          if failuresCount <= 1 then starting
-          else (lastDelay.toMillis * multiplier).toLong.millis
-        )
-        .min(maximum)
+/** Runs [[op]] with a timeout. When the timeout occurs, [[op]] is cancelled through the given [[Async]] context, and
+  * [[TimeoutException]] is thrown.
+  */
+def withTimeout[T](timeout: Duration)(op: Async ?=> T)(using Async, AsyncOperations): T =
+  Async.select(
+    Future(op).handle(_.get),
+    Future(sleep(timeout.toMillis)).handle: _ =>
+      throw TimeoutException()
+  )
+
+/** Runs [[op]] with a timeout. When the timeout occurs, [[op]] is cancelled through the given [[Async]] context, and
+  * [[None]] is returned.
+  */
+def withTimeoutOption[T](timeout: Duration)(op: Async ?=> T)(using Async, AsyncOperations): Option[T] =
+  Async.select(
+    Future(op).handle(v => Some(v.get)),
+    Future(sleep(timeout.toMillis)).handle(_ => None)
+  )
