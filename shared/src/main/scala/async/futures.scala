@@ -361,8 +361,11 @@ enum TaskSchedule:
   */
 class Task[+T](val body: (Async, AsyncOperations) ?=> T):
 
+  /** Run the current task and returns the result. */
+  def run()(using Async, AsyncOperations): T = body
+
   /** Start a future computed from the `body` of this task */
-  def run(using Async.Spawn, AsyncOperations) = Future(body)
+  def start()(using Async.Spawn, AsyncOperations) = Future(body)
 
   def schedule(s: TaskSchedule): Task[T] =
     s match {
