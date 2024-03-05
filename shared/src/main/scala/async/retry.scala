@@ -22,23 +22,28 @@ case class Retry(
   /** Runs [[body]] with the current policy in its own scope, returning the result or the last failure as an exception.
     */
   def apply[T](op: => T)(using Async, AsyncOperations): T =
-    @scala.annotation.tailrec
-    def loop(failures: Int, lastDelay: Duration): T =
-      Try(op) match
-        case Failure(exception) =>
-          if maximumFailures.exists(_ == failures) then // maximum failure count reached
-            throw exception
-          else
-            val toSleep = delay.delayFor(failures + 1, lastDelay)
-            sleep(toSleep.toMillis)
-            loop(failures + 1, toSleep)
-        case Success(value) =>
+    var failures = 0
+    var lastDelay: Duration = 0.second
+    boundary:
+      while true do
+        try
+          val value = op
           if retryOnSuccess then
-            sleep(delay.delayFor(0, lastDelay).toMillis)
-            loop(0, 0.second)
-          else value
-
-    loop(0, 0.seconds)
+            failures = 0
+            lastDelay = delay.delayFor(failures, lastDelay)
+            sleep(lastDelay.toMillis)
+          else boundary.break(value)
+        catch
+          case b: boundary.Break[?] => throw b // handle this manually as it will be otherwise caught by NonFatal
+          case NonFatal(exception) =>
+            if maximumFailures.exists(_ == failures) then // maximum failure count reached
+              throw exception
+            else
+              failures = failures + 1
+              lastDelay = delay.delayFor(failures, lastDelay)
+              sleep(lastDelay.toMillis)
+      end while
+      ???
 
   /** Set the maximum failure count. */
   def withMaximumFailures(max: Int) =
