@@ -200,14 +200,14 @@ object Future:
     /** Alternative parallel composition of this task with `other` task. If either task succeeds, succeed with the
       * success that was returned first. Otherwise, fail with the failure that was returned last.
       */
-    def alt(f2: Future[T]): Future[T] = altImpl(false)(f2)
+    def or(f2: Future[T]): Future[T] = orImpl(false)(f2)
 
-    /** Like `alt` but the slower future is cancelled. If either task succeeds, succeed with the success that was
+    /** Like `or` but the slower future is cancelled. If either task succeeds, succeed with the success that was
       * returned first and the other is cancelled. Otherwise, fail with the failure that was returned last.
       */
-    def altWithCancel(f2: Future[T]): Future[T] = altImpl(true)(f2)
+    def orWithCancel(f2: Future[T]): Future[T] = orImpl(true)(f2)
 
-    inline def altImpl(inline withCancel: Boolean)(f2: Future[T]): Future[T] = Future.withResolver: r =>
+    inline def orImpl(inline withCancel: Boolean)(f2: Future[T]): Future[T] = Future.withResolver: r =>
       Async
         .raceWithOrigin(f1, f2)
         .onComplete(Listener { case ((v, which), _) =>
@@ -327,12 +327,12 @@ object Future:
 
     /** Race all futures, returning the first successful value. Throws the last exception received, if everything fails.
       */
-    def altAll(using Async): T = altImpl(false)
+    def awaitFirst(using Async): T = awaitFirstImpl(false)
 
-    /** Like [[altAll]], but cancels all other futures as soon as the first future succeeds. */
-    def altAllWithCancel(using Async): T = altImpl(true)
+    /** Like [[awaitFirst]], but cancels all other futures as soon as the first future succeeds. */
+    def awaitFirstWithCancel(using Async): T = awaitFirstImpl(true)
 
-    private inline def altImpl(withCancel: Boolean)(using Async): T =
+    private inline def awaitFirstImpl(withCancel: Boolean)(using Async): T =
       val collector = Collector(fs*)
       @scala.annotation.tailrec
       def loop(attempt: Int): T =
