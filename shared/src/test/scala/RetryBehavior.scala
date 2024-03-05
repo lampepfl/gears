@@ -51,4 +51,48 @@ class RetryBehavior extends munit.FunSuite {
     assert(end - start < 5 * 150)
   }
 
+  test("delay policies") {
+    // start with wave1.length of failures, one success, and then wave2.length of failures
+    def expectDurations(policy: Delay, wave1: Seq[Duration], success: Duration, wave2: Seq[Duration]) =
+      var lastDelay: Duration = 0.second
+      for (len, i) <- wave1.iterator.zipWithIndex do
+        assertEquals(policy.delayFor(i + 1, lastDelay), len, clue = s"$policy $len $i")
+        lastDelay = len
+      assertEquals(policy.delayFor(0, lastDelay), success)
+      lastDelay = success
+      for (len, i) <- wave2.iterator.zipWithIndex do
+        assertEquals(policy.delayFor(i + 1, lastDelay), len)
+        lastDelay = len
+
+    expectDurations(
+      Delay.none,
+      Seq(0.second, 0.second),
+      0.second,
+      Seq(0.second, 0.second)
+    )
+    expectDurations(
+      Delay.constant(1.second),
+      Seq(1.second, 1.second),
+      1.second,
+      Seq(1.second, 1.second)
+    )
+
+    expectDurations(
+      Delay.backoff(1.minute, 1.second, multiplier = 5),
+      Seq(1.second, 5.seconds, 25.seconds, 1.minute),
+      1.second,
+      Seq(1.second, 5.seconds, 25.seconds, 1.minute)
+    )
+
+    val decor = Delay.deccorelated(1.minute, 1.second, multiplier = 5)
+    def decorLoop(i: Int, last: Duration, max: Duration): Unit =
+      if last == max then assertEquals(decor.delayFor(i, max), max)
+      else
+        val delay = decor.delayFor(i, last)
+        if i > 1 then assert(last <= delay)
+        assert(delay <= max)
+        decorLoop(i + 1, delay, max)
+    decorLoop(1, 0.second, 1.minute)
+    decorLoop(0, 5.second, 1.minute)
+  }
 }

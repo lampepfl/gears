@@ -35,7 +35,7 @@ case class Retry(
             loop(failures + 1, toSleep)
         case Success(value) =>
           if retryOnSuccess then
-            sleep(delay.delayFor(0, 0.second).toMillis)
+            sleep(delay.delayFor(0, lastDelay).toMillis)
             loop(0, 0.second)
           else value
 
@@ -73,7 +73,7 @@ object Retry:
       *   The number of successive failures until the current attempt. Note that if the last attempt was a success,
       *   [[failuresCount]] is `0`.
       * @param lastDelay
-      *   The duration of the last delay, if there were any successive failures. Otherwise this is `0`.
+      *   The duration of the last delay.
       */
     def delayFor(failuresCount: Int, lastDelay: Duration): Duration
 
@@ -102,7 +102,7 @@ object Retry:
             .jitterDelay(
               lastDelay,
               if failuresCount <= 1 then starting
-              else (lastDelay.toMillis * multiplier).toLong.millis
+              else starting * scala.math.pow(multiplier, failuresCount - 1)
             )
             .min(maximum)
 
@@ -110,10 +110,12 @@ object Retry:
     def deccorelated(maximum: Duration, starting: Duration, multiplier: Double = 3) =
       new Delay:
         def delayFor(failuresCount: Int, lastDelay: Duration): Duration =
+          val lowerBound =
+            if failuresCount <= 1 then 0.second else lastDelay
           val upperBound =
-            if failuresCount <= 1 then starting
-            else multiplier * lastDelay
-          Random.between(lastDelay.toMillis, upperBound.min(maximum).toMillis).millis
+            (if failuresCount <= 1 then starting
+             else multiplier * lastDelay).min(maximum)
+          Random.between(lowerBound.toMillis, upperBound.toMillis + 1).millis
 
   /** A randomizer for the delay duration, to avoid accidental coordinated DoS on failures. See [[Jitter]] companion
     * objects for some provided jitter implementations.
@@ -135,13 +137,13 @@ object Retry:
 
     /** Full jitter: randomize between 0 and the suggested delay duration. */
     val full = new Jitter:
-      def jitterDelay(last: Duration, maximum: Duration): Duration = Random.between(0, maximum.toMillis).millis
+      def jitterDelay(last: Duration, maximum: Duration): Duration = Random.between(0, maximum.toMillis + 1).millis
 
     /** Equal jitter: randomize between the last delay duration and the suggested delay duration. */
     val equal = new Jitter:
       def jitterDelay(last: Duration, maximum: Duration): Duration =
         val base = maximum.toMillis / 2
-        (base + Random.between(0, base)).millis
+        (base + Random.between(0, maximum.toMillis - base + 1)).millis
 
 /** Runs [[op]] with a timeout. When the timeout occurs, [[op]] is cancelled through the given [[Async]] context, and
   * [[TimeoutException]] is thrown.
