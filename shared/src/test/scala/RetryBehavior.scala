@@ -1,6 +1,7 @@
 import gears.async.{Async, Future, Task, TaskSchedule, Retry}
 import Retry.Delay
 import scala.concurrent.duration.*
+import FiniteDuration as Duration
 import gears.async.default.given
 import Future.{*:, zip}
 
