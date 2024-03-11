@@ -87,7 +87,7 @@ object Future:
 
   /** A future that is completed by evaluating `body` as a separate asynchronous operation in the given `scheduler`
     */
-  private class RunnableFuture[+T](body: Async ?=> T)(using ac: Async) extends CoreFuture[T]:
+  private class RunnableFuture[+T](body: Async.Spawn ?=> T)(using ac: Async) extends CoreFuture[T]:
 
     private var innerGroup: CompletionGroup = CompletionGroup()
 
@@ -150,18 +150,26 @@ object Future:
 
   end RunnableFuture
 
-  /** Create a future that asynchronously executes `body` that defines its result value in a Try or returns failure if
-    * an exception was thrown. If the future is created in an Async context, it is added to the children of that
-    * context's root.
+  /** Create a future that asynchronously executes [[body]] that defines its result value in a [[Try]] or returns
+    * [[Failure]] if an exception was thrown.
     */
-  def apply[T](body: Async ?=> T)(using Async): Future[T] =
+  def apply[T](body: Async.Spawn ?=> T)(using async: Async, spawnable: Async.Spawn & async.type): Future[T] =
     RunnableFuture(body)
 
-  /** A future that immediately terminates with the given result */
+  /** A future that immediately terminates with the given result. */
   def now[T](result: Try[T]): Future[T] =
     val f = CoreFuture[T]()
     f.complete(result)
     f
+
+  /** An alias to [[now]]. */
+  inline def completed[T](result: Try[T]) = now(result)
+
+  /** A future that immediately resolves with the given result. Similar to `Future.now(Success(result))`. */
+  inline def resolved[T](result: T): Future[T] = now(Success(result))
+
+  /** A future that immediately rejects with the given exception. Similar to `Future.now(Failure(exception))`. */
+  inline def rejected(exception: Throwable): Future[Nothing] = now(Failure(exception))
 
   extension [T](f1: Future[T])
 
@@ -200,14 +208,14 @@ object Future:
     /** Alternative parallel composition of this task with `other` task. If either task succeeds, succeed with the
       * success that was returned first. Otherwise, fail with the failure that was returned last.
       */
-    def alt(f2: Future[T]): Future[T] = altImpl(false)(f2)
+    def or(f2: Future[T]): Future[T] = orImpl(false)(f2)
 
-    /** Like `alt` but the slower future is cancelled. If either task succeeds, succeed with the success that was
+    /** Like `or` but the slower future is cancelled. If either task succeeds, succeed with the success that was
       * returned first and the other is cancelled. Otherwise, fail with the failure that was returned last.
       */
-    def altWithCancel(f2: Future[T]): Future[T] = altImpl(true)(f2)
+    def orWithCancel(f2: Future[T]): Future[T] = orImpl(true)(f2)
 
-    inline def altImpl(inline withCancel: Boolean)(f2: Future[T]): Future[T] = Future.withResolver: r =>
+    inline def orImpl(inline withCancel: Boolean)(f2: Future[T]): Future[T] = Future.withResolver: r =>
       Async
         .raceWithOrigin(f1, f2)
         .onComplete(Listener { case ((v, which), _) =>
@@ -327,12 +335,12 @@ object Future:
 
     /** Race all futures, returning the first successful value. Throws the last exception received, if everything fails.
       */
-    def altAll(using Async): T = altImpl(false)
+    def awaitFirst(using Async): T = awaitFirstImpl(false)
 
-    /** Like [[altAll]], but cancels all other futures as soon as the first future succeeds. */
-    def altAllWithCancel(using Async): T = altImpl(true)
+    /** Like [[awaitFirst]], but cancels all other futures as soon as the first future succeeds. */
+    def awaitFirstWithCancel(using Async): T = awaitFirstImpl(true)
 
-    private inline def altImpl(withCancel: Boolean)(using Async): T =
+    private inline def awaitFirstImpl(withCancel: Boolean)(using Async): T =
       val collector = Collector(fs*)
       @scala.annotation.tailrec
       def loop(attempt: Int): T =
@@ -362,8 +370,12 @@ enum TaskSchedule:
   */
 class Task[+T](val body: (Async, AsyncOperations) ?=> T):
 
+  /** Run the current task and returns the result. */
+  def run()(using Async, AsyncOperations): T = body
+
   /** Start a future computed from the `body` of this task */
-  def run(using Async, AsyncOperations) = Future(body)
+  def start()(using async: Async, spawn: Async.Spawn & async.type, asyncOps: AsyncOperations) =
+    Future(body)(using async, spawn)
 
   def schedule(s: TaskSchedule): Task[T] =
     s match {

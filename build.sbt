@@ -11,7 +11,7 @@ lazy val root =
       Seq(
         name := "Gears",
         organization := "ch.epfl.lamp",
-        version := "0.1.0-SNAPSHOT",
+        version := "0.2.0-SNAPSHOT",
         testFrameworks += new TestFramework("munit.Framework")
       )
     )

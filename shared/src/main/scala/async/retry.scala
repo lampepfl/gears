@@ -23,7 +23,7 @@ case class Retry(
     */
   def apply[T](op: => T)(using Async, AsyncOperations): T =
     var failures = 0
-    var lastDelay: Duration = 0.second
+    var lastDelay: FiniteDuration = 0.second
     boundary:
       while true do
         try
@@ -31,7 +31,7 @@ case class Retry(
           if retryOnSuccess then
             failures = 0
             lastDelay = delay.delayFor(failures, lastDelay)
-            sleep(lastDelay.toMillis)
+            sleep(lastDelay)
           else boundary.break(value)
         catch
           case b: boundary.Break[?] => throw b // handle this manually as it will be otherwise caught by NonFatal
@@ -41,7 +41,7 @@ case class Retry(
             else
               failures = failures + 1
               lastDelay = delay.delayFor(failures, lastDelay)
-              sleep(lastDelay.toMillis)
+              sleep(lastDelay)
       end while
       ???
 
@@ -79,15 +79,15 @@ object Retry:
       * @param lastDelay
       *   The duration of the last delay.
       */
-    def delayFor(failuresCount: Int, lastDelay: Duration): Duration
+    def delayFor(failuresCount: Int, lastDelay: FiniteDuration): FiniteDuration
 
   object Delay:
     /** No delays. */
     val none = constant(0.second)
 
     /** A fixed amount of delays, whether the last attempt was a success or failure. */
-    def constant(duration: Duration) = new Delay:
-      def delayFor(failuresCount: Int, lastDelay: Duration): Duration = duration
+    def constant(duration: FiniteDuration) = new Delay:
+      def delayFor(failuresCount: Int, lastDelay: FiniteDuration): FiniteDuration = duration
 
     /** Returns a delay policy for exponential backoff.
       * @param maximum
@@ -99,21 +99,23 @@ object Retry:
       * @param jitter
       *   An additional jitter to randomize the delay duration. Defaults to none. See [[Jitter]].
       */
-    def backoff(maximum: Duration, starting: Duration, multiplier: Double = 2, jitter: Jitter = Jitter.none) =
+    def backoff(maximum: Duration, starting: FiniteDuration, multiplier: Double = 2, jitter: Jitter = Jitter.none) =
       new Delay:
-        def delayFor(failuresCount: Int, lastDelay: Duration): Duration =
-          jitter
+        def delayFor(failuresCount: Int, lastDelay: FiniteDuration): FiniteDuration =
+          val sleep = jitter
             .jitterDelay(
               lastDelay,
               if failuresCount <= 1 then starting
-              else starting * scala.math.pow(multiplier, failuresCount - 1)
+              else (starting.toMillis * scala.math.pow(multiplier, failuresCount - 1)).millis
             )
-            .min(maximum)
+          maximum match
+            case max: FiniteDuration => sleep.min(max)
+            case _                   => sleep /* infinite maximum */
 
     /** Decorrelated exponential backoff: randomize between the last delay duration and a multiple of that duration. */
     def deccorelated(maximum: Duration, starting: Duration, multiplier: Double = 3) =
       new Delay:
-        def delayFor(failuresCount: Int, lastDelay: Duration): Duration =
+        def delayFor(failuresCount: Int, lastDelay: FiniteDuration): FiniteDuration =
           val lowerBound =
             if failuresCount <= 1 then 0.second else lastDelay
           val upperBound =
@@ -132,9 +134,11 @@ object Retry:
       * @param maximum
       *   The theoretical amount of delay governed by the [[Delay]] policy, serving as an upper bound.
       */
-    def jitterDelay(last: Duration, maximum: Duration): Duration
+    def jitterDelay(last: FiniteDuration, maximum: FiniteDuration): FiniteDuration
 
   object Jitter:
+    import FiniteDuration as Duration
+
     /** No jitter, always return the exact duration suggested by the policy. */
     val none = new Jitter:
       def jitterDelay(last: Duration, maximum: Duration): Duration = maximum

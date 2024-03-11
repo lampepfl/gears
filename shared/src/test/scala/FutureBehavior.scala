@@ -28,11 +28,11 @@ class FutureBehavior extends munit.FunSuite {
           assert(false); 1
         }
         val res = c
-          .alt(Future {
+          .or(Future {
             val res = a.await + b.await
             res
           })
-          .alt(c)
+          .or(c)
           .await
         res
       val y = Future:
@@ -51,7 +51,7 @@ class FutureBehavior extends munit.FunSuite {
         val b = Future {
           true
         }
-        val res = a.alt(b).await
+        val res = a.or(b).await
         res
       val _: Future[Int | Boolean] = z
       assertEquals(x.await, 33)
@@ -82,26 +82,26 @@ class FutureBehavior extends munit.FunSuite {
       assertEquals(f.await, 55)
   }
 
-  test("alt") {
+  test("or") {
     Async.blocking:
       val error = new AssertionError()
       val fail = Future.now(Failure(error))
       val fail1 = Future.now(Failure(error))
       val succeed = Future.now(Success(13))
 
-      assert(Set(10, 20).contains(Future { 10 }.alt(Future { 20 }).await))
-      assertEquals(fail.alt(succeed).await, 13)
-      assertEquals(succeed.alt(fail).await, 13)
-      assertEquals(fail.alt(fail1).awaitResult, Failure(error))
+      assert(Set(10, 20).contains(Future { 10 }.or(Future { 20 }).await))
+      assertEquals(fail.or(succeed).await, 13)
+      assertEquals(succeed.or(fail).await, 13)
+      assertEquals(fail.or(fail1).awaitResult, Failure(error))
   }
 
-  test("altC of 2 futures") {
+  test("orWithCancel of 2 futures") {
     Async.blocking:
       var touched = 0
       Future {
         sleep(200)
         touched += 1
-      }.alt(Future {
+      }.or(Future {
         10
       }).awaitResult
       sleep(300)
@@ -111,7 +111,7 @@ class FutureBehavior extends munit.FunSuite {
       Future {
         sleep(200)
         touched += 1
-      }.altWithCancel(Future { 10 }).awaitResult
+      }.orWithCancel(Future { 10 }).awaitResult
       sleep(300)
       assertEquals(touched, 0)
   }
@@ -414,23 +414,23 @@ class FutureBehavior extends munit.FunSuite {
       assert(!lastFutureFinished)
   }
 
-  test("future collection: altAll*") {
+  test("future collection: awaitFirst*") {
     Async.blocking:
       val range = (0 to 10)
       def futs = range.map(i => Future { sleep(i * 100); i })
-      assert(range contains futs.altAll)
+      assert(range contains futs.awaitFirst)
 
       val exc = new Exception("a")
       def futsWithFail = futs ++ Seq(Future { throw exc })
-      assert(range contains futsWithFail.altAll)
+      assert(range contains futsWithFail.awaitFirst)
 
       val excs = range.map(i => new Exception(i.toString()))
       def futsAllFail = range.zip(excs).map((i, exc) => Future { sleep(i * 100); throw exc })
-      assertEquals(Try(futsAllFail.altAll), Failure(excs.last))
+      assertEquals(Try(futsAllFail.awaitFirst), Failure(excs.last))
 
       var lastFutureFinished = false
       def futsWithSleepy = futsWithFail ++ Seq(Future { sleep(200000); lastFutureFinished = true; 0 })
-      assert(range contains futsWithSleepy.altAll)
+      assert(range contains futsWithSleepy.awaitFirst)
       assert(!lastFutureFinished)
   }
 
