@@ -365,7 +365,8 @@ class Task[+T](val body: (Async, AsyncOperations) ?=> T):
   def run()(using Async, AsyncOperations): T = body
 
   /** Start a future computed from the `body` of this task */
-  def start()(using Async.Spawn, AsyncOperations) = Future(body)
+  def start()(using async: Async, spawn: Async.Spawn & async.type, asyncOps: AsyncOperations) =
+    Future(body)(using async, spawn)
 
   def schedule(s: TaskSchedule): Task[T] =
     s match {
