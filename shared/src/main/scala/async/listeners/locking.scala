@@ -5,9 +5,7 @@ import gears.async._
 import Listener.ListenerLock
 import scala.annotation.tailrec
 
-/** Two listeners being locked at the same time, while holding the same lock on their listener chains. This happens if
-  * you attempt to lockBoth two listeners with a common downstream listener, e.g., two derived listeners of the same
-  * race.
+/** Two listeners being locked at the same time, while having the same [[Listener.ListenerLock.selfNumber lock number]].
   */
 case class ConflictingLocksException(
     listeners: (Listener[?], Listener[?])
@@ -16,10 +14,11 @@ case class ConflictingLocksException(
 /** Attempt to lock both listeners belonging to possibly different sources at the same time. Lock orders are respected
   * by comparing numbers on every step.
   *
-  * Returns [[Locked]] on success, or the listener that fails first.
+  * Returns `true` on success, or the listener that fails first.
   *
-  * In the case that two locks sharing the same number is encountered, [[ConflictingLocksException]] is thrown with the
-  * base listeners and conflicting listeners.
+  * @throws ConflictingLocksException
+  *   In the case that two locks sharing the same number is encountered, this exception is thrown with the conflicting
+  *   listeners.
   */
 def lockBoth[T, U](
     lt: Listener[T],
