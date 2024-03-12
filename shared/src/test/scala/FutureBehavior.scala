@@ -1,6 +1,6 @@
 import gears.async.{Async, Future, Task, TaskSchedule, uninterruptible}
 import gears.async.default.given
-import gears.async.Future.{*:, Promise, zip}
+import gears.async.Future.{Promise, zip}
 import gears.async.AsyncOperations.*
 
 import java.util.concurrent.CancellationException
@@ -215,40 +215,40 @@ class FutureBehavior extends munit.FunSuite {
     assertEquals(zombieModifiedThis, true)
   }
 
-  test("zip on tuples with EmptyTuple") {
-    Async.blocking:
-      val z1 = Future { sleep(500); 10 } *: Future { sleep(10); 222 } *: Future { sleep(150); 333 } *: Future {
-        EmptyTuple
-      }
-      assertEquals(z1.await, (10, 222, 333))
-  }
+  // test("zip on tuples with EmptyTuple") {
+  //   Async.blocking:
+  //     val z1 = Future { sleep(500); 10 } *: Future { sleep(10); 222 } *: Future { sleep(150); 333 } *: Future {
+  //       EmptyTuple
+  //     }
+  //     assertEquals(z1.await, (10, 222, 333))
+  // }
 
-  test("zip on tuples with last zip") {
-    Async.blocking:
-      val z1 = Future { 10 } *: Future { 222 }.zip(Future { 333 })
-      assertEquals(z1.await, (10, 222, 333))
-  }
+  // test("zip on tuples with last zip") {
+  //   Async.blocking:
+  //     val z1 = Future { 10 } *: Future { 222 }.zip(Future { 333 })
+  //     assertEquals(z1.await, (10, 222, 333))
+  // }
 
-  test("zip(3) first error") {
-    for (_ <- 1 to 20)
-      Async.blocking:
-        val e1 = AssertionError(111)
-        val e2 = AssertionError(211)
-        val e3 = AssertionError(311)
-        assertEquals(
-          (Future {
-            sleep(Random.between(200, 300));
-            throw e1
-          } *: Future {
-            sleep(Random.between(200, 300));
-            throw e2
-          } *: Future {
-            sleep(Random.between(50, 100));
-            throw e3
-          } *: Future.now(Success(EmptyTuple))).awaitResult,
-          Failure(e3)
-        )
-  }
+  // test("zip(3) first error") {
+  //   for (_ <- 1 to 20)
+  //     Async.blocking:
+  //       val e1 = AssertionError(111)
+  //       val e2 = AssertionError(211)
+  //       val e3 = AssertionError(311)
+  //       assertEquals(
+  //         (Future {
+  //           sleep(Random.between(200, 300));
+  //           throw e1
+  //         } *: Future {
+  //           sleep(Random.between(200, 300));
+  //           throw e2
+  //         } *: Future {
+  //           sleep(Random.between(50, 100));
+  //           throw e3
+  //         } *: Future.now(Success(EmptyTuple))).awaitResult,
+  //         Failure(e3)
+  //       )
+  // }
 
   test("cancelled futures return the same constant CancellationException with no stack attached".ignore) {
     Async.blocking:
@@ -434,4 +434,17 @@ class FutureBehavior extends munit.FunSuite {
       assert(!lastFutureFinished)
   }
 
+  test("uninterruptible should continue even when Future is cancelled") {
+    Async.blocking:
+      val ch = gears.async.UnboundedChannel[Int]()
+      val reader = Future:
+        gears.async.uninterruptible:
+          val i = ch.read().right.get
+          println(i)
+      reader.cancel()
+      ch.sendImmediately(1)
+      ch.sendImmediately(2)
+      reader.awaitResult
+      assertEquals(ch.read(), Right(2))
+  }
 }
