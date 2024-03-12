@@ -1,26 +1,36 @@
 package gears.async
 
-import TaskSchedule.ExponentialBackoff
-import AsyncOperations.sleep
-
 import scala.collection.mutable
-import mutable.ListBuffer
-
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.CancellationException
 import scala.compiletime.uninitialized
-import scala.util.{Failure, Success, Try}
 import scala.annotation.unchecked.uncheckedVariance
 import scala.annotation.tailrec
 import scala.util
+import scala.util.{Failure, Success, Try}
 import scala.util.control.NonFatal
 
-/** A cancellable future that can suspend waiting for other asynchronous sources
+/** Futures are [[Async.Source Source]]s that has the following properties:
+  *   - They represent a single value: Once resolved, [[Async.await await]]-ing on a [[Future]] should always return the
+  *     same value.
+  *   - They can potentially be cancelled, via [[Cancellable.cancel the cancel method]].
+  *
+  * There are two kinds of futures, active and passive.
+  *   - '''Active''' futures are ones that are spawned with [[Future.apply]] and [[Task.start]]. They require the
+  *     [[Async.Spawn]] context, and run on their own (as long as the [[Async.Spawn]] scope has not ended). Active
+  *     futures represent concurrent computations within Gear's structured concurrency tree. Idiomatic Gears code should
+  *     ''never'' return active futures. Should a function be async (i.e. takes an [[Async]] context parameter), they
+  *     should return values or throw exceptions directly.
+  *   - '''Passive''' futures are ones that are created by [[Future.Promise]] (through
+  *     [[Future.Promise.asFuture asFuture]]) and [[Future.withResolver]]. They represent yet-arrived values coming from
+  *     ''outside'' of Gear's structured concurrency tree (for example, from network or the file system, or even from
+  *     another concurrency system like [[scala.concurrent.Future Scala standard library futures]]). Idiomatic Gears
+  *     libraries should return this kind of [[Future]] if deemed neccessary, but functions returning passive futures
+  *     should ''not'' take an [[Async]] context.
   */
 trait Future[+T] extends Async.OriginalSource[Try[T]], Cancellable
 
 object Future:
-
   /** A future that is completed explicitly by calling its `complete` method. There are three public implementations
     *
     *   - RunnableFuture: Completion is done by running a block of code
@@ -89,6 +99,11 @@ object Future:
     */
   private class RunnableFuture[+T](body: Async.Spawn ?=> T)(using ac: Async) extends CoreFuture[T]:
 
+    /** RunnableFuture maintains its own inner [[CompletionGroup]], that is separated from the provided Async
+      * instance's. When the future is cancelled, we only cancel this CompletionGroup. This effectively means any
+      * `.await` operations within the future is cancelled *only if they link into this group*. The future body run with
+      * this inner group by default, but it can always opt-out (e.g. with [[uninterruptible]]).
+      */
     private var innerGroup: CompletionGroup = CompletionGroup()
 
     private def checkCancellation(): Unit =
@@ -150,13 +165,13 @@ object Future:
 
   end RunnableFuture
 
-  /** Create a future that asynchronously executes [[body]] that defines its result value in a [[Try]] or returns
-    * [[Failure]] if an exception was thrown.
+  /** Create a future that asynchronously executes `body` that wraps its execution in a [[scala.util.Try]]. The returned
+    * future is linked to the given [[Async.Spawn]] scope by default, i.e. it is cancelled when this scope ends.
     */
   def apply[T](body: Async.Spawn ?=> T)(using async: Async, spawnable: Async.Spawn & async.type): Future[T] =
     RunnableFuture(body)
 
-  /** A future that immediately terminates with the given result. */
+  /** A future that is immediately completed with the given result. */
   def now[T](result: Try[T]): Future[T] =
     val f = CoreFuture[T]()
     f.complete(result)
@@ -172,7 +187,6 @@ object Future:
   inline def rejected(exception: Throwable): Future[Nothing] = now(Failure(exception))
 
   extension [T](f1: Future[T])
-
     /** Parallel composition of two futures. If both futures succeed, succeed with their values in a pair. Otherwise,
       * fail with the failure that was returned first.
       */
@@ -190,23 +204,24 @@ object Future:
               case Right(Failure(ex)) => r.reject(ex)
           })
 
-    /** Parallel composition of tuples of futures. Future.Success(EmptyTuple) might be treated as Nil.
-      */
-    def *:[U <: Tuple](f2: Future[U]): Future[T *: U] = Future.withResolver: r =>
-      Async
-        .either(f1, f2)
-        .onComplete(Listener { (v, _) =>
-          v match
-            case Left(Success(x1)) =>
-              f2.onComplete(Listener { (x2, _) => r.complete(x2.map(x1 *: _)) })
-            case Right(Success(x2)) =>
-              f1.onComplete(Listener { (x1, _) => r.complete(x1.map(_ *: x2)) })
-            case Left(Failure(ex))  => r.reject(ex)
-            case Right(Failure(ex)) => r.reject(ex)
-        })
+    // /** Parallel composition of tuples of futures. Disabled since scaladoc is crashing with it. (https://github.com/scala/scala3/issues/19925) */
+    // def *:[U <: Tuple](f2: Future[U]): Future[T *: U] = Future.withResolver: r =>
+    //   Async
+    //     .either(f1, f2)
+    //     .onComplete(Listener { (v, _) =>
+    //       v match
+    //         case Left(Success(x1)) =>
+    //           f2.onComplete(Listener { (x2, _) => r.complete(x2.map(x1 *: _)) })
+    //         case Right(Success(x2)) =>
+    //           f1.onComplete(Listener { (x1, _) => r.complete(x1.map(_ *: x2)) })
+    //         case Left(Failure(ex))  => r.reject(ex)
+    //         case Right(Failure(ex)) => r.reject(ex)
+    //     })
 
     /** Alternative parallel composition of this task with `other` task. If either task succeeds, succeed with the
       * success that was returned first. Otherwise, fail with the failure that was returned last.
+      * @see
+      *   [[orWithCancel]] for an alternative version where the slower future is cancelled.
       */
     def or(f2: Future[T]): Future[T] = orImpl(false)(f2)
 
@@ -229,7 +244,11 @@ object Future:
 
   end extension
 
-  /** A promise defines a future that is be completed via the `complete` method.
+  /** A promise is a [[Future]] that is be completed manually via the `complete` method.
+    * @see
+    *   [[Promise$.apply]] to create a new, empty promise.
+    * @see
+    *   [[Future.withResolver]] to create a passive [[Future]] from callback-style asynchronous calls.
     */
   trait Promise[T] extends Future[T]:
     inline def asFuture: Future[T] = this
@@ -238,6 +257,7 @@ object Future:
     def complete(result: Try[T]): Unit
 
   object Promise:
+    /** Create a new, unresolved [[Promise]]. */
     def apply[T](): Promise[T] =
       new CoreFuture[T] with Promise[T]:
         override def cancel(): Unit =
@@ -389,7 +409,7 @@ class Task[+T](val body: (Async, AsyncOperations) ?=> T):
           if (maxRepetitions == 1) ret
           else {
             while (maxRepetitions == 0 || repetitions < maxRepetitions) {
-              sleep(millis)
+              AsyncOperations.sleep(millis)
               ret = body
               repetitions += 1
             }
@@ -408,7 +428,7 @@ class Task[+T](val body: (Async, AsyncOperations) ?=> T):
           else {
             var timeToSleep = millis
             while (maxRepetitions == 0 || repetitions < maxRepetitions) {
-              sleep(timeToSleep)
+              AsyncOperations.sleep(timeToSleep)
               timeToSleep *= exponentialBase
               ret = body
               repetitions += 1
@@ -427,7 +447,7 @@ class Task[+T](val body: (Async, AsyncOperations) ?=> T):
           repetitions += 1
           if (maxRepetitions == 1) ret
           else {
-            sleep(millis)
+            AsyncOperations.sleep(millis)
             ret = body
             repetitions += 1
             if (maxRepetitions == 2) ret
@@ -436,7 +456,7 @@ class Task[+T](val body: (Async, AsyncOperations) ?=> T):
                 val aOld = a
                 a = b
                 b = aOld + b
-                sleep(b * millis)
+                AsyncOperations.sleep(b * millis)
                 ret = body
                 repetitions += 1
               }
@@ -451,7 +471,7 @@ class Task[+T](val body: (Async, AsyncOperations) ?=> T):
           @tailrec
           def helper(repetitions: Long = 0): T =
             if (repetitions > 0 && millis > 0)
-              sleep(millis)
+              AsyncOperations.sleep(millis)
             val ret: T = body
             ret match {
               case Failure(_)                                                      => ret
@@ -467,7 +487,7 @@ class Task[+T](val body: (Async, AsyncOperations) ?=> T):
           @tailrec
           def helper(repetitions: Long = 0): T =
             if (repetitions > 0 && millis > 0)
-              sleep(millis)
+              AsyncOperations.sleep(millis)
             val ret: T = body
             ret match {
               case Success(_)                                                      => ret
@@ -480,6 +500,11 @@ class Task[+T](val body: (Async, AsyncOperations) ?=> T):
 
 end Task
 
+/** Runs the `body` inside in an [[Async]] context that does *not* propagate cancellation until the end.
+  *
+  * In other words, `body` is never notified of the cancellation of the `ac` context; but `uninterruptible` would still
+  * throw a [[CancellationException]] ''after `body` finishes running'' if `ac` was cancelled.
+  */
 def uninterruptible[T](body: Async ?=> T)(using ac: Async): T =
   val tracker = Cancellable.Tracking().link()
 
@@ -492,7 +517,12 @@ def uninterruptible[T](body: Async ?=> T)(using ac: Async): T =
   if tracker.isCancelled then throw new CancellationException()
   r
 
-def cancellationScope[T](cancel: Cancellable)(fn: => T)(using a: Async): T =
-  cancel.link()
+/** Link `cancellable` to the completion group of the current [[Async]] context during `fn`.
+  *
+  * If the [[Async]] context is cancelled during the execution of `fn`, `cancellable` will also be immediately
+  * cancelled.
+  */
+def cancellationScope[T](cancellable: Cancellable)(fn: => T)(using a: Async): T =
+  cancellable.link()
   try fn
-  finally cancel.unlink()
+  finally cancellable.unlink()

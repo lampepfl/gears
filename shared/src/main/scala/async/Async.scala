@@ -121,9 +121,16 @@ object Async:
     /** Checks whether data is available at present and pass it to `k` if so. Calls to `poll` are always synchronous and
       * non-blocking.
       *
-      * If no element is available, returns `false` immediately. If there is (or may be) data available, `k` is locked
-      * and if it fails, `true` is returned to signal this source's general availability. If locking `k` succeeds, only
-      * return `true` iff `k` is completed (it is always unlocked nevertheless).
+      * The process is as follows:
+      *   - If no data is immediately available, return `false` immediately.
+      *   - If there is data available, attempt to lock `k`.
+      *     - If `k` is no longer available, `true` is returned to signal this source's general availability.
+      *     - If locking `k` succeeds:
+      *       - If data is still available, complete `k` and return true.
+      *       - Otherwise, unlock `k` and return false.
+      *
+      * Note that in all cases, a return value of `false` indicates that `k` should be put into `onComplete` to receive
+      * data in a later point in time.
       *
       * @return
       *   Whether poll was able to pass data to `k`. Note that this is regardless of `k` being available to receive the
