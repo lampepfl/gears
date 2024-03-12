@@ -1,6 +1,6 @@
 package gears.async
 
-/** A trait for cancellable entities that can be grouped */
+/** A trait for cancellable entities that can be grouped. */
 trait Cancellable:
 
   private var group: CompletionGroup = CompletionGroup.Unlinked
@@ -28,6 +28,7 @@ trait Cancellable:
 end Cancellable
 
 object Cancellable:
+  /** A special [[Cancellable]] object that just tracks whether its linked group was cancelled. */
   trait Tracking extends Cancellable:
     def isCancelled: Boolean
 

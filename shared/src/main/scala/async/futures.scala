@@ -33,6 +33,8 @@ import scala.util.control.NonFatal
   * @see
   *   [[Future.Promise]] and [[Future.withResolver]] for creating passive futures.
   * @see
+  *   [[Future.awaitAll]], [[Future.awaitFirst]] and [[Future.Collector]] for tools to work with multiple futures.
+  * @see
   *   [[ScalaConverters.asGears]] and [[ScalaConverters.asScala]] for converting between Scala futures and Gears
   *   futures.
   */
@@ -320,7 +322,21 @@ object Future:
     future
   end withResolver
 
-  /** Collects a list of futures into a channel of futures, arriving as they finish. */
+  /** Collects a list of futures into a channel of futures, arriving as they finish.
+    * @example
+    *   {{{
+    * // Sleep sort
+    * val futs = numbers.map(i => Future(sleep(i.millis)))
+    * val collector = Collector(futs*)
+    *
+    * val output = mutable.ArrayBuffer[Int]()
+    * for i <- 1 to futs.size:
+    *   output += collector.results.read().await
+    *   }}}
+    * @see
+    *   [[Future.awaitAll]] and [[Future.awaitFirst]] for simple usage of the collectors to get all results or the first
+    *   succeeding one.
+    */
   class Collector[T](futures: Future[T]*):
     private val ch = UnboundedChannel[Future[T]]()
 

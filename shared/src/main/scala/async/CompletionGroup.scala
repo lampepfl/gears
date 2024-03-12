@@ -20,6 +20,7 @@ class CompletionGroup extends Cancellable.Tracking:
         members.toSeq
     .foreach(_.cancel())
 
+  /** Wait for all members of the group to complete and unlink themselves. */
   private[async] def waitCompletion()(using Async): Unit =
     synchronized:
       if members.nonEmpty && cancelWait.isEmpty then cancelWait = Some(Promise())
