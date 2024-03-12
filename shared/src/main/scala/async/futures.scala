@@ -27,6 +27,14 @@ import scala.util.control.NonFatal
   *     another concurrency system like [[scala.concurrent.Future Scala standard library futures]]). Idiomatic Gears
   *     libraries should return this kind of [[Future]] if deemed neccessary, but functions returning passive futures
   *     should ''not'' take an [[Async]] context.
+  *
+  * @see
+  *   [[Future.apply]] and [[Task.start]] for creating active futures.
+  * @see
+  *   [[Future.Promise]] and [[Future.withResolver]] for creating passive futures.
+  * @see
+  *   [[ScalaConverters.asGears]] and [[ScalaConverters.asScala]] for converting between Scala futures and Gears
+  *   futures.
   */
 trait Future[+T] extends Async.OriginalSource[Try[T]], Cancellable
 
