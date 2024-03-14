@@ -10,19 +10,17 @@ import java.util.concurrent.locks.ReentrantLock
   * or [[Listener.acceptingListener]].
   *
   * However, should the listener want to attempt synchronization, it has to expose some locking-related interfaces. See
-  * `lock`.
+  * [[Listener.lock]].
   */
 trait Listener[-T]:
   import Listener._
 
   /** Complete the listener with the given item, from the given source. **If the listener exposes a
-    * [[Listener.ListenerLock]]**, it is required to acquire this lock completely (either through [[lockCompletely]] or
-    * through manual locking of every layer) before calling [[complete]]. This can also be done conveniently with
-    * [[completeNow]]. For performance reasons, this condition is usually not checked and will end up causing unexpected
-    * behavior if not satisfied.
+    * [[Listener.ListenerLock]]**, it is required to acquire this lock before calling [[complete]]. This can also be
+    * done conveniently with [[completeNow]]. For performance reasons, this condition is usually not checked and will
+    * end up causing unexpected behavior if not satisfied.
     *
-    * The listener must automatically release the lock of itself and any underlying listeners, however this usually is
-    * done automatically by calling the inner listener's [[complete]] recursively.
+    * The listener must automatically release its own lock upon completion.
     */
   def complete(data: T, source: Async.Source[T]): Unit
 
@@ -32,7 +30,7 @@ trait Listener[-T]:
   val lock: Listener.ListenerLock | Null
 
   /** Attempts to acquire locks and then calling [[complete]] with the given item and source. If locking fails,
-    * [[release]] is automatically called.
+    * [[releaseLock]] is automatically called.
     */
   def completeNow(data: T, source: Async.Source[T]): Boolean =
     if acquireLock() then
@@ -40,11 +38,10 @@ trait Listener[-T]:
       true
     else false
 
-  /** Release the listener lock up to the given [[Listener.LockMarker]], if it exists. */
+  /** Release the listener's lock if it exists. */
   inline final def releaseLock(): Unit = if lock != null then lock.release()
 
-  /** Attempts to completely lock the listener, if such a lock exists. Succeeds with [[true]] immediately if there is no
-    * [[Listener.ListenerLock]]. If locking fails, [[release]] is automatically called.
+  /** Attempts to lock the listener, if such a lock exists. Succeeds with `true` immediately if [[lock]] is `null`.
     */
   inline final def acquireLock(): Boolean =
     if lock != null then lock.acquire() else true
@@ -76,14 +73,11 @@ object Listener:
     *
     * Some implementations are provided for ease of implementations:
     *   - For custom listener implementations involving locks: [[NumberedLock]] provides uniquely numbered locks.
-    *   - For source transformation implementations: [[ListenerLockWrapper]] provides a ListenerLock instance that only
-    *     forwards the requests to the underlying lock. [[withLock]] is a convenient `.map` for `[[ListenerLock]] |
-    *     Null`.
+    *   - For source transformation implementations: [[withLock]] is a convenient `.map` for `[[ListenerLock]] | Null`.
     */
   trait ListenerLock:
-    /** The assigned number of the lock. If the listener holds inner listeners underneath that utilizes locks, it is
-      * **required** that [[selfNumber]] must be greater or equal any [[PartialLock.nextNumber]] of any returned
-      * [[PartialLock]]s.
+    /** The assigned number of the lock. It is required that listeners that can be locked together to have different
+      * [[selfNumber numbers]]. This requirement can be simply done by using a lock created using [[NumberedLock]].
       */
     val selfNumber: Long
 
@@ -91,9 +85,7 @@ object Listener:
       */
     def acquire(): Boolean
 
-    /** Release the current lock without resolving the listener with any items, if the current listener lock is before
-      * or the same as the current [[Listener.LockMarker]].
-      */
+    /** Release the current lock. */
     def release(): Unit
   end ListenerLock
 

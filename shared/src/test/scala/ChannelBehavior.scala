@@ -11,7 +11,7 @@ import gears.async.{
 }
 import gears.async.default.given
 import gears.async.AsyncOperations.*
-import Future.{*:, zip}
+import Future.zip
 
 import java.util.concurrent.CancellationException
 import scala.collection.mutable

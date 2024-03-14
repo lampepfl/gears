@@ -4,19 +4,24 @@ import scala.concurrent.duration.FiniteDuration
 import java.util.concurrent.TimeoutException
 import gears.async.AsyncOperations.sleep
 
+/** Defines fundamental operations that require the support of the scheduler. This is commonly provided alongside with
+  * the given implementation of [[Scheduler]].
+  * @see
+  *   [[Scheduler]] for the definition of the scheduler itself.
+  */
 trait AsyncOperations:
-  /** Suspends the current [[Async]] context for at least [[millis]] milliseconds. */
+  /** Suspends the current [[Async]] context for at least `millis` milliseconds. */
   def sleep(millis: Long)(using Async): Unit
 
 object AsyncOperations:
-  /** Suspends the current [[Async]] context for at least [[millis]] milliseconds.
+  /** Suspends the current [[Async]] context for at least `millis` milliseconds.
     * @param millis
-    *   The duration to suspend. Must be a positive integer.
+    *   The duration to suspend, in milliseconds. Must be a positive integer.
     */
   inline def sleep(millis: Long)(using AsyncOperations, Async): Unit =
     summon[AsyncOperations].sleep(millis)
 
-  /** Suspends the current [[Async]] context for at least [[millis]] milliseconds.
+  /** Suspends the current [[Async]] context for `duration`.
     * @param duration
     *   The duration to suspend. Must be positive.
     */

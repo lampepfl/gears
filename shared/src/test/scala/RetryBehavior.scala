@@ -3,7 +3,7 @@ import Retry.Delay
 import scala.concurrent.duration.*
 import FiniteDuration as Duration
 import gears.async.default.given
-import Future.{*:, zip}
+import Future.zip
 
 import scala.concurrent.ExecutionContext
 import scala.util.{Failure, Success, Try}
