@@ -3,6 +3,7 @@ An Experimental Asynchronous Proramming Library for Scala 3
 
 ![GitHub Release](https://img.shields.io/github/v/release/lampepfl/gears)
 ![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/lampepfl/gears/ci.yml)
+[![Homepage](https://img.shields.io/badge/website-homepage-brightgreen)](https://lampepfl.github.io/gears)
 [![API Documentation Link](https://img.shields.io/badge/api-documentation-brightgreen)](https://lampepfl.github.io/gears/api)
 
 ## Building Gears
