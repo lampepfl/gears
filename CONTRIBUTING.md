@@ -11,3 +11,15 @@ All of the needed dependencies can be loaded by the included Nix Flake. If you h
 nix develop
 ```
 to enter the development environment with all the dependencies loaded. You can also use [direnv](https://direnv.net/)'s `use flake` to automate this process.
+
+Once done, it should suffice to run
+```bash
+sbt publishLocal
+```
+to have Gears compiled and published locally for usage.
+
+## Running Tests
+
+```bash
+sbt test
+```
