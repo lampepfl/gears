@@ -1,9 +1,11 @@
-import gears.async.{Async, Future, AsyncSupport, uninterruptible}
 import gears.async.AsyncOperations.*
-import gears.async.default.given
 import gears.async.Future.MutableCollector
-import java.util.concurrent.atomic.AtomicInteger
 import gears.async.Timer
+import gears.async.default.given
+import gears.async.{Async, AsyncSupport, Future, uninterruptible}
+
+import java.util.concurrent.atomic.AtomicInteger
+
 import scala.concurrent.duration._
 
 class StressTest extends munit.FunSuite:

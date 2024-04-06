@@ -1,12 +1,15 @@
-import gears.async.{Async, Future, AsyncSupport, uninterruptible}
 import gears.async.AsyncOperations.*
 import gears.async.default.given
-import scala.util.boundary
-import boundary.break
-import scala.concurrent.duration.{Duration, DurationInt}
+import gears.async.{Async, AsyncSupport, Future, uninterruptible}
+
 import java.util.concurrent.CancellationException
-import scala.util.Success
+
+import scala.concurrent.duration.{Duration, DurationInt}
 import scala.util.Properties
+import scala.util.Success
+import scala.util.boundary
+
+import boundary.break
 
 // JVM-only since `munitTimeout` is not available on scala native.
 // See (here)[https://scalameta.org/munit/docs/tests.html#customize-test-timeouts].

@@ -1,8 +1,10 @@
 package gears.async
 
-import scala.annotation.tailrec
 import gears.async.Async.Source
+
 import java.util.concurrent.locks.ReentrantLock
+
+import scala.annotation.tailrec
 
 /** A listener, representing an one-time value receiver of an [[Async.Source]].
   *

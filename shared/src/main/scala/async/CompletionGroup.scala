@@ -1,7 +1,8 @@
 package gears.async
 import scala.collection.mutable
-import Future.Promise
 import scala.util.Success
+
+import Future.Promise
 
 /** A group of cancellable objects that are completed together. Cancelling the group means cancelling all its
   * uncompleted members.

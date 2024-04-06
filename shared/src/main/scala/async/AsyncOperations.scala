@@ -1,8 +1,10 @@
 package gears.async
 
-import scala.concurrent.duration.FiniteDuration
-import java.util.concurrent.TimeoutException
 import gears.async.AsyncOperations.sleep
+
+import java.util.concurrent.TimeoutException
+
+import scala.concurrent.duration.FiniteDuration
 
 /** Defines fundamental operations that require the support of the scheduler. This is commonly provided alongside with
   * the given implementation of [[Scheduler]].

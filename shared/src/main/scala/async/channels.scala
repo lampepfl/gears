@@ -1,15 +1,14 @@
 package gears.async
-import scala.collection.mutable
-import mutable.{ArrayBuffer, ListBuffer}
+import gears.async.Async.Source
+import gears.async.Listener.acceptingListener
+import gears.async.listeners.lockBoth
 
+import scala.collection.mutable
+import scala.util.control.Breaks.{break, breakable}
 import scala.util.{Failure, Success, Try}
 
-import scala.util.control.Breaks.{break, breakable}
-import gears.async.Async.Source
-import gears.async.listeners.lockBoth
-import gears.async.Listener.acceptingListener
-
 import Channel.{Closed, Res}
+import mutable.{ArrayBuffer, ListBuffer}
 
 /** The part of a channel one can send values to. Blocking behavior depends on the implementation.
   */

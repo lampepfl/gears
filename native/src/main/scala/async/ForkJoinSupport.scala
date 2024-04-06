@@ -1,14 +1,16 @@
 package gears.async.native
 
+import gears.async.Future.Promise
 import gears.async._
-import scala.scalanative.runtime.{Continuations => nativeContinuations}
+
+import java.util.concurrent.CancellationException
 import java.util.concurrent.ForkJoinPool
+import java.util.concurrent.atomic.AtomicBoolean
+
 import scala.concurrent.ExecutionContext
 import scala.concurrent.JavaConversions._
 import scala.concurrent.duration._
-import java.util.concurrent.atomic.AtomicBoolean
-import gears.async.Future.Promise
-import java.util.concurrent.CancellationException
+import scala.scalanative.runtime.{Continuations => nativeContinuations}
 
 class NativeContinuation[-T, +R] private[native] (val cont: T => R) extends Suspension[T, R]:
   def resume(arg: T): R = cont(arg)

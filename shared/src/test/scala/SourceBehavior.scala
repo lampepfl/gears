@@ -1,12 +1,14 @@
-import gears.async.{Async, Future, Listener}
-import Async.either
 import gears.async.AsyncOperations.*
 import gears.async.default.given
+import gears.async.{Async, Future, Listener}
 
 import java.util.concurrent.CancellationException
+
 import scala.concurrent.ExecutionContext
-import scala.util.{Failure, Success, Try}
 import scala.util.Random
+import scala.util.{Failure, Success, Try}
+
+import Async.either
 
 class SourceBehavior extends munit.FunSuite {
   given ExecutionContext = ExecutionContext.global

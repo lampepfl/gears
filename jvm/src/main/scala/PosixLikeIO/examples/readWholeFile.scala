@@ -2,12 +2,14 @@ package PosixLikeIO.examples
 
 import gears.async.Async
 import gears.async.default.given
-import PosixLikeIO.PIOHelper
 
 import java.nio.ByteBuffer
 import java.nio.charset.StandardCharsets
 import java.nio.file.StandardOpenOption
+
 import scala.concurrent.ExecutionContext
+
+import PosixLikeIO.PIOHelper
 
 @main def readWholeFile(): Unit =
   given ExecutionContext = ExecutionContext.global
