@@ -24,7 +24,7 @@ lazy val root =
     .nativeSettings(
       Seq(
         nativeConfig ~= { c =>
-          c.withMultithreadingSupport(true)
+          c.withMultithreading(true)
         },
         libraryDependencies += "org.scalameta" %%% "munit" % "1.0.0-M10+17-0ca7e7e9-SNAPSHOT" % Test
       )
