@@ -2,7 +2,6 @@ package gears.async
 
 import java.lang.invoke.{MethodHandles, VarHandle}
 import java.util.concurrent.locks.ReentrantLock
-
 import scala.annotation.unchecked.uncheckedVariance
 import scala.concurrent.duration.FiniteDuration
 

@@ -4,7 +4,6 @@ import gears.async.Listener
 
 import java.util.concurrent.CancellationException
 import java.util.concurrent.TimeoutException
-
 import scala.annotation.tailrec
 import scala.collection.mutable
 import scala.concurrent.TimeoutException

@@ -10,7 +10,6 @@ import gears.async.listeners.ConflictingLocksException
 import gears.async.listeners.lockBoth
 
 import java.util.concurrent.atomic.AtomicBoolean
-
 import scala.collection.mutable.Buffer
 import scala.util.Success
 

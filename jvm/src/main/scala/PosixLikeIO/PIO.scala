@@ -10,7 +10,6 @@ import java.nio.channels.{AsynchronousFileChannel, CompletionHandler, SocketChan
 import java.nio.charset.{Charset, StandardCharsets}
 import java.nio.file.{Path, StandardOpenOption}
 import java.util.concurrent.CancellationException
-
 import scala.Tuple.Union
 import scala.concurrent.ExecutionContext
 import scala.util.{Failure, Success, Try}

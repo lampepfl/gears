@@ -3,7 +3,6 @@ import gears.async.default.given
 import gears.async.{Async, Future, Listener}
 
 import java.util.concurrent.CancellationException
-
 import scala.concurrent.ExecutionContext
 import scala.util.Random
 import scala.util.{Failure, Success, Try}

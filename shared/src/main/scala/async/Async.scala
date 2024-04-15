@@ -5,7 +5,6 @@ import gears.async.Listener.withLock
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.locks.ReentrantLock
-
 import scala.collection.mutable
 import scala.util.boundary
 

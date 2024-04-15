@@ -6,7 +6,6 @@ import gears.async.{Async, Future, Task, TaskSchedule, uninterruptible}
 
 import java.util.concurrent.CancellationException
 import java.util.concurrent.atomic.AtomicInteger
-
 import scala.collection.mutable
 import scala.collection.mutable.Set
 import scala.concurrent.ExecutionContext

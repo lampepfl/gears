@@ -15,7 +15,6 @@ import gears.async.{
 import java.nio.ByteBuffer
 import java.util.concurrent.CancellationException
 import java.util.concurrent.atomic.AtomicInteger
-
 import scala.collection.Stepper.UnboxingFloatStepper
 import scala.collection.mutable
 import scala.collection.mutable.{ArrayBuffer, Set}

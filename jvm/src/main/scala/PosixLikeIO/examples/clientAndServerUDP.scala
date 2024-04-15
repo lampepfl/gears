@@ -7,7 +7,6 @@ import gears.async.{Async, Future}
 import java.net.DatagramPacket
 import java.nio.ByteBuffer
 import java.nio.file.StandardOpenOption
-
 import scala.concurrent.ExecutionContext
 
 import PosixLikeIO.{PIOHelper, SocketUDP}

@@ -3,7 +3,6 @@ import gears.async.default.given
 import gears.async.{Async, AsyncSupport, Future, uninterruptible}
 
 import java.util.concurrent.CancellationException
-
 import scala.concurrent.duration.{Duration, DurationInt}
 import scala.util.Success
 import scala.util.boundary

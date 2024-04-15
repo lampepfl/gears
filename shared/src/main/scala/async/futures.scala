@@ -2,7 +2,6 @@ package gears.async
 
 import java.util.concurrent.CancellationException
 import java.util.concurrent.atomic.AtomicBoolean
-
 import scala.annotation.tailrec
 import scala.annotation.unchecked.uncheckedVariance
 import scala.collection.mutable

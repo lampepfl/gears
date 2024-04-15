@@ -3,7 +3,6 @@ import gears.async._
 
 import java.util.concurrent.CancellationException
 import java.util.concurrent.TimeoutException
-
 import scala.concurrent.duration._
 import scala.util.Try
 import scala.util.{Failure, Success}

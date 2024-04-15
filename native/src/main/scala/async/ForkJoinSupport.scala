@@ -6,7 +6,6 @@ import gears.async._
 import java.util.concurrent.CancellationException
 import java.util.concurrent.ForkJoinPool
 import java.util.concurrent.atomic.AtomicBoolean
-
 import scala.concurrent.ExecutionContext
 import scala.concurrent.JavaConversions._
 import scala.concurrent.duration._
