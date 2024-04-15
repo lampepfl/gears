@@ -1,14 +1,15 @@
 package PosixLikeIO.examples
 
+import gears.async.AsyncOperations.*
 import gears.async.default.given
 import gears.async.{Async, Future}
-import gears.async.AsyncOperations.*
-import PosixLikeIO.{PIOHelper, SocketUDP}
 
 import java.net.DatagramPacket
 import java.nio.ByteBuffer
 import java.nio.file.StandardOpenOption
 import scala.concurrent.ExecutionContext
+
+import PosixLikeIO.{PIOHelper, SocketUDP}
 
 @main def clientAndServerUDP(): Unit =
   given ExecutionContext = ExecutionContext.global

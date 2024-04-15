@@ -2,8 +2,10 @@
 package gears.async.listeners
 
 import gears.async._
-import Listener.ListenerLock
+
 import scala.annotation.tailrec
+
+import Listener.ListenerLock
 
 /** Two listeners being locked at the same time, while having the same [[Listener.ListenerLock.selfNumber lock number]].
   */

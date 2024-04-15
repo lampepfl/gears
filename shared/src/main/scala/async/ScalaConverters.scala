@@ -1,7 +1,7 @@
 package gears.async
 
-import scala.concurrent.{Future as StdFuture, Promise as StdPromise}
 import scala.concurrent.ExecutionContext
+import scala.concurrent.{Future as StdFuture, Promise as StdPromise}
 import scala.util.Try
 
 /** Converters from Gears types to Scala API types and back. */

@@ -1,11 +1,13 @@
-import gears.async.{Async, Future, AsyncSupport, uninterruptible}
 import gears.async.AsyncOperations.*
 import gears.async.default.given
-import scala.util.boundary
-import boundary.break
-import scala.concurrent.duration.{Duration, DurationInt}
+import gears.async.{Async, AsyncSupport, Future, uninterruptible}
+
 import java.util.concurrent.CancellationException
+import scala.concurrent.duration.{Duration, DurationInt}
 import scala.util.Success
+import scala.util.boundary
+
+import boundary.break
 
 class CancellationBehavior extends munit.FunSuite:
   enum State:

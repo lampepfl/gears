@@ -1,3 +1,5 @@
+import gears.async.AsyncOperations.*
+import gears.async.default.given
 import gears.async.{
   Async,
   BufferedChannel,
@@ -9,19 +11,18 @@ import gears.async.{
   TaskSchedule,
   UnboundedChannel
 }
-import gears.async.default.given
-import gears.async.AsyncOperations.*
-import Future.zip
 
-import java.util.concurrent.CancellationException
-import scala.collection.mutable
-import scala.concurrent.ExecutionContext
-import scala.util.{Failure, Success, Try}
-import scala.util.Random
-import scala.collection.mutable.{ArrayBuffer, Set}
-import java.util.concurrent.atomic.AtomicInteger
 import java.nio.ByteBuffer
+import java.util.concurrent.CancellationException
+import java.util.concurrent.atomic.AtomicInteger
 import scala.collection.Stepper.UnboxingFloatStepper
+import scala.collection.mutable
+import scala.collection.mutable.{ArrayBuffer, Set}
+import scala.concurrent.ExecutionContext
+import scala.util.Random
+import scala.util.{Failure, Success, Try}
+
+import Future.zip
 
 class ChannelBehavior extends munit.FunSuite {
 

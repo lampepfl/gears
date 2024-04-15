@@ -1,17 +1,18 @@
 package measurements
 
-import PosixLikeIO.PIOHelper
-import gears.async.{Async, BufferedChannel, ChannelMultiplexer, Future, SyncChannel}
 import gears.async.default.given
+import gears.async.{Async, BufferedChannel, ChannelMultiplexer, Future, SyncChannel}
 
 import java.io.{FileReader, FileWriter}
 import java.nio.file.{Files, NoSuchFileException, Paths, StandardOpenOption}
+import java.util.concurrent.atomic.AtomicInteger
 import scala.collection.mutable
 import scala.collection.mutable.{ArrayBuffer, HashMap}
 import scala.concurrent.ExecutionContext
-import java.util.concurrent.atomic.AtomicInteger
-import scala.util.Try
 import scala.util.CommandLineParser.FromString.given_FromString_Int
+import scala.util.Try
+
+import PosixLikeIO.PIOHelper
 
 case class TimeMeasurementResult(millisecondsPerOperation: Double, standardDeviation: Double)
 

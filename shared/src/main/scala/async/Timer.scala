@@ -1,16 +1,17 @@
 package gears.async
 
-import Future.Promise
-import AsyncOperations.sleep
+import gears.async.Listener
 
+import java.util.concurrent.CancellationException
 import java.util.concurrent.TimeoutException
+import scala.annotation.tailrec
 import scala.collection.mutable
 import scala.concurrent.TimeoutException
-import scala.util.{Failure, Success, Try}
-import gears.async.Listener
 import scala.concurrent.duration._
-import scala.annotation.tailrec
-import java.util.concurrent.CancellationException
+import scala.util.{Failure, Success, Try}
+
+import AsyncOperations.sleep
+import Future.Promise
 
 /** Timer exposes a steady [[Async.Source]] of ticks that happens every `tickDuration` milliseconds. Note that the timer
   * does not start ticking until `start` is called (which is a blocking operation, until the timer is cancelled).

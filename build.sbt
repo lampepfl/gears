@@ -1,4 +1,4 @@
-import sbtcrossproject.CrossPlugin.autoImport.{crossProject, CrossType}
+import sbtcrossproject.CrossPlugin.autoImport.{CrossType, crossProject}
 import scalanative.build._
 
 ThisBuild / scalaVersion := "3.3.3"

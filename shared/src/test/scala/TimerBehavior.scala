@@ -1,10 +1,11 @@
-import gears.async._
 import gears.async.AsyncOperations._
-import scala.concurrent.duration._
-import scala.util.{Success, Failure}
-import java.util.concurrent.TimeoutException
+import gears.async._
+
 import java.util.concurrent.CancellationException
+import java.util.concurrent.TimeoutException
+import scala.concurrent.duration._
 import scala.util.Try
+import scala.util.{Failure, Success}
 
 class TimerBehavior extends munit.FunSuite {
   import gears.async.default.given

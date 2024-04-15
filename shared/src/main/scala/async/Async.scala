@@ -1,10 +1,12 @@
 package gears.async
-import java.util.concurrent.atomic.AtomicBoolean
-import scala.collection.mutable
-import java.util.concurrent.locks.ReentrantLock
-import java.util.concurrent.atomic.AtomicLong
-import gears.async.Listener.withLock
+
 import gears.async.Listener.NumberedLock
+import gears.async.Listener.withLock
+
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.locks.ReentrantLock
+import scala.collection.mutable
 import scala.util.boundary
 
 /** The async context: provides the capability to asynchronously [[Async.await await]] for [[Async.Source Source]]s, and

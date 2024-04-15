@@ -1,16 +1,17 @@
+import gears.async.Async
+import gears.async.Async.Source
 import gears.async.Async.race
 import gears.async.Future
 import gears.async.Future.Promise
-import gears.async.Async
 import gears.async.Listener
-import gears.async.default.given
-import scala.util.Success
-import java.util.concurrent.atomic.AtomicBoolean
-import gears.async.listeners.lockBoth
 import gears.async.Listener.ListenerLock
-import gears.async.Async.Source
-import scala.collection.mutable.Buffer
+import gears.async.default.given
 import gears.async.listeners.ConflictingLocksException
+import gears.async.listeners.lockBoth
+
+import java.util.concurrent.atomic.AtomicBoolean
+import scala.collection.mutable.Buffer
+import scala.util.Success
 
 class ListenerBehavior extends munit.FunSuite:
   given munit.Assertions = this

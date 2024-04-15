@@ -1,14 +1,14 @@
 package gears.async
 
-import scala.util.Random
-import scala.util.{Try, Success, Failure}
-import scala.util.boundary
-import scala.util.control.NonFatal
-import scala.concurrent.duration._
-
 import gears.async.Async
 import gears.async.AsyncOperations.sleep
 import gears.async.Retry.Delay
+
+import scala.concurrent.duration._
+import scala.util.Random
+import scala.util.boundary
+import scala.util.control.NonFatal
+import scala.util.{Failure, Success, Try}
 
 /** Utility class to perform asynchronous actions with retrying policies on exceptions.
   *

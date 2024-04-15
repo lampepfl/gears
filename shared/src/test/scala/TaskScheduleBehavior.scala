@@ -1,10 +1,11 @@
-import gears.async.{Async, Future, Task, TaskSchedule}
 import gears.async.default.given
-import Future.zip
+import gears.async.{Async, Future, Task, TaskSchedule}
 
 import scala.concurrent.ExecutionContext
-import scala.util.{Failure, Success, Try}
 import scala.util.Random
+import scala.util.{Failure, Success, Try}
+
+import Future.zip
 
 class TaskScheduleBehavior extends munit.FunSuite {
   given ExecutionContext = ExecutionContext.global

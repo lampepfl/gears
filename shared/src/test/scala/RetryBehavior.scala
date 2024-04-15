@@ -1,13 +1,14 @@
-import gears.async.{Async, Future, Task, TaskSchedule, Retry}
-import Retry.Delay
-import scala.concurrent.duration.*
-import FiniteDuration as Duration
 import gears.async.default.given
-import Future.zip
+import gears.async.{Async, Future, Retry, Task, TaskSchedule}
 
 import scala.concurrent.ExecutionContext
-import scala.util.{Failure, Success, Try}
+import scala.concurrent.duration.*
 import scala.util.Random
+import scala.util.{Failure, Success, Try}
+
+import FiniteDuration as Duration
+import Future.zip
+import Retry.Delay
 
 class RetryBehavior extends munit.FunSuite {
   test("Exponential backoff(2) 50ms, 5 times total schedule"):

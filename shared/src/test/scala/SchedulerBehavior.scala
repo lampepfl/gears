@@ -1,9 +1,11 @@
-import gears.async.{Async, Future, Listener}
 import gears.async.AsyncOperations.*
-import gears.async.default.given
-import concurrent.duration.DurationInt
 import gears.async.Future.Promise
+import gears.async.default.given
+import gears.async.{Async, Future, Listener}
+
 import scala.util.Success
+
+import concurrent.duration.DurationInt
 
 class SchedulerBehavior extends munit.FunSuite {
   test("schedule cancellation works") {

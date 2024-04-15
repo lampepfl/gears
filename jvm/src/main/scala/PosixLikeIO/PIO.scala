@@ -1,19 +1,20 @@
 package PosixLikeIO
 
-import gears.async.{Async, Future}
+import gears.async.Scheduler
 import gears.async.default.given
-import Future.Promise
+import gears.async.{Async, Future}
 
 import java.net.{DatagramPacket, DatagramSocket, InetAddress, InetSocketAddress, ServerSocket, Socket}
 import java.nio.ByteBuffer
 import java.nio.channels.{AsynchronousFileChannel, CompletionHandler, SocketChannel}
 import java.nio.charset.{Charset, StandardCharsets}
 import java.nio.file.{Path, StandardOpenOption}
+import java.util.concurrent.CancellationException
 import scala.Tuple.Union
 import scala.concurrent.ExecutionContext
 import scala.util.{Failure, Success, Try}
-import gears.async.Scheduler
-import java.util.concurrent.CancellationException
+
+import Future.Promise
 
 object File:
   extension (resolver: Future.Resolver[Int])
