@@ -1,4 +1,5 @@
 package gears.async
+
 import gears.async.Listener.NumberedLock
 import gears.async.Listener.withLock
 
