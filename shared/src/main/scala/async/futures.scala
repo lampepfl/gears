@@ -246,10 +246,10 @@ object Future:
         .onComplete(Listener { case ((v, which), _) =>
           v match
             case Success(value) =>
-              inline if withCancel then (if which == f1 then f2 else f1).cancel()
+              inline if withCancel then (if which == f1.symbol then f2 else f1).cancel()
               r.resolve(value)
             case Failure(_) =>
-              (if which == f1 then f2 else f1).onComplete(Listener((v, _) => r.complete(v)))
+              (if which == f1.symbol then f2 else f1).onComplete(Listener((v, _) => r.complete(v)))
         })
 
   end extension
@@ -340,15 +340,24 @@ object Future:
   class Collector[T](futures: Future[T]*):
     private val ch = UnboundedChannel[Future[T]]()
 
+    private val futureRefs = mutable.Map[Async.SourceSymbol[Try[T]], Future[T]]()
+
     /** Output channels of all finished futures. */
     final def results = ch.asReadable
 
-    private val listener = Listener((_, fut) =>
+    private val listener = Listener((_, futRef) =>
       // safe, as we only attach this listener to Future[T]
-      ch.sendImmediately(fut.asInstanceOf[Future[T]])
+      val ref = futRef.asInstanceOf[Async.SourceSymbol[Try[T]]]
+      val fut = futureRefs.synchronized:
+        // futureRefs.remove(ref).get
+        futureRefs(ref)
+      ch.sendImmediately(futureRefs(fut))
     )
 
-    protected final def addFuture(future: Future[T]) = future.onComplete(listener)
+    protected final def addFuture(future: Future[T]) =
+      futureRefs.synchronized:
+        futureRefs += (future.symbol -> future)
+      future.onComplete(listener)
 
     futures.foreach(addFuture)
   end Collector
