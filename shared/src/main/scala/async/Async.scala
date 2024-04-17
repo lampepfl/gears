@@ -375,18 +375,18 @@ object Async:
   opaque type SelectCase[T] = (Source[?], Nothing => T)
   //                           ^ unsafe types, but we only construct SelectCase from `handle` which is safe
 
-  extension [T](src: Source[T])
+  extension [T](src: Source[T]^)
     /** Attach a handler to `src`, creating a [[SelectCase]].
       * @see
       *   [[Async$.select Async.select]] where [[SelectCase]] is used.
       */
-    inline def handle[U](f: T => U): SelectCase[U] = (src, f)
+    inline def handle[U](f: T => U): SelectCase[U]^{src, f} = (src, f)
 
     /** Alias for [[handle]]
       * @see
       *   [[Async$.select Async.select]] where [[SelectCase]] is used.
       */
-    inline def ~~>[U](f: T => U): SelectCase[U] = src.handle(f)
+    inline def ~~>[U](f: T => U): SelectCase[U]^{src, f} = src.handle(f)
 
   /** Race a list of sources with the corresponding handler functions, once an item has come back. Like [[race]],
     * [[select]] guarantees exactly one of the sources are polled. Unlike [[transformValuesWith]], the handler in
@@ -408,7 +408,7 @@ object Async:
     * )
     *   }}}
     */
-  def select[T](cases: SelectCase[T]*)(using Async) =
+  def select[T](cases: (SelectCase[T]^)*)(using Async) =
     val (input, which) = raceWithOrigin(cases.map(_._1)*).awaitResult
     val (_, handler) = cases.find(_._1.symbol == which).get
     handler.asInstanceOf[input.type => T](input)
@@ -421,8 +421,10 @@ object Async:
     *   [[race]] and [[select]] for racing more than two sources.
     */
   def either[T1, T2](src1: Source[T1]^, src2: Source[T2]^): Source[Either[T1, T2]]^{src1, src2} =
-    val sources =
-      Seq[Source[Either[T1, T2]]^{src1, src2}](src1.transformValuesWith(Left(_)), src2.transformValuesWith(Right(_)))
-    race(sources*)
+    // TODO: this is compiling without the ^{src1, src2} annotation!
+    val left: Source[Either[T1, T2]]^{src1} = src1.transformValuesWith(Left(_))
+    val right: Source[Either[T1, T2]]^{src2} = src2.transformValuesWith(Right(_))
+    // val sources: Seq[Source[Either[T1, T2]]^{src1, src2}] = Seq(left, right)
+    race(left, right)
 end Async
 
