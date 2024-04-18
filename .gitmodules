@@ -1,4 +1,0 @@
-[submodule "dependencies/munit"]
-	path = dependencies/munit
-	url = https://github.com/natsukagami/munit.git
-	branch = scala-native-0.5
