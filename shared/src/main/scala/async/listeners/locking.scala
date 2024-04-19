@@ -27,14 +27,14 @@ case class ConflictingLocksException(
 def lockBoth[T, U](
     lt: Listener[T]^,
     lu: Listener[U]^
-): (lt.type | lu.type | true)^{lt, lu} =
+): (lt.type | lu.type | true) =
   val lockT = if lt.lock == null then return (if lu.acquireLock() then true else lu) else lt.lock
   val lockU = if lu.lock == null then return (if lt.acquireLock() then true else lt) else lu.lock
 
   def doLock[T, U](lt: Listener[T]^, lu: Listener[U]^)(
       lockT: ListenerLock^{lt},
       lockU: ListenerLock^{lu}
-  ): (lt.type | lu.type | true)^{lt, lu} =
+  ): (lt.type | lu.type | true) =
     // assert(lockT.number > lockU.number)
     if !lockT.acquire() then lt
     else if !lockU.acquire() then
