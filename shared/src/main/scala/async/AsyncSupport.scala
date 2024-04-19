@@ -1,7 +1,9 @@
 package gears.async
 
 import language.experimental.captureChecking
+
 import scala.concurrent.duration._
+import scala.annotation.capability
 
 /** The delimited continuation suspension interface. Represents a suspended computation asking for a value of type `T`
   * to continue (and eventually returning a value of type `R`).
