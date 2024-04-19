@@ -92,7 +92,7 @@ object Async:
     * Most functions should not take [[Spawn]] as a parameter, unless the function explicitly wants to spawn "dangling"
     * runnable [[Future]]s. Instead, functions should take [[Async]] and spawn scoped futures within [[Async.group]].
     */
-  opaque type Spawn <: Async = Async
+  @capability opaque type Spawn <: Async = Async
 
   /** Runs `body` inside a spawnable context where it is allowed to spawn concurrently runnable [[Future]]s. When the
     * body returns, all spawned futures are cancelled and waited for.
@@ -186,18 +186,18 @@ object Async:
   // ... it can be quickly obtained from any Source
   given[T]: scala.Conversion[Source[T], SourceSymbol[T]] = _.symbol
 
-  extension [T](src: Source[scala.util.Try[T]])
+  extension [T](src: Source[scala.util.Try[T]]^)
     /** Waits for an item to arrive from the source, then automatically unwraps it. Suspends until an item returns.
       * @see
       *   [[Source!.awaitResult awaitResult]] for non-unwrapping await.
       */
-    inline def await(using Async) = src.awaitResult.get
-  extension [E, T](src: Source[Either[E, T]])
+    def await(using Async) = src.awaitResult.get
+  extension [E, T](src: Source[Either[E, T]]^)
     /** Waits for an item to arrive from the source, then automatically unwraps it. Suspends until an item returns.
       * @see
       *   [[Source!.awaitResult awaitResult]] for non-unwrapping await.
       */
-    inline def await(using Async) = src.awaitResult.right.get
+    inline def await(using inline async: Async) = src.awaitResult.right.get
 
   /** An original source has a standard definition of [[Source.onComplete onComplete]] in terms of [[Source.poll poll]]
     * and [[OriginalSource.addListener addListener]].
@@ -360,7 +360,7 @@ object Async:
         sources.foreach(_.onComplete(listener))
 
       def dropListener(k: Listener[T]^): Unit =
-        val listener = Listener.ForwardingListener.empty[U](this, k)
+        val listener = Listener.ForwardingListener.empty(this, k)
         sources.foreach(_.dropListener(listener))
 
 
