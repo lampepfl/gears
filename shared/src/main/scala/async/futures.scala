@@ -108,9 +108,11 @@ object Future:
   end CoreFuture
 
   private class CancelSuspension[U](val src: Async.Source[U]^)(val ac: Async, val suspension: ac.support.Suspension[Try[U], Unit]) extends Cancellable:
+   self: CancelSuspension[U]^{src, ac} =>
     var listener: Listener[U]^{ac} = Listener.acceptingListener[U]: (x, _) =>
       val completedBefore = complete()
-      if !completedBefore then ac.support.resumeAsync(suspension)(Success(x))
+      if !completedBefore then
+        ac.support.resumeAsync(suspension)(Success(x))
       unlink()
     var completed = false
 

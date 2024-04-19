@@ -372,21 +372,21 @@ object Async:
     * @see
     *   [[Async$.select Async.select]] where [[SelectCase]] is used.
     */
-  opaque type SelectCase[T] = (Source[?], Nothing => T)
-  //                           ^ unsafe types, but we only construct SelectCase from `handle` which is safe
+  case class SelectCase[+T] private[Async] (src: Source[Any]^, f: Nothing => T)
+  //                                        ^ unsafe types, but we only construct SelectCase from `handle` which is safe
 
   extension [T](src: Source[T]^)
     /** Attach a handler to `src`, creating a [[SelectCase]].
       * @see
       *   [[Async$.select Async.select]] where [[SelectCase]] is used.
       */
-    inline def handle[U](f: T => U): SelectCase[U]^{src, f} = (src, f)
+    def handle[U](f: T => U): SelectCase[U]^{src, f} = SelectCase(src, f)
 
     /** Alias for [[handle]]
       * @see
       *   [[Async$.select Async.select]] where [[SelectCase]] is used.
       */
-    inline def ~~>[U](f: T => U): SelectCase[U]^{src, f} = src.handle(f)
+    def ~~>[U](f: T => U): SelectCase[U]^{src, f} = src.handle(f)
 
   /** Race a list of sources with the corresponding handler functions, once an item has come back. Like [[race]],
     * [[select]] guarantees exactly one of the sources are polled. Unlike [[transformValuesWith]], the handler in
@@ -410,7 +410,7 @@ object Async:
     */
   def select[T](cases: (SelectCase[T]^)*)(using Async) =
     val (input, which) = raceWithOrigin(cases.map(_._1)*).awaitResult
-    val (_, handler) = cases.find(_._1.symbol == which).get
+    val SelectCase(_, handler) = cases.find(_._1.symbol == which).get
     handler.asInstanceOf[input.type => T](input)
 
   /** Race two sources, wrapping them respectively in [[Left]] and [[Right]] cases.

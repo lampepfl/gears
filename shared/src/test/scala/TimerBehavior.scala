@@ -1,3 +1,5 @@
+import language.experimental.captureChecking
+
 import gears.async.AsyncOperations._
 import gears.async._
 
@@ -25,7 +27,7 @@ class TimerBehavior extends munit.FunSuite {
       assert(timer.src.awaitResult == timer.TimerEvent.Tick)
   }
 
-  def `cancel future after timeout`[T](d: Duration, f: Future[T])(using Async, AsyncOperations): Try[T] =
+  def `cancel future after timeout`[T](d: Duration, f: Future[T]^)(using Async, AsyncOperations): Try[T] =
     Async.group:
       f.link()
       val t = Future { sleep(d.toMillis) }
