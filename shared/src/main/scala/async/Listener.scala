@@ -58,7 +58,7 @@ object Listener:
       def complete(data: T, source: SourceSymbol[T]) = consumer(data, source)
 
   /** Returns a simple [[Listener]] that always accepts the item and sends it to the consumer. */
-  inline def apply[T](consumer: (T, SourceSymbol[T]) => Unit): Listener[T] = acceptingListener(consumer)
+  def apply[T](consumer: (T, SourceSymbol[T]) => Unit): Listener[T]^{consumer} = acceptingListener(consumer)
 
   /** A special class of listener that forwards the inner listener through the given source. For purposes of
     * [[Async.Source.dropListener]] these listeners are compared for equality by the hash of the source and the inner
@@ -67,10 +67,10 @@ object Listener:
   abstract case class ForwardingListener[T](src: Async.Source[?]^, inner: Listener[?]^) extends Listener[T]
 
   object ForwardingListener:
-    /** Create an empty [[ForwardingListener]] for equality comparison. */
-    def empty[T](src: Async.Source[?]^, inner: Listener[?]^): ForwardingListener[T]^{src, inner} = new ForwardingListener[T](src, inner):
+    /** Creates an empty [[ForwardingListener]] for equality comparison. */
+    def empty(src: Async.Source[?]^, inner: Listener[?]^): ForwardingListener[Any]^{src, inner} = new ForwardingListener[Any](src, inner):
       val lock = null
-      override def complete(data: T, source: SourceSymbol[T]) = ???
+      override def complete(data: Any, source: SourceSymbol[Any]) = ???
 
   /** A lock required by a listener to be acquired before accepting values. Should there be multiple listeners that
     * needs to be locked at the same time, they should be locked by larger-number-first.

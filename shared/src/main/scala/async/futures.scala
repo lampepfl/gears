@@ -3,12 +3,15 @@ package gears.async
 import java.util.concurrent.CancellationException
 import java.util.concurrent.atomic.AtomicBoolean
 import scala.annotation.tailrec
+import scala.annotation.unchecked.uncheckedCaptures
 import scala.annotation.unchecked.uncheckedVariance
 import scala.collection.mutable
 import scala.compiletime.uninitialized
 import scala.util
 import scala.util.control.NonFatal
 import scala.util.{Failure, Success, Try}
+
+import language.experimental.captureChecking
 
 /** Futures are [[Async.Source Source]]s that has the following properties:
   *   - They represent a single value: Once resolved, [[Async.await await]]-ing on a [[Future]] should always return the
@@ -48,24 +51,23 @@ object Future:
     *   - withResolver: Completion is done by external request set up from a block of code.
     */
   private class CoreFuture[+T] extends Future[T]:
-
     @volatile protected var hasCompleted: Boolean = false
     protected var cancelRequest = AtomicBoolean(false)
     private var result: Try[T] = uninitialized // guaranteed to be set if hasCompleted = true
-    private val waiting: mutable.Set[Listener[Try[T]]] = mutable.Set()
+    private val waiting = mutable.Set[(Listener[Try[T]]^) @uncheckedCaptures]()
 
     // Async.Source method implementations
 
-    def poll(k: Listener[Try[T]]): Boolean =
+    def poll(k: Listener[Try[T]]^): Boolean =
       if hasCompleted then
         k.completeNow(result, this)
         true
       else false
 
-    def addListener(k: Listener[Try[T]]): Unit = synchronized:
+    def addListener(k: Listener[Try[T]]^): Unit = synchronized:
       waiting += k
 
-    def dropListener(k: Listener[Try[T]]): Unit = synchronized:
+    def dropListener(k: Listener[Try[T]]^): Unit = synchronized:
       waiting -= k
 
     // Cancellable method implementations
@@ -105,10 +107,48 @@ object Future:
 
   end CoreFuture
 
+  private class CancelSuspension[U](val src: Async.Source[U]^)(val ac: Async, val suspension: ac.support.Suspension[Try[U], Unit]) extends Cancellable:
+    var listener: Listener[U]^{ac} = Listener.acceptingListener[U]: (x, _) =>
+      val completedBefore = complete()
+      if !completedBefore then ac.support.resumeAsync(suspension)(Success(x))
+      unlink()
+    var completed = false
+
+    def complete() = synchronized:
+      val completedBefore = completed
+      completed = true
+      completedBefore
+
+    override def cancel() =
+      val completedBefore = complete()
+      if !completedBefore then
+        src.dropListener(listener)
+        ac.support.resumeAsync(suspension)(Failure(new CancellationException()))
+
+  private class FutureAsync(val group: CompletionGroup)(using ac: Async, label: ac.support.Label[Unit]) extends Async(using ac.support, ac.scheduler):
+   self: Async^{ac} =>
+    /** Await a source first by polling it, and, if that fails, by suspending in a onComplete call.
+      */
+    override def await[U](src: Async.Source[U]^): U =
+      if group.isCancelled then throw new CancellationException()
+      src
+        .poll()
+        .getOrElse:
+          val res = ac.support.suspend[Try[U], Unit](k =>
+            val cancellable = CancelSuspension(src)(ac, k)
+            // val listener: Listener[U] = Listener.acceptingListener[U]: (x, _) => ???
+              // val completedBefore = cancellable.complete()
+              // if !completedBefore then ac.support.resumeAsync(k)(Success(x))
+            cancellable.link(group) // may resume + remove listener immediately
+            src.onComplete(cancellable.listener)
+          )(using label)
+          res.get
+
+    override def withGroup(group: CompletionGroup): Async^{ac} = FutureAsync(group)
+
   /** A future that is completed by evaluating `body` as a separate asynchronous operation in the given `scheduler`
     */
   private class RunnableFuture[+T](body: Async.Spawn ?=> T)(using ac: Async) extends CoreFuture[T]:
-
     /** RunnableFuture maintains its own inner [[CompletionGroup]], that is separated from the provided Async
       * instance's. When the future is cancelled, we only cancel this CompletionGroup. This effectively means any
       * `.await` operations within the future is cancelled *only if they link into this group*. The future body run with
@@ -118,47 +158,6 @@ object Future:
 
     private def checkCancellation(): Unit =
       if cancelRequest.get() then throw new CancellationException()
-
-    private class FutureAsync(val group: CompletionGroup)(using label: ac.support.Label[Unit])
-        extends Async(using ac.support, ac.scheduler):
-      /** Await a source first by polling it, and, if that fails, by suspending in a onComplete call.
-        */
-      override def await[U](src: Async.Source[U]): U =
-        class CancelSuspension extends Cancellable:
-          var suspension: ac.support.Suspension[Try[U], Unit] = uninitialized
-          var listener: Listener[U] = uninitialized
-          var completed = false
-
-          def complete() = synchronized:
-            val completedBefore = completed
-            completed = true
-            completedBefore
-
-          override def cancel() =
-            val completedBefore = complete()
-            if !completedBefore then
-              src.dropListener(listener)
-              ac.support.resumeAsync(suspension)(Failure(new CancellationException()))
-
-        if group.isCancelled then throw new CancellationException()
-
-        src
-          .poll()
-          .getOrElse:
-            val cancellable = CancelSuspension()
-            val res = ac.support.suspend[Try[U], Unit](k =>
-              val listener = Listener.acceptingListener[U]: (x, _) =>
-                val completedBefore = cancellable.complete()
-                if !completedBefore then ac.support.resumeAsync(k)(Success(x))
-              cancellable.suspension = k
-              cancellable.listener = listener
-              cancellable.link(group) // may resume + remove listener immediately
-              src.onComplete(listener)
-            )
-            cancellable.unlink()
-            res.get
-
-      override def withGroup(group: CompletionGroup) = FutureAsync(group)
 
     override def cancel(): Unit = if setCancelled() then this.innerGroup.cancel()
 
@@ -178,7 +177,8 @@ object Future:
   /** Create a future that asynchronously executes `body` that wraps its execution in a [[scala.util.Try]]. The returned
     * future is linked to the given [[Async.Spawn]] scope by default, i.e. it is cancelled when this scope ends.
     */
-  def apply[T](body: Async.Spawn ?=> T)(using async: Async, spawnable: Async.Spawn & async.type): Future[T] =
+  def apply[T](body: Async.Spawn ?=> T)(using async: Async, spawnable: Async.Spawn)
+    (using async.type =:= spawnable.type): Future[T]^{body, spawnable} =
     RunnableFuture(body)
 
   /** A future that is immediately completed with the given result. */
@@ -196,11 +196,11 @@ object Future:
   /** A future that immediately rejects with the given exception. Similar to `Future.now(Failure(exception))`. */
   inline def rejected(exception: Throwable): Future[Nothing] = now(Failure(exception))
 
-  extension [T](f1: Future[T])
+  extension [T](f1: Future[T]^)
     /** Parallel composition of two futures. If both futures succeed, succeed with their values in a pair. Otherwise,
       * fail with the failure that was returned first.
       */
-    def zip[U](f2: Future[U]): Future[(T, U)] =
+    def zip[U](f2: Future[U]^): Future[(T, U)]^{f1, f2} =
       Future.withResolver: r =>
         Async
           .either(f1, f2)
@@ -233,14 +233,14 @@ object Future:
       * @see
       *   [[orWithCancel]] for an alternative version where the slower future is cancelled.
       */
-    def or(f2: Future[T]): Future[T] = orImpl(false)(f2)
+    def or(f2: Future[T]^): Future[T]^{f1, f2} = orImpl(false)(f2)
 
     /** Like `or` but the slower future is cancelled. If either task succeeds, succeed with the success that was
       * returned first and the other is cancelled. Otherwise, fail with the failure that was returned last.
       */
-    def orWithCancel(f2: Future[T]): Future[T] = orImpl(true)(f2)
+    def orWithCancel(f2: Future[T]^): Future[T]^{f1, f2} = orImpl(true)(f2)
 
-    inline def orImpl(inline withCancel: Boolean)(f2: Future[T]): Future[T] = Future.withResolver: r =>
+    inline def orImpl(inline withCancel: Boolean)(f2: Future[T]^): Future[T]^{f1, f2} = Future.withResolver: r =>
       Async
         .raceWithOrigin(f1, f2)
         .onComplete(Listener { case ((v, which), _) =>
@@ -311,8 +311,8 @@ object Future:
     */
   def withResolver[T](body: Resolver[T] => Unit): Future[T] =
     val future = new CoreFuture[T] with Resolver[T] with Promise[T] {
-      @volatile var cancelHandle = () => rejectAsCancelled()
-      override def onCancel(handler: () => Unit): Unit = cancelHandle = handler
+      @volatile var cancelHandle: (() => Unit) @uncheckedCaptures = () => rejectAsCancelled()
+      override def onCancel(handler: () => Unit): Unit = cancelHandle = handler 
       override def complete(result: Try[T]): Unit = super.complete(result)
 
       override def cancel(): Unit =
@@ -337,13 +337,13 @@ object Future:
     *   [[Future.awaitAll]] and [[Future.awaitFirst]] for simple usage of the collectors to get all results or the first
     *   succeeding one.
     */
-  class Collector[T](futures: Future[T]*):
-    private val ch = UnboundedChannel[Future[T]]()
+  class Collector[T](futures: (Future[T]^)*):
+    private val ch = UnboundedChannel[Future[T]^{futures*}]()
 
-    private val futureRefs = mutable.Map[Async.SourceSymbol[Try[T]], Future[T]]()
+    private val futureRefs = mutable.Map[Async.SourceSymbol[Try[T]], Future[T]^{futures*}]()
 
     /** Output channels of all finished futures. */
-    final def results = ch.asReadable
+    final def results: ReadableChannel[Future[T]^{futures*}] = ch.asReadable
 
     private val listener = Listener((_, futRef) =>
       // safe, as we only attach this listener to Future[T]
@@ -354,7 +354,7 @@ object Future:
       ch.sendImmediately(futureRefs(fut))
     )
 
-    protected final def addFuture(future: Future[T]) =
+    protected final def addFuture(future: Future[T]^{futures*}) =
       futureRefs.synchronized:
         futureRefs += (future.symbol -> future)
       future.onComplete(listener)
@@ -363,12 +363,12 @@ object Future:
   end Collector
 
   /** Like [[Collector]], but exposes the ability to add futures after creation. */
-  class MutableCollector[T](futures: Future[T]*) extends Collector[T](futures*):
+  class MutableCollector[T](futures: (Future[T]^)*) extends Collector[T](futures*):
     /** Add a new [[Future]] into the collector. */
-    inline def add(future: Future[T]) = addFuture(future)
-    inline def +=(future: Future[T]) = add(future)
+    def add(future: Future[T]^{futures*}): Unit = addFuture(future)
+    def +=(future: Future[T]^{futures*}) = add(future)
 
-  extension [T](fs: Seq[Future[T]])
+  extension [T](fs: Seq[Future[T]^])
     /** `.await` for all futures in the sequence, returns the results in a sequence, or throws if any futures fail. */
     def awaitAll(using Async) =
       val collector = Collector(fs*)
@@ -427,10 +427,11 @@ class Task[+T](val body: (Async, AsyncOperations) ?=> T):
   def run()(using Async, AsyncOperations): T = body
 
   /** Start a future computed from the `body` of this task */
-  def start()(using async: Async, spawn: Async.Spawn & async.type, asyncOps: AsyncOperations) =
+  def start()(using async: Async, spawn: Async.Spawn, asyncOps: AsyncOperations)
+    (using async.type =:= spawn.type): Future[T]^{this, spawn} =
     Future(body)(using async, spawn)
 
-  def schedule(s: TaskSchedule): Task[T] =
+  def schedule(s: TaskSchedule): Task[T]^{this} =
     s match {
       case TaskSchedule.Every(millis, maxRepetitions) =>
         assert(millis >= 1)
