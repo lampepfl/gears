@@ -1,8 +1,12 @@
 package gears.async
 
+import language.experimental.captureChecking
+
+import java.util.concurrent.atomic.AtomicLong
+
 /** A trait for cancellable entities that can be grouped. */
 trait Cancellable:
-
+  val id = Cancellable.Id()
   private var group: CompletionGroup = CompletionGroup.Unlinked
 
   /** Issue a cancel request */
@@ -28,6 +32,11 @@ trait Cancellable:
 end Cancellable
 
 object Cancellable:
+  opaque type Id = Long
+  private object Id:
+    private val gen = AtomicLong(0)
+    def apply(): Id = gen.incrementAndGet()
+
   /** A special [[Cancellable]] object that just tracks whether its linked group was cancelled. */
   trait Tracking extends Cancellable:
     def isCancelled: Boolean
