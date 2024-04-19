@@ -6,6 +6,7 @@ import java.lang.invoke.{MethodHandles, VarHandle}
 import java.util.concurrent.locks.ReentrantLock
 import scala.annotation.unchecked.uncheckedVariance
 import scala.concurrent.duration.FiniteDuration
+import scala.annotation.constructorOnly
 
 object VThreadScheduler extends Scheduler:
   private val VTFactory = Thread
@@ -21,7 +22,7 @@ object VThreadScheduler extends Scheduler:
     val sr = ScheduledRunnable(delay, body)
     () => sr.cancel()
 
-  private class ScheduledRunnable(val delay: FiniteDuration, val body: Runnable^) extends Cancellable {
+  private class ScheduledRunnable(delay: FiniteDuration, body: Runnable^) extends Cancellable { 
     @volatile var interruptGuard = true // to avoid interrupting the body
 
     val th = VTFactory.newThread: () =>
