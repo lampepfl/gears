@@ -380,24 +380,23 @@ class FutureBehavior extends munit.FunSuite {
       assertEquals(sum, range.sum)
   }
 
-  // crashing atm
-  // test("mutable collector") {
-  //   Async.blocking:
-  //     val range = (0 to 10)
-  //     val futs = range.map(i => Future { sleep(i * 100); i })
-  //     val collector = Future.MutableCollector(futs*)
+  test("mutable collector") {
+    Async.blocking:
+      val range = (0 to 10)
+      val futs = range.map(i => Future { sleep(i * 100); i })
+      val collector = Future.MutableCollector(futs*)
 
-  //     for i <- range do
-  //       val r = Future { i }
-  //       Future:
-  //         sleep(i * 200)
-  //         collector += r
+      for i <- range do
+        val r = Future { i }
+        Future:
+          sleep(i * 200)
+          collector += r
 
-  //     var sum = 0
-  //     for i <- range do sum += collector.results.read().right.get.await
-  //     for i <- range do sum += collector.results.read().right.get.await
-  //     assertEquals(sum, 2 * range.sum)
-  // }
+      var sum = 0
+      for i <- range do sum += collector.results.read().right.get.await
+      for i <- range do sum += collector.results.read().right.get.await
+      assertEquals(sum, 2 * range.sum)
+  }
 
   test("future collection: awaitAll*") {
     Async.blocking:
