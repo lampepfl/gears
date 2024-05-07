@@ -16,6 +16,7 @@ lazy val root =
           "org.scala-lang" %% "scala2-library-cc-tasty-experimental" % "3.5.0-RC1-bin-SNAPSHOT",
           "org.scalameta" %%% "munit" % "1.0.0-RC1" % Test
         ),
+        // scalacOptions ++= Seq("-Ycc-log", "-Yprint-debug"),
         testFrameworks += new TestFramework("munit.Framework")
       )
     )
