@@ -146,7 +146,7 @@ object Future:
           )(using label)
           res.get
 
-    override def withGroup(group: CompletionGroup): Async^{ac} = FutureAsync(group)
+    override def withGroup(group: CompletionGroup): Async^ = FutureAsync(group)
 
   /** A future that is completed by evaluating `body` as a separate asynchronous operation in the given `scheduler`
     */
