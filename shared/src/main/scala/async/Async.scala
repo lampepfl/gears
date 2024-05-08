@@ -282,8 +282,6 @@ object Async:
     */
   def race[T](sources: (Source[T]^)*): Source[T]^{sources*} = raceImpl[T, T]((v, _) => v)(sources)
 
-  def raceAyaya[T](sources: Seq[(Source[T]^)]): Source[T]^{sources*} = raceImpl[T, T]((v, _) => v)(sources)
-
   /** Like [[race]], but the returned value includes a reference to the upstream source that the item came from.
     * @see
     *   [[Async$.select Async.select]] for a convenient syntax to race sources and awaiting them with [[Async]].

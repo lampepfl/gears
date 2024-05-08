@@ -126,6 +126,7 @@ object Future:
       if !completedBefore then
         src.dropListener(listener)
         ac.support.resumeAsync(suspension)(Failure(new CancellationException()))
+        unlink()
 
   private class FutureAsync(val group: CompletionGroup)(using ac: Async, label: ac.support.Label[Unit]) extends Async(using ac.support, ac.scheduler):
    self: Async^{ac} =>
