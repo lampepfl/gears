@@ -12,7 +12,7 @@ lazy val root =
         name := "Gears",
         organization := "ch.epfl.lamp",
         version := "0.2.0-SNAPSHOT",
-        libraryDependencies += "org.scalameta" %%% "munit" % "1.0.0-M12" % Test,
+        libraryDependencies += "org.scalameta" %%% "munit" % "1.0.0-RC1" % Test,
         testFrameworks += new TestFramework("munit.Framework")
       )
     )
