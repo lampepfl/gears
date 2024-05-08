@@ -276,7 +276,7 @@ object Channel:
       * there are *only* all readers or all senders. It must be externally synchronized.
       */
     private[async] class CellBuf():
-      case class Send(cs: CanSend, sender: Sender^)
+      final case class Send(cs: CanSend, sender: Sender^)
       type Cell = Reader | Send
       // reader == 0 || sender == 0 always
       private var reader = 0
@@ -293,7 +293,8 @@ object Channel:
         pending.head.asInstanceOf[Reader]
       def nextSender =
         require(sender > 0)
-        pending.head.asInstanceOf[(CanSend, Sender)]
+        val Send(cs, s) = pending.head.asInstanceOf[Send]
+        (cs, s)
       def dequeue() =
         pending.dequeue()
         if reader > 0 then reader -= 1 else sender -= 1
