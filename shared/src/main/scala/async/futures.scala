@@ -1,5 +1,7 @@
 package gears.async
 
+import language.experimental.captureChecking
+
 import java.util.concurrent.CancellationException
 import java.util.concurrent.atomic.AtomicBoolean
 import scala.annotation.tailrec
@@ -10,8 +12,6 @@ import scala.compiletime.uninitialized
 import scala.util
 import scala.util.control.NonFatal
 import scala.util.{Failure, Success, Try}
-
-import language.experimental.captureChecking
 
 /** Futures are [[Async.Source Source]]s that has the following properties:
   *   - They represent a single value: Once resolved, [[Async.await await]]-ing on a [[Future]] should always return the

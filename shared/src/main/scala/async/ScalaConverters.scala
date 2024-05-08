@@ -1,5 +1,7 @@
 package gears.async
 
+import language.experimental.captureChecking
+
 import scala.concurrent.ExecutionContext
 import scala.concurrent.{Future as StdFuture, Promise as StdPromise}
 import scala.util.Try

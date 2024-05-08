@@ -1,11 +1,12 @@
 package gears.async
+
 import language.experimental.captureChecking
 
+import scala.annotation.unchecked.uncheckedCaptures
 import scala.collection.mutable
 import scala.util.Success
 
 import Future.Promise
-import scala.annotation.unchecked.uncheckedCaptures
 
 /** A group of cancellable objects that are completed together. Cancelling the group means cancelling all its
   * uncompleted members.
