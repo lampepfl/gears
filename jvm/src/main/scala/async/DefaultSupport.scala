@@ -1,5 +1,7 @@
 package gears.async.default
 
+import language.experimental.captureChecking
+
 import gears.async._
 
 given AsyncOperations = JvmAsyncOperations
