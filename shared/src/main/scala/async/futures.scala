@@ -364,11 +364,19 @@ object Future:
     futures.foreach(addFuture)
   end Collector
 
-  /** Like [[Collector]], but exposes the ability to add futures after creation. */
+  /** Like [[Collector]], but exposes the ability to add futures after creation.
+    * Method [[unsafeAdd]] of the [[MutableCollector]] is **unsafe** with regards to
+    * capture checking.
+    */
   class MutableCollector[T](futures: (Future[T]^)*) extends Collector[T](futures*):
-    /** Add a new [[Future]] into the collector. */
-    def add(future: Future[T]^{futures*}): Unit = addFuture(future)
-    def +=(future: Future[T]^{futures*}) = add(future)
+    /** Adds a new [[Future]] into the collector.
+      * **Unsafe**: capture checking is not enforced here.
+      */
+    def unsafeAdd(future: Future[T]^): Unit = addFuture(future.asInstanceOf[Future[T]^{futures*}])
+    /** Adds a new [[Future]] into the collector. */
+    def add(future: Future[T]^{futures*}) = unsafeAdd(future)
+    /** Adds a new [[Future]] into the collector. */
+    def +=(future: Future[T]^{futures*}) = unsafeAdd(future)
 
   extension [T](fs: Seq[Future[T]^])
     /** `.await` for all futures in the sequence, returns the results in a sequence, or throws if any futures fail. */
