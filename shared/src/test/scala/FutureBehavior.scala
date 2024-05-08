@@ -1,3 +1,5 @@
+import language.experimental.captureChecking
+
 import gears.async.AsyncOperations.*
 import gears.async.Future.{Promise, zip}
 import gears.async.Listener
@@ -53,7 +55,6 @@ class FutureBehavior extends munit.FunSuite {
         }
         val res = a.or(b).await
         res
-      val _: Future[Int | Boolean] = z
       assertEquals(x.await, 33)
       assertEquals(y.await, (22, 11))
   }
@@ -390,7 +391,7 @@ class FutureBehavior extends munit.FunSuite {
         val r = Future { i }
         Future:
           sleep(i * 200)
-          collector += r
+          collector.unsafeAdd(r)
 
       var sum = 0
       for i <- range do sum += collector.results.read().right.get.await
