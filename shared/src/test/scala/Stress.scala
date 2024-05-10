@@ -1,3 +1,5 @@
+import language.experimental.captureChecking
+
 import gears.async.AsyncOperations.*
 import gears.async.Future.MutableCollector
 import gears.async.Timer
@@ -5,6 +7,7 @@ import gears.async.default.given
 import gears.async.{Async, AsyncSupport, Future, uninterruptible}
 
 import java.util.concurrent.atomic.AtomicInteger
+import scala.annotation.unchecked.uncheckedCaptures
 import scala.concurrent.duration._
 
 class StressTest extends munit.FunSuite:
@@ -15,11 +18,11 @@ class StressTest extends munit.FunSuite:
       def compute(using Async) =
         k.incrementAndGet()
       Async.blocking:
-        val collector = MutableCollector((1L to parallelism).map(_ => Future { compute })*)
+        val collector = MutableCollector[Int]((1L to parallelism).map(_ => Future { compute })*)
         var sum = 0L
         for i <- parallelism + 1 to total do
           sum += collector.results.read().right.get.await
-          collector += Future { compute }
+          collector.unsafeAdd(Future { compute })
         for i <- 1L to parallelism do sum += collector.results.read().right.get.await
         assertEquals(sum, total * (total + 1) / 2)
   }
@@ -40,7 +43,7 @@ class StressTest extends munit.FunSuite:
       var sum = 0L
       for i <- parallelism + 1 to total do
         sum += collector.results.read().right.get.await
-        collector += Future { compute }
+        collector.unsafeAdd(Future { compute })
       for i <- 1L to parallelism do sum += collector.results.read().right.get.await
       assertEquals(sum, total * (total + 1) / 2)
   }

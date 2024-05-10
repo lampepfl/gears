@@ -1,5 +1,7 @@
 package PosixLikeIO.examples
 
+import language.experimental.captureChecking
+
 import gears.async.Async
 import gears.async.default.given
 

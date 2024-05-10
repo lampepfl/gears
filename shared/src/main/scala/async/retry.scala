@@ -1,5 +1,7 @@
 package gears.async
 
+import language.experimental.captureChecking
+
 import gears.async.Async
 import gears.async.AsyncOperations.sleep
 import gears.async.Retry.Delay

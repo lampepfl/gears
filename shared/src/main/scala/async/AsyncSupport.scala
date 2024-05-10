@@ -1,6 +1,9 @@
 package gears.async
 
+import language.experimental.captureChecking
+
 import scala.concurrent.duration._
+import scala.annotation.capability
 
 /** The delimited continuation suspension interface. Represents a suspended computation asking for a value of type `T`
   * to continue (and eventually returning a value of type `R`).
@@ -36,8 +39,8 @@ trait AsyncSupport extends SuspendSupport:
 
 /** A scheduler implementation, with the ability to execute a computation immediately or after a delay. */
 trait Scheduler:
-  def execute(body: Runnable): Unit
-  def schedule(delay: FiniteDuration, body: Runnable): Cancellable
+  def execute(body: Runnable^): Unit
+  def schedule(delay: FiniteDuration, body: Runnable^): Cancellable
 
 object AsyncSupport:
   inline def apply()(using ac: AsyncSupport) = ac

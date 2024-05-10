@@ -1,5 +1,7 @@
 package gears.async
 
+import language.experimental.captureChecking
+
 object JvmAsyncOperations extends AsyncOperations:
 
   private def jvmInterruptible[T](fn: => T)(using Async): T =

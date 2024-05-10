@@ -1,5 +1,7 @@
 package measurements
 
+import language.experimental.captureChecking
+
 import gears.async.default.given
 import gears.async.{Async, BufferedChannel, ChannelMultiplexer, Future, SyncChannel}
 
@@ -65,9 +67,12 @@ def measureIterations[T](action: () => T): Int =
 
   val c1: Double = measureIterations: () =>
     Async.blocking:
-      Async.race(Future { Thread.sleep(10) }, Future { Thread.sleep(100) }, Future { Thread.sleep(50) }).await
-      Async.race(Future { Thread.sleep(50) }, Future { Thread.sleep(10) }, Future { Thread.sleep(100) }).await
-      Async.race(Future { Thread.sleep(100) }, Future { Thread.sleep(50) }, Future { Thread.sleep(10) }).await
+      val r1 = Async.race(Future { Thread.sleep(10) }, Future { Thread.sleep(100) }, Future { Thread.sleep(50) })
+      r1.await
+      val r2 = Async.race(Future { Thread.sleep(50) }, Future { Thread.sleep(10) }, Future { Thread.sleep(100) })
+      r2.await
+      val r3 = Async.race(Future { Thread.sleep(100) }, Future { Thread.sleep(50) }, Future { Thread.sleep(10) })
+      r3.await
 
   val c2: Double = measureIterations: () =>
     Async.blocking:
@@ -95,11 +100,11 @@ def measureIterations[T](action: () => T): Int =
   println("Non-raced futures per second: " + c2_per_second_adjusted)
   println("Overhead: " + (c2_per_second_adjusted / c1_per_second_adjusted))
 
-  /* Linux
+/* Linux
   Raced futures awaited per second: 15.590345727332032
   Non-raced futures per second: 15.597976831457009
   Overhead: 1.0004894762604013
-   */
+ */
 
 @main def measureRaceOverheadVsJava(): Unit =
   given ExecutionContext = ExecutionContext.global
@@ -148,11 +153,11 @@ def measureIterations[T](action: () => T): Int =
   println("Java threads awaited per second: " + c2_per_second_adjusted)
   println("Overhead: " + (c2_per_second_adjusted / c1_per_second_adjusted))
 
-  /* Linux
+/* Linux
   Raced futures awaited per second: 15.411487529449996
   Java threads awaited per second: 15.671210243700953
   Overhead: 1.0168525402726147
-   */
+ */
 
 @main def channelsVsJava(): Unit =
   given ExecutionContext = ExecutionContext.global
@@ -305,13 +310,13 @@ def measureIterations[T](action: () => T): Int =
     Thread.sleep(500)
     println("ChannelMultiplexer over BufferedChannels sends per second: " + cmOverBufferedSendsPerSecond)
 
-  /* Linux
+/* Linux
     Java "channel" sends per second: 8691652
     SyncChannel sends per second: 319371.0
     BufferedChannel sends per second: 308286.0
     ChannelMultiplexer over SyncChannels sends per second: 155737.0
     ChannelMultiplexer over BufferedChannels sends per second: 151995.0
-   */
+ */
 
 /** Warmup for 10 seconds and benchmark for 60 seconds.
   */
@@ -490,7 +495,7 @@ def measureRunTimes[T](action: () => T): TimeMeasurementResult =
   dataAlmostJson.append("}")
   println(dataAlmostJson.toString)
 
-  /* Linux
+/* Linux
   {
     "File writing": {
 
@@ -506,5 +511,4 @@ def measureRunTimes[T](action: () => T): TimeMeasurementResult =
   "Java Files.write": [18.96376850600001, 0.20493288428568684],
   },
   },
-  }
-   */
+  } */
