@@ -19,7 +19,7 @@ case class Retry(
     maximumFailures: Option[Int] = None,
     delay: Delay = Delay.none
 ):
-  /** Runs [[body]] with the current policy in its own scope, returning the result or the last failure as an exception.
+  /** Runs `body` with the current policy in its own scope, returning the result or the last failure as an exception.
     */
   def apply[T](op: => T)(using Async, AsyncOperations): T =
     var failures = 0
@@ -50,7 +50,7 @@ case class Retry(
     assert(max >= 0)
     this.copy(maximumFailures = Some(max))
 
-  /** Set the delay policy between runs. See [[Delay]]. */
+  /** Set the delay policy between runs. See [[Retry.Delay]]. */
   def withDelay(delay: Delay) = this.copy(delay = delay)
 
 object Retry:
@@ -75,7 +75,7 @@ object Retry:
       *
       * @param failuresCount
       *   The number of successive failures until the current attempt. Note that if the last attempt was a success,
-      *   [[failuresCount]] is `0`.
+      *   `failuresCount` is `0`.
       * @param lastDelay
       *   The duration of the last delay.
       */
