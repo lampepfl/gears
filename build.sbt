@@ -10,10 +10,13 @@ lazy val root =
     .settings(
       Seq(
         name := "Gears",
-        organization := "ch.epfl.lamp",
-        version := "0.2.0-SNAPSHOT",
         libraryDependencies += "org.scalameta" %%% "munit" % "1.0.0-RC1" % Test,
-        testFrameworks += new TestFramework("munit.Framework")
+        testFrameworks += new TestFramework("munit.Framework"),
+
+        // publish settings
+        organization := "ch.epfl.lamp",
+        homepage := Some("https://lampepfl.github.io/gears"),
+        licenses := List(License.Apache2)
       )
     )
     .jvmSettings(
