@@ -10,6 +10,7 @@ lazy val root =
     .settings(
       Seq(
         name := "Gears",
+        versionScheme := Some("early-semver"),
         libraryDependencies += "org.scalameta" %%% "munit" % "1.0.0-RC1" % Test,
         testFrameworks += new TestFramework("munit.Framework"),
 
