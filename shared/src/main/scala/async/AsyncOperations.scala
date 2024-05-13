@@ -29,8 +29,8 @@ object AsyncOperations:
   inline def sleep(duration: FiniteDuration)(using AsyncOperations, Async): Unit =
     sleep(duration.toMillis)
 
-/** Runs [[op]] with a timeout. When the timeout occurs, [[op]] is cancelled through the given [[Async]] context, and
-  * [[TimeoutException]] is thrown.
+/** Runs `op` with a timeout. When the timeout occurs, `op` is cancelled through the given [[Async]] context, and
+  * [[java.util.concurrent.TimeoutException]] is thrown.
   */
 def withTimeout[T](timeout: FiniteDuration)(op: Async ?=> T)(using AsyncOperations, Async): T =
   Async.group:
@@ -40,7 +40,7 @@ def withTimeout[T](timeout: FiniteDuration)(op: Async ?=> T)(using AsyncOperatio
         throw TimeoutException()
     )
 
-/** Runs [[op]] with a timeout. When the timeout occurs, [[op]] is cancelled through the given [[Async]] context, and
+/** Runs `op` with a timeout. When the timeout occurs, `op` is cancelled through the given [[Async]] context, and
   * [[None]] is returned.
   */
 def withTimeoutOption[T](timeout: FiniteDuration)(op: Async ?=> T)(using AsyncOperations, Async): Option[T] =
