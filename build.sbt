@@ -15,7 +15,7 @@ lazy val root =
 
         // publish settings
         organization := "ch.epfl.lamp",
-        homepage := Some("https://lampepfl.github.io/gears"),
+        homepage := Some(url("https://lampepfl.github.io/gears")),
         licenses := List(License.Apache2)
       )
     )
