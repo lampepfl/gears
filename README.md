@@ -16,6 +16,26 @@ An Experimental Asynchronous Proramming Library for Scala 3. It aims to be:
 The [Gears Book](https://natsukagami.github.io/gears-book) is a great way to getting started with programming using Gears.
 It provides a tutorial, as well as a guided walkthrough of all concepts available within Gears.
 
+### Adding `gears` to your dependencies
+
+With `sbt`:
+```scala
+  libraryDependencies += "ch.epfl.lamp" %%% "gears" % "<version>",
+```
+
+With `mill`:
+```scala
+def ivyDeps = Agg(
+  // ... other dependencies
+  ivy"ch.epfl.lamp:::gears::<version>"
+)
+```
+
+With `scala` (since 3.5.0) or `scala-cli`:
+```scala
+//> using dep "ch.epfl.lamp:::gears::<version>"
+```
+
 ## Setting up on an unpublished version of Gears
 
 You will need JDK >= 21 and [Scala Native](https://scala-native.org) set up.
