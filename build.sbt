@@ -10,7 +10,10 @@ inThisBuild(
     // publish settings
     organization := "ch.epfl.lamp",
     homepage := Some(url("https://lampepfl.github.io/gears")),
-    licenses := List(License.Apache2)
+    licenses := List(License.Apache2),
+    developers := List(
+      Developer("natsukagami", "Natsu Kagami", "natsukagami@gmail.com", url("https://github.com/natsukagami"))
+    )
   )
 )
 
