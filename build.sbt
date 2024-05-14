@@ -4,7 +4,6 @@ import scalanative.build._
 ThisBuild / scalaVersion := "3.3.3"
 
 publish / skip := true
-// publishSigned / skip := true
 
 lazy val root =
   crossProject(JVMPlatform, NativePlatform)
