@@ -3,6 +3,8 @@ import scalanative.build._
 
 ThisBuild / scalaVersion := "3.3.3"
 
+publish / skip := true
+
 lazy val root =
   crossProject(JVMPlatform, NativePlatform)
     .crossType(CrossType.Full)
@@ -10,10 +12,14 @@ lazy val root =
     .settings(
       Seq(
         name := "Gears",
-        organization := "ch.epfl.lamp",
-        version := "0.2.0-SNAPSHOT",
+        versionScheme := Some("early-semver"),
         libraryDependencies += "org.scalameta" %%% "munit" % "1.0.0-RC1" % Test,
-        testFrameworks += new TestFramework("munit.Framework")
+        testFrameworks += new TestFramework("munit.Framework"),
+
+        // publish settings
+        organization := "ch.epfl.lamp",
+        homepage := Some(url("https://lampepfl.github.io/gears")),
+        licenses := List(License.Apache2)
       )
     )
     .jvmSettings(
