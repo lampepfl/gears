@@ -5,6 +5,15 @@ ThisBuild / scalaVersion := "3.3.3"
 
 publish / skip := true
 
+inThisBuild(
+  Seq(
+    // publish settings
+    organization := "ch.epfl.lamp",
+    homepage := Some(url("https://lampepfl.github.io/gears")),
+    licenses := List(License.Apache2)
+  )
+)
+
 lazy val root =
   crossProject(JVMPlatform, NativePlatform)
     .crossType(CrossType.Full)
@@ -14,12 +23,7 @@ lazy val root =
         name := "Gears",
         versionScheme := Some("early-semver"),
         libraryDependencies += "org.scalameta" %%% "munit" % "1.0.0-RC1" % Test,
-        testFrameworks += new TestFramework("munit.Framework"),
-
-        // publish settings
-        organization := "ch.epfl.lamp",
-        homepage := Some(url("https://lampepfl.github.io/gears")),
-        licenses := List(License.Apache2)
+        testFrameworks += new TestFramework("munit.Framework")
       )
     )
     .jvmSettings(
