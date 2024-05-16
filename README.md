@@ -5,7 +5,7 @@
 [![Homepage](https://img.shields.io/badge/website-homepage-brightgreen)](https://lampepfl.github.io/gears)
 [![API Documentation Link](https://img.shields.io/badge/api-documentation-brightgreen)](https://lampepfl.github.io/gears/api)
 
-An Experimental Asynchronous Proramming Library for Scala 3. It aims to be:
+An Experimental Asynchronous Programming Library for Scala 3. It aims to be:
 - **Simple**: enables direct-style programming (suspending with `.await`, calling Async-functions directly) and comes with few simple concepts.
 - **Structured**: allows an idiomatic way of structuring concurrent programs minimizing computation leaking (*structured concurrency*), while
   providing a toolbox for dealing with external, unstructured events.
