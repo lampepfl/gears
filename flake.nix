@@ -16,6 +16,7 @@
         # system.
         devShells.default = pkgs.mkShell {
           buildInputs = with pkgs; [
+            jdk21
             # Scala deps
             (sbt.override { jre = jdk21; })
             # Scala Native deps
@@ -32,19 +33,6 @@
           shellHook = ''
             export LLVM_BIN=${pkgs.clang}/bin
           '';
-        };
-        # To be used to build `scala-native` and `munit`, as JDK21 + scala-native is not yet doing so well.
-        devShells.dependencies = pkgs.mkShell {
-          buildInputs = with pkgs; [
-            # Scala deps
-            (sbt.override { jre = jdk17; })
-            # Scala Native deps
-            llvm
-            clang
-            boehmgc
-            libunwind
-            zlib
-          ];
         };
       };
       flake = {
