@@ -1,9 +1,10 @@
 import gears.async.AsyncOperations.*
 import gears.async.default.given
-import gears.async.{Async, Future, Listener}
+import gears.async.{Async, Future, Listener, withTimeout}
 
 import java.util.concurrent.CancellationException
 import scala.concurrent.ExecutionContext
+import scala.concurrent.duration.*
 import scala.util.Random
 import scala.util.{Failure, Success, Try}
 
@@ -138,10 +139,11 @@ class SourceBehavior extends munit.FunSuite {
 
   test("all listeners in chain fire") {
     Async.blocking:
-      @volatile var aRan = Future.Promise[Unit]()
-      @volatile var bRan = Future.Promise[Unit]()
+      var aRan = Future.Promise[Unit]()
+      var bRan = Future.Promise[Unit]()
+      val wait = Future.Promise[Unit]()
       val f: Future[Int] = Future {
-        sleep(50)
+        wait.await
         10
       }
       val g = f.transformValuesWith(identity)
@@ -149,9 +151,10 @@ class SourceBehavior extends munit.FunSuite {
       g.onComplete(Listener.acceptingListener { (_, _) => bRan.complete(Success(())) })
       assertEquals(aRan.poll(), None)
       assertEquals(bRan.poll(), None)
+      wait.complete(Success(()))
       f.await
-      Thread.sleep(100) // onComplete of await and manual may be scheduled
-      aRan.zip(bRan).or(Future(sleep(600))).await
+      withTimeout(200.millis):
+        aRan.zip(bRan).await
   }
 
   test("either") {
