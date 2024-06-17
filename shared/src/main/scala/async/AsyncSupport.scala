@@ -27,15 +27,15 @@ trait SuspendSupport:
 
 /** Extends [[SuspendSupport]] with "asynchronous" boundary/resume functions, in the presence of a [[Scheduler]] */
 trait AsyncSupport extends SuspendSupport:
-  type Scheduler <: gears.async.Scheduler
+  val scheduler: Scheduler
 
   /** Resume a [[Suspension]] at some point in the future, scheduled by the scheduler. */
-  private[async] def resumeAsync[T, R](suspension: Suspension[T, R])(arg: T)(using s: Scheduler): Unit =
-    s.execute(() => suspension.resume(arg))
+  private[async] def resumeAsync[T, R](suspension: Suspension[T, R])(arg: T): Unit =
+    scheduler.execute(() => suspension.resume(arg))
 
   /** Schedule a computation with the suspension boundary already created. */
-  private[async] def scheduleBoundary(body: Label[Unit] ?=> Unit)(using s: Scheduler): Unit =
-    s.execute(() => boundary(body))
+  private[async] def scheduleBoundary(body: Label[Unit] ?=> Unit): Unit =
+    scheduler.execute(() => boundary(body))
 
 /** A scheduler implementation, with the ability to execute a computation immediately or after a delay. */
 trait Scheduler:

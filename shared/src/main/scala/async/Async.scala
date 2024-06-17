@@ -34,7 +34,9 @@ import scala.annotation.retainsCap
   * @see
   *   [[Async$.group Async.group]] and [[Future$.apply Future.apply]] for [[Async]]-subscoping operations.
   */
-@capability trait Async(using val support: AsyncSupport, val scheduler: support.Scheduler):
+trait Async(using val support: AsyncSupport) extends caps.Capability:
+  val scheduler = support.scheduler
+
   /** Waits for completion of source `src` and returns the result. Suspends the computation.
     *
     * @see
@@ -50,8 +52,8 @@ import scala.annotation.retainsCap
   def withGroup(group: CompletionGroup): Async
 
 object Async:
-  private class Blocking(val group: CompletionGroup)(using support: AsyncSupport, scheduler: support.Scheduler)
-      extends Async(using support, scheduler):
+  private class Blocking(val group: CompletionGroup)(using support: AsyncSupport)
+      extends Async(using support):
     private val lock = ReentrantLock()
     private val condVar = lock.newCondition()
 
@@ -81,7 +83,7 @@ object Async:
   /** Execute asynchronous computation `body` on currently running thread. The thread will suspend when the computation
     * waits.
     */
-  def blocking[T](body: Async.Spawn ?=> T)(using support: AsyncSupport, scheduler: support.Scheduler): T =
+  def blocking[T](body: Async.Spawn ?=> T)(using support: AsyncSupport): T =
     group(body)(using Blocking(CompletionGroup.Unlinked))
 
   /** Returns the currently executing Async context. Equivalent to `summon[Async]`. */
@@ -92,7 +94,7 @@ object Async:
     * Most functions should not take [[Spawn]] as a parameter, unless the function explicitly wants to spawn "dangling"
     * runnable [[Future]]s. Instead, functions should take [[Async]] and spawn scoped futures within [[Async.group]].
     */
-  @capability opaque type Spawn <: Async = Async
+  opaque type Spawn <: Async = Async
 
   /** Runs `body` inside a spawnable context where it is allowed to spawn concurrently runnable [[Future]]s. When the
     * body returns, all spawned futures are cancelled and waited for.
@@ -280,19 +282,17 @@ object Async:
     * @see
     *   [[Async$.select Async.select]] for a convenient syntax to race sources and awaiting them with [[Async]].
     */
-  def race[T](sources: (Source[T]^)*): Source[T]^{sources*} = raceImpl[T, T]((v, _) => v)(sources)
-
-  def raceAyaya[T](sources: Seq[(Source[T]^)]): Source[T]^{sources*} = raceImpl[T, T]((v, _) => v)(sources)
+  def race[T](sources: (Source[T]^)*): Source[T]^{sources*} = raceImpl((v: T, _: SourceSymbol[T]) => v)(sources)
 
   /** Like [[race]], but the returned value includes a reference to the upstream source that the item came from.
     * @see
     *   [[Async$.select Async.select]] for a convenient syntax to race sources and awaiting them with [[Async]].
     */
   def raceWithOrigin[T](sources: (Source[T]^)*): Source[(T, SourceSymbol[T])]^{sources*} =
-    raceImpl[(T, SourceSymbol[T]), T]((v, src) => (v, src))(sources)
+    raceImpl((v: T, src: SourceSymbol[T]) => (v, src))(sources)
 
   /** Pass first result from any of `sources` to the continuation */
-  private def raceImpl[T, U](map: (U, SourceSymbol[U]) -> T)(sources: Seq[Source[U]^]): Source[T]^{sources*} =
+  private def raceImpl[T, U, SU <: Source[U]^](map: (U, SourceSymbol[U]) -> T)(sources: Seq[SU]): Source[T] =
     new Source[T]:
       val selfSrc = this
       def poll(k: Listener[T]^): Boolean =
@@ -309,8 +309,10 @@ object Async:
 
         found
 
+      def dropAll(l: Listener[U]^) = sources.foreach(_.dropListener(l))
+
       def onComplete(k: Listener[T]^): Unit =
-        val listener: Listener[U]^{k, sources*} = new Listener.ForwardingListener[U](this, k) {
+        val listener: Listener[U]^{k} = new Listener.ForwardingListener[U](this, k) {
           val self = this
           inline def lockIsOurs = k.lock == null
           val lock =
@@ -326,7 +328,7 @@ object Async:
                         found = true
                         old
                       }
-                    then sources.foreach(_.dropListener(self)) // same as dropListener(k), but avoids an allocation
+                    then dropAll(self) // same as dropListener(k), but avoids an allocation
                     false
                   else if found then
                     k.lock.release()
@@ -408,10 +410,10 @@ object Async:
     * )
     *   }}}
     */
-  def select[T](cases: (SelectCase[T]^)*)(using Async) =
+  def select[T, SC <: (SelectCase[T]^)](cases: SC*)(using Async) =
     val (input, which) = raceWithOrigin(cases.map(_._1)*).awaitResult
-    val SelectCase(_, handler) = cases.find(_._1.symbol == which).get
-    handler.asInstanceOf[input.type => T](input)
+    val sc = cases.find(_._1.symbol == which).get
+    sc.f.asInstanceOf[input.type => T](input)
 
   /** Race two sources, wrapping them respectively in [[Left]] and [[Right]] cases.
     * @return

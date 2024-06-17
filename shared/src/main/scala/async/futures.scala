@@ -127,7 +127,7 @@ object Future:
         src.dropListener(listener)
         ac.support.resumeAsync(suspension)(Failure(new CancellationException()))
 
-  private class FutureAsync(val group: CompletionGroup)(using ac: Async, label: ac.support.Label[Unit]) extends Async(using ac.support, ac.scheduler):
+  private class FutureAsync(val group: CompletionGroup)(using ac: Async, label: ac.support.Label[Unit]) extends Async(using ac.support):
    self: Async^{ac} =>
     /** Await a source first by polling it, and, if that fails, by suspending in a onComplete call.
       */
@@ -181,7 +181,7 @@ object Future:
     */
   def apply[T](body: Async.Spawn ?=> T)(using async: Async, spawnable: Async.Spawn)
     (using async.type =:= spawnable.type): Future[T]^{body, spawnable} =
-    RunnableFuture(body)
+    RunnableFuture(body)(using spawnable)
 
   /** A future that is immediately completed with the given result. */
   def now[T](result: Try[T]): Future[T] =
@@ -301,7 +301,7 @@ object Future:
       * may be used. The handler should eventually complete the Future using one of complete/resolve/reject*. The
       * default handler is set up to [[rejectAsCancelled]] immediately.
       */
-    def onCancel(handler: () => Unit): Unit
+    def onCancel(handler: () -> Unit): Unit
   end Resolver
 
   /** Create a promise that may be completed asynchronously using external means.
@@ -311,10 +311,10 @@ object Future:
     *
     * If the external operation supports cancellation, the body can register one handler using [[Resolver.onCancel]].
     */
-  def withResolver[T](body: Resolver[T] => Unit): Future[T] =
+  def withResolver[T](body: Resolver[T]^ => Unit): Future[T] =
     val future = new CoreFuture[T] with Resolver[T] with Promise[T] {
-      @volatile var cancelHandle: (() => Unit) @uncheckedCaptures = () => rejectAsCancelled()
-      override def onCancel(handler: () => Unit): Unit = cancelHandle = handler 
+      @volatile var cancelHandle: (() -> Unit) = () => rejectAsCancelled()
+      override def onCancel(handler: () -> Unit): Unit = cancelHandle = handler
       override def complete(result: Try[T]): Unit = super.complete(result)
 
       override def cancel(): Unit =
@@ -339,13 +339,13 @@ object Future:
     *   [[Future.awaitAll]] and [[Future.awaitFirst]] for simple usage of the collectors to get all results or the first
     *   succeeding one.
     */
-  class Collector[T](futures: (Future[T]^)*):
-    private val ch = UnboundedChannel[Future[T]^{futures*}]()
+  class Collector[T, FT <: Future[T]^](futures: FT*):
+    private val ch = UnboundedChannel[FT]()
 
-    private val futureRefs = mutable.Map[Async.SourceSymbol[Try[T]], Future[T]^{futures*}]()
+    private val futureRefs = mutable.Map[Async.SourceSymbol[Try[T]], FT]()
 
     /** Output channels of all finished futures. */
-    final def results: ReadableChannel[Future[T]^{futures*}] = ch.asReadable
+    final def results: ReadableChannel[FT] = ch.asReadable
 
     private val listener = Listener((_, futRef) =>
       // safe, as we only attach this listener to Future[T]
@@ -353,10 +353,10 @@ object Future:
       val fut = futureRefs.synchronized:
         // futureRefs.remove(ref).get
         futureRefs(ref)
-      ch.sendImmediately(futureRefs(fut))
+      ch.sendImmediately(futureRefs(fut.symbol))
     )
 
-    protected final def addFuture(future: Future[T]^{futures*}) =
+    protected final def addFuture(future: FT) =
       futureRefs.synchronized:
         futureRefs += (future.symbol -> future)
       future.onComplete(listener)
@@ -365,21 +365,21 @@ object Future:
   end Collector
 
   /** Like [[Collector]], but exposes the ability to add futures after creation. */
-  class MutableCollector[T](futures: (Future[T]^)*) extends Collector[T](futures*):
+  class MutableCollector[T, FT <: Future[T]^](futures: FT*) extends Collector[T, FT](futures*):
     /** Add a new [[Future]] into the collector. */
-    def add(future: Future[T]^{futures*}): Unit = addFuture(future)
-    def +=(future: Future[T]^{futures*}) = add(future)
+    def add(future: FT): Unit = addFuture(future)
+    def +=(future: FT) = add(future)
 
-  extension [T](fs: Seq[Future[T]^])
+  extension [T, FT <: Future[T]^](fs: Seq[FT])
     /** `.await` for all futures in the sequence, returns the results in a sequence, or throws if any futures fail. */
     def awaitAll(using Async) =
-      val collector = Collector(fs*)
+      val collector = Collector[T, FT](fs*)
       for _ <- fs do collector.results.read().right.get.await
       fs.map(_.await)
 
     /** Like [[awaitAll]], but cancels all futures as soon as one of them fails. */
     def awaitAllOrCancel(using Async) =
-      val collector = Collector(fs*)
+      val collector = Collector[T, FT](fs*)
       try
         for _ <- fs do collector.results.read().right.get.await
         fs.map(_.await)
@@ -390,20 +390,21 @@ object Future:
 
     /** Race all futures, returning the first successful value. Throws the last exception received, if everything fails.
       */
-    def awaitFirst(using Async): T = awaitFirstImpl(false)
+    def awaitFirst(using Async): T = impl.awaitFirstImpl[T, FT](fs, false)
 
     /** Like [[awaitFirst]], but cancels all other futures as soon as the first future succeeds. */
-    def awaitFirstWithCancel(using Async): T = awaitFirstImpl(true)
+    def awaitFirstWithCancel(using Async): T = impl.awaitFirstImpl[T, FT](fs, true)
 
-    private inline def awaitFirstImpl(withCancel: Boolean)(using Async): T =
-      val collector = Collector(fs*)
+  private object impl:
+    def awaitFirstImpl[T, FT <: Future[T]^](fs: Seq[FT], withCancel: Boolean)(using Async): T =
+      val collector = Collector[T, FT](fs*)
       @scala.annotation.tailrec
       def loop(attempt: Int): T =
         collector.results.read().right.get.awaitResult match
           case Failure(exception) =>
             if attempt == fs.length then /* everything failed */ throw exception else loop(attempt + 1)
           case Success(value) =>
-            inline if withCancel then fs.foreach(_.cancel())
+            if withCancel then fs.foreach(_.cancel())
             value
       loop(1)
 end Future

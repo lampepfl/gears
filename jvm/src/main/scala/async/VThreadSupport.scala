@@ -17,12 +17,13 @@ object VThreadScheduler extends Scheduler:
   override def execute(body: Runnable^): Unit =
     val th = VTFactory.newThread(body)
     th.start()
+    ()
 
   override def schedule(delay: FiniteDuration, body: Runnable^): Cancellable =
     val sr = ScheduledRunnable(delay, body)
-    () => sr.cancel()
+    sr
 
-  private class ScheduledRunnable(delay: FiniteDuration, body: Runnable^) extends Cancellable { 
+  private class ScheduledRunnable(delay: FiniteDuration, @constructorOnly body: Runnable^) extends Cancellable {
     @volatile var interruptGuard = true // to avoid interrupting the body
 
     val th = VTFactory.newThread: () =>
@@ -44,7 +45,7 @@ object VThreadScheduler extends Scheduler:
 
 object VThreadSupport extends AsyncSupport:
 
-  type Scheduler = VThreadScheduler.type
+  val scheduler = VThreadScheduler
 
   private final class VThreadLabel[R]():
     private var result: Option[R] = None
@@ -111,11 +112,11 @@ object VThreadSupport extends AsyncSupport:
 
     label.waitResult()
 
-  override private[async] def resumeAsync[T, R](suspension: Suspension[T, R])(arg: T)(using Scheduler): Unit =
+  override private[async] def resumeAsync[T, R](suspension: Suspension[T, R])(arg: T): Unit =
     suspension.l.clearResult()
     suspension.setInput(arg)
 
-  override def scheduleBoundary(body: (Label[Unit]) ?=> Unit)(using Scheduler): Unit =
+  override def scheduleBoundary(body: (Label[Unit]) ?=> Unit): Unit =
     VThreadScheduler.execute: () =>
       val label = VThreadLabel[Unit]()
       body(using label)
