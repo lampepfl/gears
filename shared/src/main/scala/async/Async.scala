@@ -95,21 +95,33 @@ object Async:
   def group[T](body: Async.Spawn ?=> T)(using Async): T =
     withNewCompletionGroup(CompletionGroup().link())(body)
 
+  private def cancelAndWaitGroup(group: CompletionGroup)(using async: Async) =
+    val completionAsync =
+      if CompletionGroup.Unlinked == async.group
+      then async
+      else async.withGroup(CompletionGroup.Unlinked)
+    group.cancel()
+    group.waitCompletion()(using completionAsync)
+
   /** Runs a body within another completion group. When the body returns, the group is cancelled and its completion
     * awaited with the `Unlinked` group.
     */
   private[async] def withNewCompletionGroup[T](group: CompletionGroup)(body: Async.Spawn ?=> T)(using
       async: Async
   ): T =
-    val completionAsync =
-      if CompletionGroup.Unlinked == async.group
-      then async
-      else async.withGroup(CompletionGroup.Unlinked)
-
     try body(using async.withGroup(group))
-    finally
-      group.cancel()
-      group.waitCompletion()(using completionAsync)
+    finally cancelAndWaitGroup(group)(using async)
+
+  /** A Resource that grants access to the [[Spawn]] capability. On cleanup, every spawned [[Future]] is cancelled and
+    * awaited, similar to [[Async.group]].
+    *
+    * Note that the [[Spawn]] from the resource must not be used for awaiting after allocation.
+    */
+  val spawning = new Resource[Spawn]:
+    override def use[V](body: Spawn => V)(using Async): V = group(spawn ?=> body(spawn))
+    override def allocated(using allocAsync: Async): (Spawn, (Async) ?=> Unit) =
+      val group = CompletionGroup() // not linked to allocAsync's group because it would not unlink itself
+      (allocAsync.withGroup(group), closeAsync ?=> cancelAndWaitGroup(group)(using closeAsync))
 
   /** An asynchronous data source. Sources can be persistent or ephemeral. A persistent source will always pass same
     * data to calls of [[Source!.poll]] and [[Source!.onComplete]]. An ephemeral source can pass new data in every call.
