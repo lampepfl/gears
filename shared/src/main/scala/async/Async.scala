@@ -318,14 +318,14 @@ object Async:
                 def acquire() =
                   if found then false
                   else
-                    acquireLock()
+                    numberedLock.lock()
                     if found then
-                      releaseLock()
+                      numberedLock.unlock()
                       // no cleanup needed here, since we have done this by an earlier `complete` or `lockNext`
                       false
                     else true
                 def release() =
-                  releaseLock()
+                  numberedLock.unlock()
 
           var found = false
 
