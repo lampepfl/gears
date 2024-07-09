@@ -109,7 +109,7 @@ object Future:
 
   private class CancelSuspension[U](val src: Async.Source[U]^)(val ac: Async, val suspension: ac.support.Suspension[Try[U], Unit]) extends Cancellable:
    self: CancelSuspension[U]^{src, ac} =>
-    var listener: Listener[U]^{ac} = Listener.acceptingListener[U]: (x, _) =>
+    val listener: Listener[U]^{ac} = Listener.acceptingListener[U]: (x, _) =>
       val completedBefore = complete()
       if !completedBefore then
         ac.support.resumeAsync(suspension)(Success(x))
@@ -128,7 +128,6 @@ object Future:
         ac.support.resumeAsync(suspension)(Failure(new CancellationException()))
 
   private class FutureAsync(val group: CompletionGroup)(using ac: Async, label: ac.support.Label[Unit]) extends Async(using ac.support):
-   self: Async^{ac} =>
     /** Await a source first by polling it, and, if that fails, by suspending in a onComplete call.
       */
     override def await[U](src: Async.Source[U]^): U =
@@ -137,7 +136,7 @@ object Future:
         .poll()
         .getOrElse:
           val res = ac.support.suspend[Try[U], Unit](k =>
-            val cancellable = CancelSuspension(src)(ac, k)
+            val cancellable: CancelSuspension[U]^{src, ac} = CancelSuspension(src)(ac, k)
             // val listener: Listener[U] = Listener.acceptingListener[U]: (x, _) => ???
               // val completedBefore = cancellable.complete()
               // if !completedBefore then ac.support.resumeAsync(k)(Success(x))
@@ -339,13 +338,13 @@ object Future:
     *   [[Future.awaitAll]] and [[Future.awaitFirst]] for simple usage of the collectors to get all results or the first
     *   succeeding one.
     */
-  class Collector[T, FT <: Future[T]^](futures: FT*):
-    private val ch = UnboundedChannel[FT]()
+  class Collector[T](val futures: Seq[Future[T]^]):
+    private val ch = UnboundedChannel[Future[T]^{futures*}]()
 
-    private val futureRefs = mutable.Map[Async.SourceSymbol[Try[T]], FT]()
+    private val futureRefs = mutable.Map[Async.SourceSymbol[Try[T]], Future[T]^{futures*}]()
 
     /** Output channels of all finished futures. */
-    final def results: ReadableChannel[FT] = ch.asReadable
+    final def results: ReadableChannel[Future[T]^{futures*}] = ch.asReadable
 
     private val listener = Listener((_, futRef) =>
       // safe, as we only attach this listener to Future[T]
@@ -356,7 +355,7 @@ object Future:
       ch.sendImmediately(futureRefs(fut.symbol))
     )
 
-    protected final def addFuture(future: FT) =
+    protected final def addFuture(future: Future[T]^{futures*}) =
       futureRefs.synchronized:
         futureRefs += (future.symbol -> future)
       future.onComplete(listener)
@@ -365,23 +364,25 @@ object Future:
   end Collector
 
   /** Like [[Collector]], but exposes the ability to add futures after creation. */
-  class MutableCollector[T, FT <: Future[T]^](futures: FT*) extends Collector[T, FT](futures*):
+  class MutableCollector[T](futures: Seq[Future[T]^]) extends Collector[T](futures):
     /** Add a new [[Future]] into the collector. */
-    def add(future: FT): Unit = addFuture(future)
-    def +=(future: FT) = add(future)
+    def add(future: Future[T]^{futures*}): Unit = addFuture(future)
+    def +=(future: Future[T]^{futures*}) = add(future)
 
-  extension [T, FT <: Future[T]^](fs: Seq[FT])
+  extension [T](fs: Seq[Future[T]^])
     /** `.await` for all futures in the sequence, returns the results in a sequence, or throws if any futures fail. */
     def awaitAll(using Async) =
-      val collector = Collector[T, FT](fs*)
-      for _ <- fs do collector.results.read().right.get.await
+      val collector = Collector(fs)
+      for _ <- fs do
+        val fut: Future[T]^{fs*} = collector.results.read().right.get
+        fut.await
       fs.map(_.await)
 
     /** Like [[awaitAll]], but cancels all futures as soon as one of them fails. */
     def awaitAllOrCancel(using Async) =
-      val collector = Collector[T, FT](fs*)
+      val collector = Collector[T](fs)
       try
-        for _ <- fs do collector.results.read().right.get.await
+        for _ <- fs do ??? // collector.results.read().right.get.await
         fs.map(_.await)
       catch
         case NonFatal(e) =>
@@ -390,17 +391,18 @@ object Future:
 
     /** Race all futures, returning the first successful value. Throws the last exception received, if everything fails.
       */
-    def awaitFirst(using Async): T = impl.awaitFirstImpl[T, FT](fs, false)
+    def awaitFirst(using Async): T = impl.awaitFirstImpl[T](fs, false)
 
     /** Like [[awaitFirst]], but cancels all other futures as soon as the first future succeeds. */
-    def awaitFirstWithCancel(using Async): T = impl.awaitFirstImpl[T, FT](fs, true)
+    def awaitFirstWithCancel(using Async): T = impl.awaitFirstImpl[T](fs, true)
 
   private object impl:
-    def awaitFirstImpl[T, FT <: Future[T]^](fs: Seq[FT], withCancel: Boolean)(using Async): T =
-      val collector = Collector[T, FT](fs*)
+    def awaitFirstImpl[T](fs: Seq[Future[T]^], withCancel: Boolean)(using Async): T =
+      val collector = Collector[T](fs)
       @scala.annotation.tailrec
       def loop(attempt: Int): T =
-        collector.results.read().right.get.awaitResult match
+        val fut: Future[T]^{fs*} = ??? // collector.results.read().right.get
+        fut.awaitResult match
           case Failure(exception) =>
             if attempt == fs.length then /* everything failed */ throw exception else loop(attempt + 1)
           case Success(value) =>

@@ -7,6 +7,7 @@ import java.util.concurrent.locks.ReentrantLock
 import scala.annotation.unchecked.uncheckedVariance
 import scala.concurrent.duration.FiniteDuration
 import scala.annotation.constructorOnly
+import scala.collection.mutable
 
 object VThreadScheduler extends Scheduler:
   private val VTFactory = Thread
@@ -19,17 +20,25 @@ object VThreadScheduler extends Scheduler:
     th.start()
     ()
 
+  private val cancellables = mutable.Map[Cancellable.Id, ScheduledRunnable^]()
+
   override def schedule(delay: FiniteDuration, body: Runnable^): Cancellable =
     val sr = ScheduledRunnable(delay, body)
-    sr
+    val id = sr.id
+    () => cancellables(id).cancel()
 
-  private class ScheduledRunnable(delay: FiniteDuration, @constructorOnly body: Runnable^) extends Cancellable {
+  private class ScheduledRunnable(delay: FiniteDuration, body: Runnable^) extends Cancellable {
     @volatile var interruptGuard = true // to avoid interrupting the body
 
     val th = VTFactory.newThread: () =>
       try Thread.sleep(delay.toMillis)
       catch case e: InterruptedException => () /* we got cancelled, don't propagate */
-      if ScheduledRunnable.interruptGuardVar.getAndSet(this, false) then body.run()
+      if ScheduledRunnable.interruptGuardVar.getAndSet(this, false) then
+        cancellables += (id -> this)
+        try
+          body.run()
+        finally
+          cancellables -= id
     th.start()
 
     final override def cancel(): Unit =

@@ -12,10 +12,10 @@ import scala.util.boundary
 
 type Result[+T, +E] = Either[E, T]
 object Result:
-  @capability opaque type Label[-T, -E] = boundary.Label[Result[T, E]]
+  opaque type Label[-T, -E] = boundary.Label[Result[T, E]]
   // ^ doesn't work?
 
-  def apply[T, E](body: Label[T, E] ?=> T): Result[T, E] =
+  def apply[T, E](body: Label[T, E]^ ?=> T): Result[T, E] =
     boundary(Right(body))
 
   extension [U, E](r: Result[U, E]^)(using Label[Nothing, E]^)
@@ -30,8 +30,8 @@ class CaptureCheckingBehavior extends munit.FunSuite:
     // don't do this in real code! capturing Async.blocking's Async context across functions is hard to track
     Async.blocking: async ?=>
       def good1[T, E](frs: List[Future[Result[T, E]]^]): Future[Result[List[T], E]]^{async} =
-        Future: 
-          Result: 
+        Future: fut ?=>
+          Result: ret ?=>
             frs.map(_.await.ok)
 
       def good2[T, E](rf: Result[Future[T]^, E]): Future[Result[T, E]]^{async} =

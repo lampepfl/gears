@@ -193,7 +193,7 @@ object Async:
       * @see
       *   [[Source!.awaitResult awaitResult]] for non-unwrapping await.
       */
-    inline def await(using Async): T = src.awaitResult.get
+    def await(using Async): T = src.awaitResult.get
   extension [E, T](src: Source[Either[E, T]]^)
     /** Waits for an item to arrive from the source, then automatically unwraps it. Suspends until an item returns.
       * @see
