@@ -114,7 +114,7 @@ class CancellationBehavior extends munit.FunSuite:
           sleep(500)
           x1 = 1
         x2 = 1
-      Async.group:
+      Async.group: groupSpawn ?=>
         Async.current.group.cancel() // cancel now
         f.link()
         assertEquals(x1, 0)

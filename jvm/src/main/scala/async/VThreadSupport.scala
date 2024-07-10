@@ -23,11 +23,13 @@ object VThreadScheduler extends Scheduler:
   private val cancellables = mutable.Map[Cancellable.Id, ScheduledRunnable^]()
 
   override def schedule(delay: FiniteDuration, body: Runnable^): Cancellable =
-    val sr = ScheduledRunnable(delay, body)
-    val id = sr.id
-    () => cancellables(id).cancel()
+    import caps.unsafe.unsafeAssumePure
 
-  private class ScheduledRunnable(delay: FiniteDuration, body: Runnable^) extends Cancellable {
+    val sr = ScheduledRunnable(delay, body)
+    // SAFETY: should not be able to access body, only for cancellation
+    sr.unsafeAssumePure: Cancellable
+
+  private final class ScheduledRunnable(delay: FiniteDuration, body: Runnable^) extends Cancellable {
     @volatile var interruptGuard = true // to avoid interrupting the body
 
     val th = VTFactory.newThread: () =>

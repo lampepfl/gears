@@ -286,11 +286,12 @@ private object Dummy extends Async.Source[Nothing]:
   def dropListener(k: Listener[Nothing]^): Unit = ()
 
 private class TSource(using asst: munit.Assertions) extends Async.Source[Int]:
-  var listener: Option[(Listener[Int]^) @scala.annotation.unchecked.uncheckedCaptures] = None
+  var listener: Option[Listener[Int]] = None
   def poll(k: Listener[Int]^): Boolean = false
   def onComplete(k: Listener[Int]^): Unit =
+    import caps.unsafe.unsafeAssumePure
     assert(listener.isEmpty)
-    listener = Some(k)
+    listener = Some(k.unsafeAssumePure)
   def dropListener(k: Listener[Int]^): Unit =
     if listener.isDefined then
       asst.assert(k == listener.get)

@@ -87,7 +87,7 @@ object Async:
     group(body)(using Blocking(CompletionGroup.Unlinked))
 
   /** Returns the currently executing Async context. Equivalent to `summon[Async]`. */
-  inline def current(using async: Async): Async = async
+  /* inline buggy atm */def current(using async: Async): async.type = async
 
   /** [[Async.Spawn]] is a special subtype of [[Async]], also capable of spawning runnable [[Future]]s.
     *

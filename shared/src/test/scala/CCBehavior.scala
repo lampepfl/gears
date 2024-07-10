@@ -18,23 +18,24 @@ object Result:
   def apply[T, E](body: Label[T, E]^ ?=> T): Result[T, E] =
     boundary(Right(body))
 
-  extension [U, E](r: Result[U, E]^)(using Label[Nothing, E]^)
+  extension [U, E](r: Result[U, E])(using Label[Nothing, E]^)
     def ok: U = r match
       case Left(value)  => boundary.break(Left(value))
       case Right(value) => value
 
 class CaptureCheckingBehavior extends munit.FunSuite:
   import Result.*
+  import caps.unboxed
 
   test("good") {
     // don't do this in real code! capturing Async.blocking's Async context across functions is hard to track
     Async.blocking: async ?=>
-      def good1[T, E](frs: List[Future[Result[T, E]]^]): Future[Result[List[T], E]]^{async} =
+      def good1[T, E](@unboxed frs: List[Future[Result[T, E]]^]): Future[Result[List[T], E]]^{frs*, async} =
         Future: fut ?=>
           Result: ret ?=>
             frs.map(_.await.ok)
 
-      def good2[T, E](rf: Result[Future[T]^, E]): Future[Result[T, E]]^{async} =
+      def good2[T, E](@unboxed rf: Result[Future[T]^, E]): Future[Result[T, E]]^{rf*, async} =
         Future:
           Result:
             rf.ok.await // OK, Future argument has type Result[T]
