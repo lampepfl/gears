@@ -34,9 +34,7 @@ import scala.annotation.retainsCap
   * @see
   *   [[Async$.group Async.group]] and [[Future$.apply Future.apply]] for [[Async]]-subscoping operations.
   */
-trait Async(using val support: AsyncSupport) extends caps.Capability:
-  val scheduler = support.scheduler
-
+trait Async(using val support: AsyncSupport, val scheduler: support.Scheduler) extends caps.Capability:
   /** Waits for completion of source `src` and returns the result. Suspends the computation.
     *
     * @see
@@ -52,8 +50,8 @@ trait Async(using val support: AsyncSupport) extends caps.Capability:
   def withGroup(group: CompletionGroup): Async
 
 object Async:
-  private class Blocking(val group: CompletionGroup)(using support: AsyncSupport)
-      extends Async(using support):
+  private class Blocking(val group: CompletionGroup)(using support: AsyncSupport, scheduler: support.Scheduler)
+      extends Async(using support, scheduler):
     private val lock = ReentrantLock()
     private val condVar = lock.newCondition()
 
@@ -83,7 +81,7 @@ object Async:
   /** Execute asynchronous computation `body` on currently running thread. The thread will suspend when the computation
     * waits.
     */
-  def blocking[T](body: Async.Spawn ?=> T)(using support: AsyncSupport): T =
+  def blocking[T](body: Async.Spawn ?=> T)(using support: AsyncSupport, scheduler: support.Scheduler): T =
     group(body)(using Blocking(CompletionGroup.Unlinked))
 
   /** Returns the currently executing Async context. Equivalent to `summon[Async]`. */

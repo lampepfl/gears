@@ -48,8 +48,7 @@ object VThreadScheduler extends Scheduler:
         .findVarHandle(classOf[ScheduledRunnable], "interruptGuard", classOf[Boolean])
 
 object VThreadSupport extends AsyncSupport:
-
-  val scheduler = VThreadScheduler
+  type Scheduler = VThreadScheduler.type
 
   private final class VThreadLabel[R]():
     private var result: Option[R] = None
@@ -116,11 +115,11 @@ object VThreadSupport extends AsyncSupport:
 
     label.waitResult()
 
-  override private[async] def resumeAsync[T, R](suspension: Suspension[T, R])(arg: T): Unit =
+  override private[async] def resumeAsync[T, R](suspension: Suspension[T, R])(arg: T)(using Scheduler): Unit =
     suspension.l.clearResult()
     suspension.setInput(arg)
 
-  override def scheduleBoundary(body: (Label[Unit]) ?=> Unit): Unit =
+  override def scheduleBoundary(body: (Label[Unit]) ?=> Unit)(using Scheduler): Unit =
     VThreadScheduler.execute: () =>
       val label = VThreadLabel[Unit]()
       body(using label)

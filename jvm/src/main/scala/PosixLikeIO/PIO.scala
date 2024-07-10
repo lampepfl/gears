@@ -1,6 +1,6 @@
 package PosixLikeIO
 
-import gears.async.AsyncSupport
+import gears.async.Scheduler
 import gears.async.default.given
 import gears.async.{Async, Future}
 
@@ -139,8 +139,8 @@ class SocketUDP() {
 
 object SocketUDP:
   extension [T](resolver: Future.Resolver[T])
-    private[SocketUDP] inline def spawn(body: => T)(using support: AsyncSupport) =
-      support.scheduler.execute(() =>
+    private[SocketUDP] inline def spawn(body: => T)(using s: Scheduler) =
+      s.execute(() =>
         resolver.complete(Try(body).recover { case _: InterruptedException =>
           throw CancellationException()
         })
