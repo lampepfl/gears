@@ -1,4 +1,7 @@
 package gears.async
+
+// import language.experimental.captureChecking
+
 import gears.async.Async.Source
 import gears.async.Listener.acceptingListener
 import gears.async.listeners.lockBoth

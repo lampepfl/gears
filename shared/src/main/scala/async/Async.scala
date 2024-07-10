@@ -8,10 +8,8 @@ import gears.async.Listener.withLock
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.locks.ReentrantLock
-import scala.annotation.capability
 import scala.collection.mutable
 import scala.util.boundary
-import scala.annotation.retainsCap
 
 /** The async context: provides the capability to asynchronously [[Async.await await]] for [[Async.Source Source]]s, and
   * defines a scope for structured concurrency through a [[CompletionGroup]].
@@ -280,17 +278,17 @@ object Async:
     * @see
     *   [[Async$.select Async.select]] for a convenient syntax to race sources and awaiting them with [[Async]].
     */
-  def race[T](sources: (Source[T]^)*): Source[T]^{sources*} = raceImpl((v: T, _: SourceSymbol[T]) => v)(sources)
+  def race[T](@caps.unboxed sources: (Source[T]^)*): Source[T]^{sources*} = raceImpl((v: T, _: SourceSymbol[T]) => v)(sources)
 
   /** Like [[race]], but the returned value includes a reference to the upstream source that the item came from.
     * @see
     *   [[Async$.select Async.select]] for a convenient syntax to race sources and awaiting them with [[Async]].
     */
-  def raceWithOrigin[T](sources: (Source[T]^)*): Source[(T, SourceSymbol[T])]^{sources*} =
+  def raceWithOrigin[T](@caps.unboxed sources: (Source[T]^)*): Source[(T, SourceSymbol[T])]^{sources*} =
     raceImpl((v: T, src: SourceSymbol[T]) => (v, src))(sources)
 
   /** Pass first result from any of `sources` to the continuation */
-  private def raceImpl[T, U, SU <: Source[U]^](map: (U, SourceSymbol[U]) -> T)(sources: Seq[SU]): Source[T] =
+  private def raceImpl[T, U](map: (U, SourceSymbol[U]) -> T)(@caps.unboxed sources: Seq[Source[U]^]): Source[T]^{sources*} =
     new Source[T]:
       val selfSrc = this
       def poll(k: Listener[T]^): Boolean =
@@ -310,7 +308,7 @@ object Async:
       def dropAll(l: Listener[U]^) = sources.foreach(_.dropListener(l))
 
       def onComplete(k: Listener[T]^): Unit =
-        val listener: Listener[U]^{k} = new Listener.ForwardingListener[U](this, k) {
+        val listener: Listener[U]^{k, sources*} = new Listener.ForwardingListener[U](this, k) {
           val self = this
           inline def lockIsOurs = k.lock == null
           val lock =
@@ -372,21 +370,29 @@ object Async:
     * @see
     *   [[Async$.select Async.select]] where [[SelectCase]] is used.
     */
-  case class SelectCase[+T] private[Async] (src: Source[Any]^, f: Nothing => T)
+  trait SelectCase[+T]:
+    type Src
+    val src: Source[Src]^
+    val f: Src => T
+    inline final def apply(input: Src) = f(input)
   //                                        ^ unsafe types, but we only construct SelectCase from `handle` which is safe
 
-  extension [T](src: Source[T]^)
+  extension [T](_src: Source[T]^)
     /** Attach a handler to `src`, creating a [[SelectCase]].
       * @see
       *   [[Async$.select Async.select]] where [[SelectCase]] is used.
       */
-    def handle[U](f: T => U): SelectCase[U]^{src, f} = SelectCase(src, f)
+    def handle[U](_f: T => U): SelectCase[U]^{_src, _f} = new SelectCase:
+      type Src = T
+      val src = _src
+      val f = _f
 
     /** Alias for [[handle]]
       * @see
       *   [[Async$.select Async.select]] where [[SelectCase]] is used.
       */
-    def ~~>[U](f: T => U): SelectCase[U]^{src, f} = src.handle(f)
+    /* TODO: inline after cc-ing channels */
+    def ~~>[U](_f: T => U): SelectCase[U]^{_src, _f} = _src.handle(_f)
 
   /** Race a list of sources with the corresponding handler functions, once an item has come back. Like [[race]],
     * [[select]] guarantees exactly one of the sources are polled. Unlike [[transformValuesWith]], the handler in
@@ -408,10 +414,10 @@ object Async:
     * )
     *   }}}
     */
-  def select[T, SC <: (SelectCase[T]^)](cases: SC*)(using Async) =
-    val (input, which) = raceWithOrigin(cases.map(_._1)*).awaitResult
-    val sc = cases.find(_._1.symbol == which).get
-    sc.f.asInstanceOf[input.type => T](input)
+  def select[T](@caps.unboxed cases: (SelectCase[T]^)*)(using Async) =
+    val (input, which) = raceWithOrigin(cases.map(_.src)*).awaitResult
+    val sc = cases.find(_.src.symbol == which).get
+    sc(input.asInstanceOf[sc.Src])
 
   /** Race two sources, wrapping them respectively in [[Left]] and [[Right]] cases.
     * @return
