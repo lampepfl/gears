@@ -375,7 +375,6 @@ object Async:
     val src: Source[Src]^
     val f: Src => T
     inline final def apply(input: Src) = f(input)
-  //                                        ^ unsafe types, but we only construct SelectCase from `handle` which is safe
 
   extension [T](_src: Source[T]^)
     /** Attach a handler to `src`, creating a [[SelectCase]].
@@ -428,8 +427,8 @@ object Async:
     */
   def either[T1, T2](src1: Source[T1]^, src2: Source[T2]^): Source[Either[T1, T2]]^{src1, src2} =
     // TODO: this is compiling without the ^{src1, src2} annotation!
-    val left: Source[Either[T1, T2]]^{src1} = src1.transformValuesWith(Left(_))
-    val right: Source[Either[T1, T2]]^{src2} = src2.transformValuesWith(Right(_))
+    val left = src1.transformValuesWith(Left(_))
+    val right = src2.transformValuesWith(Right(_))
     // val sources: Seq[Source[Either[T1, T2]]^{src1, src2}] = Seq(left, right)
     race(left, right)
 end Async
