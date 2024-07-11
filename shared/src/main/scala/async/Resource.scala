@@ -13,7 +13,7 @@ trait Resource[+T]:
     * @return
     *   the result of [[body]]
     */
-  def use[V](body: T => Async ?=> V)(using Async): V =
+  def use[V](body: T => V)(using Async): V =
     val res = allocated
     try body(res._1)
     finally res._2
@@ -34,15 +34,15 @@ trait Resource[+T]:
     *   the transformed resource used to access the mapped resource data
     */
   def map[U](fn: T => Async ?=> U): Resource[U] = new Resource[U]:
-    override def use[V](body: U => (Async) ?=> V)(using Async): V = self.use(t => body(fn(t)))
+    override def use[V](body: U => V)(using Async): V = self.use(t => body(fn(t)))
     override def allocated(using Async): (U, (Async) ?=> Unit) =
       val res = self.allocated
-      var failed = true
       try
-        val mapped = fn(res._1)
-        failed = false // don't clean up
-        (mapped, res._2)
-      finally if failed then res._2
+        (fn(res._1), res._2)
+      catch
+        e =>
+          res._2
+          throw e
     override def map[Q](fn2: U => (Async) ?=> Q): Resource[Q] = self.map(t => fn2(fn(t)))
 
   /** Create a derived resource that creates a inner resource from the resource data. The inner resource will be
@@ -54,13 +54,11 @@ trait Resource[+T]:
     *   the transformed resource that provides the two-levels-in-one access
     */
   def flatMap[U](fn: T => Async ?=> Resource[U]): Resource[U] = new Resource[U]:
-    override def use[V](body: U => (Async) ?=> V)(using Async): V = self.use(t => fn(t).use(body))
+    override def use[V](body: U => V)(using Async): V = self.use(t => fn(t).use(body))
     override def allocated(using Async): (U, (Async) ?=> Unit) =
       val res = self.allocated
-      var failed = true
       try
         val mapped = fn(res._1).allocated
-        if mapped != null then failed = false // don't clean up (null with provoke NullPtrE, undefined but caught)
         (
           mapped._1,
           { closeAsync ?=>
@@ -68,7 +66,10 @@ trait Resource[+T]:
             finally res._2(using closeAsync) // then close second, even if first failed
           }
         )
-      finally if failed then res._2
+      catch
+        e =>
+          res._2
+          throw e
 end Resource
 
 object Resource:
@@ -92,6 +93,9 @@ object Resource:
     * [[Future]]s and return a handle to communicate with them. Allocation is only complete after that allocator
     * returns. The resource is only allocated on use.
     *
+    * If the [[Async.Spawn]] capability is used for [[Async.await]]ing, it may only be done synchronously by the
+    * spawnBody.
+    *
     * No presumption is made on reusability of the Resource. Thus, if the [[spawnBody]] is re-runnable, so is the
     * Resource created from it.
     *
@@ -101,4 +105,62 @@ object Resource:
     *   a new resource wrapping access to the spawnBody's results
     */
   inline def spawning[T](inline spawnBody: Async.Spawn ?=> T) = Async.spawning.map(spawn => spawnBody(using spawn))
+
+  /** Create a resource that does not need asynchronous allocation nor cleanup.
+    *
+    * @param data
+    *   the generator that provides the resource element
+    * @return
+    *   a resource wrapping the data provider
+    */
+  inline def just[T](inline data: => T) = apply(data, _ => ())
+
+  /** Create a resource combining access to two separate resources.
+    *
+    * @param res1
+    *   the first resource
+    * @param res2
+    *   the second resource
+    * @param join
+    *   an operator to combine the elements from both resources to that of the combined resource
+    * @return
+    *   a new resource wrapping access to the combined element
+    */
+  def both[T, U, V](res1: Resource[T], res2: Resource[U])(join: (T, U) => V): Resource[V] = new Resource[V]:
+    override def allocated(using Async): (V, (Async) ?=> Unit) =
+      val alloc1 = res1.allocated
+      val alloc2 =
+        try res2.allocated
+        catch
+          e =>
+            alloc1._2
+            throw e
+
+      try
+        val joined = join(alloc1._1, alloc2._1)
+        (
+          joined,
+          { closeAsync ?=>
+            try alloc1._2(using closeAsync)
+            finally alloc2._2(using closeAsync)
+          }
+        )
+      catch
+        e =>
+          try alloc1._2
+          finally alloc2._2
+          throw e
+  end both
+
+  /** Create a resource combining access to a list of resources
+    *
+    * @param ress
+    *   the list of single resources
+    * @return
+    *   the resource of the list of elements provided by the single resources
+    */
+  def all[T](ress: List[Resource[T]]): Resource[List[T]] = ress match
+    case Nil          => just(Nil)
+    case head :: Nil  => head.map(List(_))
+    case head :: next => both(head, all(next))(_ :: _)
 end Resource

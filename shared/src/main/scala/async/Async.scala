@@ -115,10 +115,10 @@ object Async:
   /** A Resource that grants access to the [[Spawn]] capability. On cleanup, every spawned [[Future]] is cancelled and
     * awaited, similar to [[Async.group]].
     *
-    * Note that the [[Spawn]] from the resource should not be used after allocation.
+    * Note that the [[Spawn]] from the resource must not be used for awaiting after allocation.
     */
   val spawning = new Resource[Spawn]:
-    override def use[V](body: Spawn => (Async) ?=> V)(using a: Async): V = group(spawn ?=> body(spawn)(using a))
+    override def use[V](body: Spawn => V)(using Async): V = group(spawn ?=> body(spawn))
     override def allocated(using allocAsync: Async): (Spawn, (Async) ?=> Unit) =
       val group = CompletionGroup() // not linked to allocAsync's group because it would not unlink itself
       (allocAsync.withGroup(group), closeAsync ?=> cancelAndWaitGroup(group)(using closeAsync))

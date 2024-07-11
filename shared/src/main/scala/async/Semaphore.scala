@@ -6,18 +6,12 @@ import java.util.concurrent.atomic.AtomicInteger
 /** A semaphore that manages a number of grants. One can wait to obtain a grant (with [[acquire]]) and return it to the
   * semaphore (with [[release]]).
   *
-  * @param value
-  *   the grant counter
+  * @param initialValue
+  *   the initial counter of this semaphore
   */
-class Semaphore private (private var value: AtomicInteger) extends Async.Source[Unit]:
+class Semaphore(initialValue: Int) extends Async.Source[Unit]:
+  private val value = AtomicInteger(initialValue)
   private val waiting = ConcurrentLinkedQueue[Listener[Unit]]()
-
-  /** Create a semaphore with the given initial number of grants
-    *
-    * @param initialValue
-    *   the initial counter of this semaphore
-    */
-  def this(initialValue: Int) = this(AtomicInteger(initialValue))
 
   override def onComplete(k: Listener[Unit]): Unit =
     if k.acquireLock() then // if k is gone, we are done

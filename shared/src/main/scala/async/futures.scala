@@ -132,7 +132,7 @@ object Future:
 
         // guarded by lock; null = before apply or after resume
         private var sus: ac.support.Suspension[T | Null, Unit] | Null = null
-        private var cancelRequest = false // true = cancellation request received. To be checked after releasing lock.
+        @volatile private var cancelRequest = false // if cancellation request received, checked after releasing lock
 
         // == Function, to be passed to suspend. Call this only once and before any other usage of this class.
         def apply(sus: ac.support.Suspension[T | Null, Unit]): Unit =
