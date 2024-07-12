@@ -35,7 +35,7 @@ object AsyncOperations:
   * [[java.util.concurrent.TimeoutException]] is thrown.
   */
 def withTimeout[T](timeout: FiniteDuration)(op: Async ?=> T)(using AsyncOperations, Async): T =
-  Async.group:
+  Async.group: spawn ?=>
     Async.select(
       Future(op).handle(_.get),
       Future(sleep(timeout)).handle: _ =>
