@@ -278,17 +278,17 @@ object Async:
     * @see
     *   [[Async$.select Async.select]] for a convenient syntax to race sources and awaiting them with [[Async]].
     */
-  def race[T](@caps.unboxed sources: (Source[T]^)*): Source[T]^{sources*} = raceImpl((v: T, _: SourceSymbol[T]) => v)(sources)
+  def race[T](@caps.unbox sources: (Source[T]^)*): Source[T]^{sources*} = raceImpl((v: T, _: SourceSymbol[T]) => v)(sources)
 
   /** Like [[race]], but the returned value includes a reference to the upstream source that the item came from.
     * @see
     *   [[Async$.select Async.select]] for a convenient syntax to race sources and awaiting them with [[Async]].
     */
-  def raceWithOrigin[T](@caps.unboxed sources: (Source[T]^)*): Source[(T, SourceSymbol[T])]^{sources*} =
+  def raceWithOrigin[T](@caps.unbox sources: (Source[T]^)*): Source[(T, SourceSymbol[T])]^{sources*} =
     raceImpl((v: T, src: SourceSymbol[T]) => (v, src))(sources)
 
   /** Pass first result from any of `sources` to the continuation */
-  private def raceImpl[T, U](map: (U, SourceSymbol[U]) -> T)(@caps.unboxed sources: Seq[Source[U]^]): Source[T]^{sources*} =
+  private def raceImpl[T, U](map: (U, SourceSymbol[U]) -> T)(@caps.unbox sources: Seq[Source[U]^]): Source[T]^{sources*} =
     new Source[T]:
       val selfSrc = this
       def poll(k: Listener[T]^): Boolean =
@@ -413,7 +413,7 @@ object Async:
     * )
     *   }}}
     */
-  def select[T](@caps.unboxed cases: (SelectCase[T]^)*)(using Async) =
+  def select[T](@caps.unbox cases: (SelectCase[T]^)*)(using Async) =
     val (input, which) = raceWithOrigin(cases.map(_.src)*).awaitResult
     val sc = cases.find(_.src.symbol == which).get
     sc(input.asInstanceOf[sc.Src])
@@ -426,10 +426,8 @@ object Async:
     *   [[race]] and [[select]] for racing more than two sources.
     */
   def either[T1, T2](src1: Source[T1]^, src2: Source[T2]^): Source[Either[T1, T2]]^{src1, src2} =
-    // TODO: this is compiling without the ^{src1, src2} annotation!
     val left = src1.transformValuesWith(Left(_))
     val right = src2.transformValuesWith(Right(_))
-    // val sources: Seq[Source[Either[T1, T2]]^{src1, src2}] = Seq(left, right)
-    race(left, right)
+    race(Seq(left, right)*)
 end Async
 

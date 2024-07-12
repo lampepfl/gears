@@ -369,7 +369,7 @@ object Future:
     def add(future: Future[T]^{futures*}): Unit = addFuture(future)
     def +=(future: Future[T]^{futures*}) = add(future)
 
-  extension [T](@caps.unboxed fs: Seq[Future[T]^])
+  extension [T](@caps.unbox fs: Seq[Future[T]^])
     /** `.await` for all futures in the sequence, returns the results in a sequence, or throws if any futures fail. */
     def awaitAll(using Async) =
       val collector = Collector(fs*)
@@ -397,7 +397,7 @@ object Future:
     def awaitFirstWithCancel(using Async): T = impl.awaitFirstImpl[T](fs, true)
 
   private object impl:
-    def awaitFirstImpl[T](@caps.unboxed fs: Seq[Future[T]^], withCancel: Boolean)(using Async): T =
+    def awaitFirstImpl[T](@caps.unbox fs: Seq[Future[T]^], withCancel: Boolean)(using Async): T =
       val collector = Collector[T](fs*)
       @scala.annotation.tailrec
       def loop(attempt: Int): T =
