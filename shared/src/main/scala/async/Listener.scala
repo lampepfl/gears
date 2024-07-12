@@ -52,7 +52,7 @@ trait Listener[-T]:
 
 object Listener:
   /** A simple [[Listener]] that always accepts the item and sends it to the consumer. */
-  def acceptingListener[T](consumer: (T, SourceSymbol[T]) => Unit): Listener[T]^{consumer} =
+  /* inline bug */ def acceptingListener[T](consumer: (T, SourceSymbol[T]) => Unit): Listener[T]^{consumer} =
     new Listener[T]:
       val lock = null
       def complete(data: T, source: SourceSymbol[T]) = consumer(data, source)
@@ -64,7 +64,7 @@ object Listener:
     * [[Async.Source.dropListener]] these listeners are compared for equality by the hash of the source and the inner
     * listener.
     */
-  abstract case class ForwardingListener[T](src: Async.Source[?]^, inner: Listener[?]^) extends Listener[T]
+  abstract case class ForwardingListener[-T](src: Async.Source[?]^, inner: Listener[?]^) extends Listener[T]
 
   object ForwardingListener:
     /** Creates an empty [[ForwardingListener]] for equality comparison. */

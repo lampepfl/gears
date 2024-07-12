@@ -2,6 +2,8 @@ package gears.async
 
 import language.experimental.captureChecking
 
+import gears.async.AsyncOperations.sleep
+
 import java.util.concurrent.TimeoutException
 import scala.concurrent.duration.FiniteDuration
 
@@ -19,14 +21,14 @@ object AsyncOperations:
     * @param millis
     *   The duration to suspend, in milliseconds. Must be a positive integer.
     */
-  def sleep(millis: Long)(using AsyncOperations, Async): Unit =
+  inline def sleep(millis: Long)(using AsyncOperations, Async): Unit =
     summon[AsyncOperations].sleep(millis)
 
   /** Suspends the current [[Async]] context for `duration`.
     * @param duration
     *   The duration to suspend. Must be positive.
     */
-  def sleep(duration: FiniteDuration)(using AsyncOperations, Async): Unit =
+  inline def sleep(duration: FiniteDuration)(using AsyncOperations, Async): Unit =
     sleep(duration.toMillis)
 
 /** Runs `op` with a timeout. When the timeout occurs, `op` is cancelled through the given [[Async]] context, and
@@ -36,7 +38,7 @@ def withTimeout[T](timeout: FiniteDuration)(op: Async ?=> T)(using AsyncOperatio
   Async.group:
     Async.select(
       Future(op).handle(_.get),
-      Future(AsyncOperations.sleep(timeout)).handle: _ =>
+      Future(sleep(timeout)).handle: _ =>
         throw TimeoutException()
     )
 
@@ -47,5 +49,5 @@ def withTimeoutOption[T](timeout: FiniteDuration)(op: Async ?=> T)(using AsyncOp
   Async.group:
     Async.select(
       Future(op).handle(v => Some(v.get)),
-      Future(AsyncOperations.sleep(timeout)).handle(_ => None)
+      Future(sleep(timeout)).handle(_ => None)
     )
