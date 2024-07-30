@@ -1,9 +1,13 @@
 package gears.async
 
+import language.experimental.captureChecking
+
 import java.lang.invoke.{MethodHandles, VarHandle}
 import java.util.concurrent.locks.ReentrantLock
 import scala.annotation.unchecked.uncheckedVariance
 import scala.concurrent.duration.FiniteDuration
+import scala.annotation.constructorOnly
+import scala.collection.mutable
 
 object VThreadScheduler extends Scheduler:
   private val VTFactory = Thread
@@ -11,13 +15,19 @@ object VThreadScheduler extends Scheduler:
     .name("gears.async.VThread-", 0L)
     .factory()
 
-  override def execute(body: Runnable): Unit =
+  override def execute(body: Runnable^): Unit =
     val th = VTFactory.newThread(body)
     th.start()
+    ()
 
-  override def schedule(delay: FiniteDuration, body: Runnable): Cancellable = ScheduledRunnable(delay, body)
+  override def schedule(delay: FiniteDuration, body: Runnable^): Cancellable =
+    import caps.unsafe.unsafeAssumePure
 
-  private class ScheduledRunnable(val delay: FiniteDuration, val body: Runnable) extends Cancellable {
+    val sr = ScheduledRunnable(delay, body)
+    // SAFETY: should not be able to access body, only for cancellation
+    sr.unsafeAssumePure: Cancellable
+
+  private final class ScheduledRunnable(delay: FiniteDuration, body: Runnable^) extends Cancellable:
     @volatile var interruptGuard = true // to avoid interrupting the body
 
     val th = VTFactory.newThread: () =>
@@ -28,7 +38,7 @@ object VThreadScheduler extends Scheduler:
 
     final override def cancel(): Unit =
       if ScheduledRunnable.interruptGuardVar.getAndSet(this, false) then th.interrupt()
-  }
+  end ScheduledRunnable
 
   private object ScheduledRunnable:
     val interruptGuardVar =
@@ -38,7 +48,6 @@ object VThreadScheduler extends Scheduler:
         .findVarHandle(classOf[ScheduledRunnable], "interruptGuard", classOf[Boolean])
 
 object VThreadSupport extends AsyncSupport:
-
   type Scheduler = VThreadScheduler.type
 
   private final class VThreadLabel[R]():
