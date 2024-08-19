@@ -1,3 +1,5 @@
+import language.experimental.captureChecking
+
 import gears.async.AsyncOperations.*
 import gears.async.Future.{Promise, zip}
 import gears.async.Listener
@@ -53,7 +55,7 @@ class FutureBehavior extends munit.FunSuite {
         }
         val res = a.or(b).await
         res
-      val _: Future[Int | Boolean] = z
+      val _: Future[Int | Boolean]^{z} = z
       assertEquals(x.await, 33)
       assertEquals(y.await, (22, 11))
   }

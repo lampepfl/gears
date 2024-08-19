@@ -202,11 +202,11 @@ object Future:
   /** A future that immediately rejects with the given exception. Similar to `Future.now(Failure(exception))`. */
   inline def rejected(exception: Throwable): Future[Nothing] = now(Failure(exception))
 
-  extension [T](f1: Future[T])
+  extension [T](f1: Future[T]^)
     /** Parallel composition of two futures. If both futures succeed, succeed with their values in a pair. Otherwise,
       * fail with the failure that was returned first.
       */
-    def zip[U](f2: Future[U]): Future[(T, U)] =
+    def zip[U](f2: Future[U]^): Future[(T, U)]^{f1, f2} =
       Future.withResolver: r =>
         Async
           .either(f1, f2)
@@ -239,14 +239,14 @@ object Future:
       * @see
       *   [[orWithCancel]] for an alternative version where the slower future is cancelled.
       */
-    def or(f2: Future[T]): Future[T] = orImpl(false)(f2)
+    def or(f2: Future[T]^): Future[T]^{f1, f2} = orImpl(false)(f2)
 
     /** Like `or` but the slower future is cancelled. If either task succeeds, succeed with the success that was
       * returned first and the other is cancelled. Otherwise, fail with the failure that was returned last.
       */
-    def orWithCancel(f2: Future[T]): Future[T] = orImpl(true)(f2)
+    def orWithCancel(f2: Future[T]^): Future[T]^{f1, f2} = orImpl(true)(f2)
 
-    inline def orImpl(inline withCancel: Boolean)(f2: Future[T]): Future[T] = Future.withResolver: r =>
+    inline def orImpl(inline withCancel: Boolean)(f2: Future[T]^): Future[T]^{f1, f2} = Future.withResolver: r =>
       Async
         .raceWithOrigin(f1, f2)
         .onComplete(Listener { case ((v, which), _) =>
@@ -375,7 +375,7 @@ object Future:
     inline def add(future: Future[T]^{Cap^}) = addFuture(future)
     inline def +=(future: Future[T]^{Cap^}) = add(future)
 
-  extension [T](fs: Seq[Future[T]])
+  extension [T](@caps.unbox fs: Seq[Future[T]^])
     /** `.await` for all futures in the sequence, returns the results in a sequence, or throws if any futures fail. */
     def awaitAll(using Async) =
       val collector = Collector(fs*)
