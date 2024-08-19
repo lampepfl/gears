@@ -278,7 +278,10 @@ object Async:
     * @see
     *   [[Async$.select Async.select]] for a convenient syntax to race sources and awaiting them with [[Async]].
     */
-  def race[T](@caps.unbox sources: (Source[T]^)*): Source[T]^{sources*} = raceImpl((v: T, _: SourceSymbol[T]) => v)(sources)
+  def race[T](@caps.unbox sources: Seq[Source[T]^]): Source[T]^{sources*} = raceImpl((v: T, _: SourceSymbol[T]) => v)(sources)
+  def race[T](s1: Source[T]^): Source[T]^{s1} = race(Seq(s1))
+  def race[T](s1: Source[T]^, s2: Source[T]^): Source[T]^{s1, s2} = race(Seq(s1, s2))
+  def race[T](s1: Source[T]^, s2: Source[T]^, s3: Source[T]^): Source[T]^{s1, s2, s3} = race(Seq(s1, s2, s3))
 
   /** Like [[race]], but the returned value includes a reference to the upstream source that the item came from.
     * @see
@@ -428,6 +431,6 @@ object Async:
   def either[T1, T2](src1: Source[T1]^, src2: Source[T2]^): Source[Either[T1, T2]]^{src1, src2} =
     val left = src1.transformValuesWith(Left(_))
     val right = src2.transformValuesWith(Right(_))
-    race(Seq(left, right)*)
+    race(left, right)
 end Async
 
