@@ -328,6 +328,27 @@ object Future:
     future
   end withResolver
 
+  sealed abstract class BaseCollector[T, Cap^]():
+    private val ch = UnboundedChannel[Future[T]^{Cap^}]()
+
+    private val futMap = mutable.Map[SourceSymbol[Try[T]], Future[T]^{Cap^}]()
+
+    /** Output channels of all finished futures. */
+    final def results: ReadableChannel[Future[T]^{Cap^}] = ch.asReadable
+
+    private val listener = Listener((_, fut) =>
+      // safe, as we only attach this listener to Future[T]
+      val future = futMap.synchronized:
+        futMap.remove(fut.asInstanceOf[SourceSymbol[Try[T]]]).get
+      ch.sendImmediately(future)
+    )
+
+    protected final def addFuture(future: Future[T]^{Cap^}) =
+      futMap.synchronized { futMap += (future.symbol -> future) }
+      future.onComplete(listener)
+  end BaseCollector
+
+
   /** Collects a list of futures into a channel of futures, arriving as they finish.
     * @example
     *   {{{
@@ -343,33 +364,16 @@ object Future:
     *   [[Future.awaitAll]] and [[Future.awaitFirst]] for simple usage of the collectors to get all results or the first
     *   succeeding one.
     */
-  class Collector[T](futures: (Future[T]^)*):
-    private val ch = UnboundedChannel[Future[T]^{futures*}]()
-
-    private val futMap = mutable.Map[SourceSymbol[Try[T]], Future[T]^{futures*}]()
-
-    /** Output channels of all finished futures. */
-    final def results: ReadableChannel[Future[T]^{futures*}] = ch.asReadable
-
-    private val listener = Listener((_, fut) =>
-      // safe, as we only attach this listener to Future[T]
-      val future = futMap.synchronized:
-        futMap.remove(fut.asInstanceOf[SourceSymbol[Try[T]]]).get
-      ch.sendImmediately(future)
-    )
-
-    protected final def addFuture(future: Future[T]^{futures*}) =
-      futMap.synchronized { futMap += (future.symbol -> future) }
-      future.onComplete(listener)
-
+  class Collector[T](futures: (Future[T]^)*) extends BaseCollector[T, caps.CapSet^{futures*}]:
     futures.foreach(addFuture)
   end Collector
 
   /** Like [[Collector]], but exposes the ability to add futures after creation. */
-  class MutableCollector[T](futures: Future[T]*) extends Collector[T](futures*):
+  class MutableCollector[T, Cap^](futures: (Future[T]^{Cap^})*) extends BaseCollector[T, Cap]:
+    futures.foreach(addFuture)
     /** Add a new [[Future]] into the collector. */
-    inline def add(future: Future[T]^) = addFuture(future)
-    inline def +=(future: Future[T]^) = add(future)
+    inline def add(future: Future[T]^{Cap^}) = addFuture(future)
+    inline def +=(future: Future[T]^{Cap^}) = add(future)
 
   extension [T](fs: Seq[Future[T]])
     /** `.await` for all futures in the sequence, returns the results in a sequence, or throws if any futures fail. */

@@ -1,3 +1,5 @@
+import language.experimental.captureChecking
+
 import gears.async.AsyncOperations.*
 import gears.async.Future.MutableCollector
 import gears.async.Timer
@@ -14,8 +16,8 @@ class StressTest extends munit.FunSuite:
       val k = AtomicInteger(0)
       def compute(using Async) =
         k.incrementAndGet()
-      Async.blocking:
-        val collector = MutableCollector((1L to parallelism).map(_ => Future { compute })*)
+      Async.blocking: ac ?=>
+        val collector = MutableCollector[Int, caps.CapSet^{ac}]((1L to parallelism).map(_ => Future { compute })*)
         var sum = 0L
         for i <- parallelism + 1 to total do
           sum += collector.results.read().right.get.await
