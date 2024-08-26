@@ -110,7 +110,7 @@ object Future:
 
   /** A future that is completed by evaluating `body` as a separate asynchronous operation in the given `scheduler`
     */
-  private class RunnableFuture[+T](body: Async.Spawn ?=> T)(using ac: Async) extends CoreFuture[T]:
+  private class RunnableFuture[+T](body: Async.Spawn ?-> T)(using ac: Async) extends CoreFuture[T]:
     private given acSupport: ac.support.type = ac.support
     private given acScheduler: ac.support.Scheduler = ac.scheduler
     /** RunnableFuture maintains its own inner [[CompletionGroup]], that is separated from the provided Async
@@ -123,14 +123,14 @@ object Future:
     private def checkCancellation(): Unit =
       if cancelRequest.get() then throw new CancellationException()
 
-    private class FutureAsync(val group: CompletionGroup)(using label: acSupport.Label[Unit])
+    private class FutureAsync[Cap^](val group: CompletionGroup)(using label: acSupport.Label[Unit, Cap])
         extends Async(using acSupport, acScheduler):
       /** Await a source first by polling it, and, if that fails, by suspending in a onComplete call.
         */
       override def await[U](src: Async.Source[U]^): U =
         class CancelSuspension extends Cancellable:
-          var suspension: acSupport.Suspension[Try[U], Unit] = uninitialized
-          var listener: Listener[U]^{this} = uninitialized
+          var suspension: acSupport.Suspension[Try[U], Unit]^{Cap^} = uninitialized
+          var listener: Listener[U]^{this, Cap^} = uninitialized
           var completed = false
 
           def complete() = synchronized:
@@ -142,7 +142,9 @@ object Future:
             val completedBefore = complete()
             if !completedBefore then
               src.dropListener(listener)
-              acSupport.resumeAsync(suspension)(Failure(new CancellationException()))
+              // SAFETY: we always await for this suspension to end
+              val pureSusp = caps.unsafe.unsafeAssumePure(suspension)
+              acSupport.resumeAsync(pureSusp)(Failure(new CancellationException()))
 
         if group.isCancelled then throw new CancellationException()
 
@@ -150,10 +152,12 @@ object Future:
           .poll()
           .getOrElse:
             val cancellable = CancelSuspension()
-            val res = acSupport.suspend[Try[U], Unit](k =>
+            val res = acSupport.suspend[Try[U], Unit, Cap](k =>
               val listener = Listener.acceptingListener[U]: (x, _) =>
                 val completedBefore = cancellable.complete()
-                if !completedBefore then acSupport.resumeAsync(k)(Success(x))
+                // SAFETY: Future should already capture Cap^
+                val purek = caps.unsafe.unsafeAssumePure(k)
+                if !completedBefore then acSupport.resumeAsync(purek)(Success(x))
               cancellable.suspension = k
               cancellable.listener = listener
               cancellable.link(group) // may resume + remove listener immediately
@@ -179,13 +183,17 @@ object Future:
 
   end RunnableFuture
 
+
   /** Create a future that asynchronously executes `body` that wraps its execution in a [[scala.util.Try]]. The returned
     * future is linked to the given [[Async.Spawn]] scope by default, i.e. it is cancelled when this scope ends.
     */
   def apply[T](body: Async.Spawn ?=> T)(using async: Async, spawnable: Async.Spawn)(
     using async.type =:= spawnable.type
   ): Future[T]^{body, spawnable} =
-    RunnableFuture(body)(using spawnable)
+    val f = (async: Async.Spawn) => body(using async)
+    val puref = caps.unsafe.unsafeAssumePure(f)
+    // SAFETY: body is recorded in the capture set of Future, which should be cancelled when gone out of scope.
+    RunnableFuture(async ?=> puref(async))(using spawnable)
 
   /** A future that is immediately completed with the given result. */
   def now[T](result: Try[T]): Future[T] =

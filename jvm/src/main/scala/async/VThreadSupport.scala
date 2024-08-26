@@ -15,19 +15,21 @@ object VThreadScheduler extends Scheduler:
     .name("gears.async.VThread-", 0L)
     .factory()
 
-  override def execute(body: Runnable^): Unit =
+  override def execute(body: Runnable): Unit =
     val th = VTFactory.newThread(body)
     th.start()
     ()
 
-  override def schedule(delay: FiniteDuration, body: Runnable^): Cancellable =
+  private[gears] inline def unsafeExecute(body: Runnable^): Unit = execute(caps.unsafe.unsafeAssumePure(body))
+
+  override def schedule(delay: FiniteDuration, body: Runnable): Cancellable =
     import caps.unsafe.unsafeAssumePure
 
     val sr = ScheduledRunnable(delay, body)
     // SAFETY: should not be able to access body, only for cancellation
     sr.unsafeAssumePure: Cancellable
 
-  private final class ScheduledRunnable(delay: FiniteDuration, body: Runnable^) extends Cancellable:
+  private final class ScheduledRunnable(delay: FiniteDuration, body: Runnable) extends Cancellable:
     @volatile var interruptGuard = true // to avoid interrupting the body
 
     val th = VTFactory.newThread: () =>
@@ -50,7 +52,7 @@ object VThreadScheduler extends Scheduler:
 object VThreadSupport extends AsyncSupport:
   type Scheduler = VThreadScheduler.type
 
-  private final class VThreadLabel[R]():
+  private final class VThreadLabel[R]() extends caps.Capability:
     private var result: Option[R] = None
     private val lock = ReentrantLock()
     private val cond = lock.newCondition()
@@ -74,11 +76,11 @@ object VThreadSupport extends AsyncSupport:
         result.get
       finally lock.unlock()
 
-  override opaque type Label[R] = VThreadLabel[R]
+  override opaque type Label[R, Cap^] <: caps.Capability = VThreadLabel[R]
 
   // outside boundary: waiting on label
   //  inside boundary: waiting on suspension
-  private final class VThreadSuspension[-T, +R](using private[VThreadSupport] val l: Label[R] @uncheckedVariance)
+  private final class VThreadSuspension[-T, +R](using private[VThreadSupport] val l: VThreadLabel[R] @uncheckedVariance)
       extends gears.async.Suspension[T, R]:
     private var nextInput: Option[T] = None
     private val lock = ReentrantLock()
@@ -107,9 +109,9 @@ object VThreadSupport extends AsyncSupport:
 
   override opaque type Suspension[-T, +R] <: gears.async.Suspension[T, R] = VThreadSuspension[T, R]
 
-  override def boundary[R](body: (Label[R]) ?=> R): R =
+  override def boundary[R, Cap^](body: Label[R, Cap]^ ?->{Cap^} R): R =
     val label = VThreadLabel[R]()
-    VThreadScheduler.execute: () =>
+    VThreadScheduler.unsafeExecute: () =>
       val result = body(using label)
       label.setResult(result)
 
@@ -119,13 +121,16 @@ object VThreadSupport extends AsyncSupport:
     suspension.l.clearResult()
     suspension.setInput(arg)
 
-  override def scheduleBoundary(body: (Label[Unit]) ?=> Unit)(using Scheduler): Unit =
+  override def scheduleBoundary[Cap^](body: Label[Unit, Cap] ?-> Unit)(using Scheduler): Unit =
     VThreadScheduler.execute: () =>
       val label = VThreadLabel[Unit]()
       body(using label)
 
-  override def suspend[T, R](body: Suspension[T, R] => R)(using l: Label[R]): T =
-    val sus = new VThreadSuspension[T, R]()
+  override def suspend[T, R, Cap^](body: Suspension[T, R]^{Cap^} => R^{Cap^})(using l: Label[R, Cap]^): T =
+    val sus = new VThreadSuspension[T, R](using caps.unsafe.unsafeAssumePure(l))
     val res = body(sus)
-    l.setResult(res)
+    l.setResult(
+      // SAFETY: will only be stored and returned by the Suspension resumption mechanism
+      caps.unsafe.unsafeAssumePure(res)
+    )
     sus.waitInput()
