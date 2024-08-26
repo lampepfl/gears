@@ -393,8 +393,7 @@ object Async:
       * @see
       *   [[Async$.select Async.select]] where [[SelectCase]] is used.
       */
-    /* TODO: inline after cc-ing channels */
-    def ~~>[U](_f: T => U): SelectCase[U]^{_src, _f} = _src.handle(_f)
+    inline def ~~>[U](_f: T => U): SelectCase[U]^{_src, _f} = _src.handle(_f)
 
   /** Race a list of sources with the corresponding handler functions, once an item has come back. Like [[race]],
     * [[select]] guarantees exactly one of the sources are polled. Unlike [[transformValuesWith]], the handler in

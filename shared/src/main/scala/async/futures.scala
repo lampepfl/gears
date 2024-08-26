@@ -207,7 +207,7 @@ object Future:
       * fail with the failure that was returned first.
       */
     def zip[U](f2: Future[U]^): Future[(T, U)]^{f1, f2} =
-      Future.withResolver: r =>
+      Future.withResolver[(T, U), caps.CapSet^{f1, f2}]: r =>
         Async
           .either(f1, f2)
           .onComplete(Listener { (v, _) =>
@@ -246,7 +246,7 @@ object Future:
       */
     def orWithCancel(f2: Future[T]^): Future[T]^{f1, f2} = orImpl(true)(f2)
 
-    inline def orImpl(inline withCancel: Boolean)(f2: Future[T]^): Future[T]^{f1, f2} = Future.withResolver: r =>
+    inline def orImpl(inline withCancel: Boolean)(f2: Future[T]^): Future[T]^{f1, f2} = Future.withResolver[T, caps.CapSet^{f1, f2}]: r =>
       Async
         .raceWithOrigin(f1, f2)
         .onComplete(Listener { case ((v, which), _) =>
@@ -288,7 +288,7 @@ object Future:
   /** The group of handlers to be used in [[withResolver]]. As a Future is completed only once, only one of
     * resolve/reject/complete may be used and only once.
     */
-  trait Resolver[-T]:
+  trait Resolver[-T, Cap^]:
     /** Complete the future with a data item successfully */
     def resolve(item: T): Unit = complete(Success(item))
 
@@ -305,7 +305,7 @@ object Future:
       * may be used. The handler should eventually complete the Future using one of complete/resolve/reject*. The
       * default handler is set up to [[rejectAsCancelled]] immediately.
       */
-    def onCancel(handler: () => Unit): Unit
+    def onCancel(handler: (() -> Unit)^{Cap^}): Unit
   end Resolver
 
   /** Create a promise that may be completed asynchronously using external means.
@@ -315,16 +315,18 @@ object Future:
     *
     * If the external operation supports cancellation, the body can register one handler using [[Resolver.onCancel]].
     */
-  def withResolver[T](body: Resolver[T] => Unit): Future[T] =
-    val future = new CoreFuture[T] with Resolver[T] with Promise[T]:
-      @volatile var cancelHandle: () -> Unit = () => rejectAsCancelled()
-      override def onCancel(handler: () => Unit): Unit = cancelHandle = caps.unsafe.unsafeAssumePure(handler)
+  def withResolver[T, Cap^](body: Resolver[T, Cap]^{Cap^} => Unit): Future[T]^{Cap^} =
+    val future: (CoreFuture[T] & Resolver[T, Cap] & Promise[T])^{Cap^} = new CoreFuture[T] with Resolver[T, Cap] with Promise[T]:
+      // TODO: undo this once bug is fixed
+      @volatile var cancelHandle: (() -> Unit) = () => rejectAsCancelled()
+      override def onCancel(handler: (() -> Unit)^{Cap^}): Unit =
+        cancelHandle = /* TODO remove */ caps.unsafe.unsafeAssumePure(handler)
       override def complete(result: Try[T]): Unit = super.complete(result)
 
       override def cancel(): Unit =
         if setCancelled() then cancelHandle()
     end future
-    body(future: Resolver[T])
+    body(future)
     future
   end withResolver
 

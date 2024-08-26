@@ -15,7 +15,7 @@ object ScalaConverters:
       * [[Future]] will *not* clean up the pending job when cancelled.
       */
     def asGears(using ExecutionContext): Future[T]^{fut} =
-      Future.withResolver[T]: resolver =>
+      Future.withResolver[T, caps.CapSet]: resolver =>
         fut.andThen(result => resolver.complete(result))
 
   extension [T](fut: Future[T]^)
