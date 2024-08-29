@@ -55,9 +55,11 @@ object Future:
     @volatile protected var hasCompleted: Boolean = false
     protected var cancelRequest = AtomicBoolean(false)
     private var result: Try[T] = uninitialized // guaranteed to be set if hasCompleted = true
-    private val waiting: mutable.Set[Listener[Try[T]]^] = mutable.Set()
+    private val waiting: mutable.Set[Listener[Try[T]]] = mutable.Set()
 
     // Async.Source method implementations
+
+    import caps.unsafe.unsafeAssumePure
 
     def poll(k: Listener[Try[T]]^): Boolean =
       if hasCompleted then
@@ -66,10 +68,10 @@ object Future:
       else false
 
     def addListener(k: Listener[Try[T]]^): Unit = synchronized:
-      waiting += k
+      waiting += k.unsafeAssumePure
 
     def dropListener(k: Listener[Try[T]]^): Unit = synchronized:
-      waiting -= k
+      waiting -= k.unsafeAssumePure
 
     // Cancellable method implementations
 
