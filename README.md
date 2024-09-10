@@ -27,13 +27,13 @@ With `mill`:
 ```scala
 def ivyDeps = Agg(
   // ... other dependencies
-  ivy"ch.epfl.lamp:::gears::<version>"
+  ivy"ch.epfl.lamp::gears:<version>"
 )
 ```
 
 With `scala` (since 3.5.0) or `scala-cli`:
 ```scala
-//> using dep "ch.epfl.lamp:::gears::<version>"
+//> using dep "ch.epfl.lamp::gears:<version>"
 ```
 
 ## Setting up on an unpublished version of Gears
