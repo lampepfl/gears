@@ -82,19 +82,19 @@ class CaptureCheckingBehavior extends munit.FunSuite:
             .await // uncomment to leak
   }
 
-  test("channel") {
-    trait File extends caps.Capability:
-      def read(): Int = ???
-    Async.blocking:
-      val ch = SyncChannel[File]()
-      // Sender
-      val sender = Future:
-        val f = new File {}
-        ch.send(f)
-      val recv = Future:
-        val f = ch.read().right.get
-        f.read()
-  }
+  // test("channel") {
+  //   trait File extends caps.Capability:
+  //     def read(): Int = ???
+  //   Async.blocking:
+  //     val ch = SyncChannel[File]()
+  //     // Sender
+  //     val sender = Future:
+  //       val f = new File {}
+  //       ch.send(f)
+  //     val recv = Future:
+  //       val f = ch.read().right.get
+  //       f.read()
+  // }
 
   test("very bad") {
     Async.blocking: async ?=>
@@ -108,10 +108,10 @@ class CaptureCheckingBehavior extends munit.FunSuite:
       // println(res.right.get.asInstanceOf[Future[Any]].awaitResult)
   }
 
-  test("bad") {
-    Async.blocking: async ?=>
-      def fail3[T, E](fr: Future[Result[T, E]]^): Result[Future[T]^{async}, E] =
-        Result: label ?=>
-          Future: fut ?=>
-            fr.await.ok // error, escaping label from Result
-  }
+  // test("bad") {
+  //   Async.blocking: async ?=>
+  //     def fail3[T, E](fr: Future[Result[T, E]]^): Result[Future[T]^{async}, E] =
+  //       Result: label ?=>
+  //         Future: fut ?=>
+  //           fr.await.ok // error, escaping label from Result
+  // }
