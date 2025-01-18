@@ -45,8 +45,7 @@ class RetryBehavior extends munit.FunSuite {
         if (i < 4) then
           i += 1
           i
-        else throw ex
-      )
+        else throw ex)
       assertEquals(ret, Failure(ex))
     val end = System.currentTimeMillis()
     assert(end - start >= 4 * 150)

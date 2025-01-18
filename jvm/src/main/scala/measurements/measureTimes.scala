@@ -434,15 +434,13 @@ def measureRunTimes[T](action: () => T): TimeMeasurementResult =
         dataAlmostJson.append(measure("PosixLikeIO", timesInner = if size < 100 then 100 else 10): () =>
           Async.blocking:
             PIOHelper.withFile("/tmp/FIO/x.txt", StandardOpenOption.CREATE, StandardOpenOption.WRITE): f =>
-              f.writeString(bigString.substring(0, size)).awaitResult
-        )
+              f.writeString(bigString.substring(0, size)).awaitResult)
         println("done 1")
 
         dataAlmostJson.append(measure("Java FileWriter", timesInner = if size < 100 then 100 else 10): () =>
           val writer = new FileWriter("/tmp/FIO/y.txt")
           writer.write(bigString.substring(0, size), 0, size)
-          writer.close()
-        )
+          writer.close())
         println("done 2")
 
         dataAlmostJson.append(measure("Java Files.writeString", timesInner = if size < 100 then 100 else 10): () =>
@@ -467,16 +465,14 @@ def measureRunTimes[T](action: () => T): TimeMeasurementResult =
         dataAlmostJson.append(measure("PosixLikeIO", timesInner = if size < 100 then 100 else 10): () =>
           Async.blocking:
             PIOHelper.withFile("/tmp/FIO/x.txt", StandardOpenOption.READ): f =>
-              f.readString(size).awaitResult
-        )
+              f.readString(size).awaitResult)
         println("done 1")
 
         val buffer = new Array[Char](size)
         dataAlmostJson.append(measure("Java FileReeader", timesInner = if size < 100 then 100 else 10): () =>
           val reader = new FileReader("/tmp/FIO/y.txt")
           reader.read(buffer)
-          reader.close()
-        )
+          reader.close())
         println("done 2")
 
         dataAlmostJson.append(measure("Java Files.readString", timesInner = if size < 100 then 100 else 10): () =>
