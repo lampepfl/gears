@@ -1,7 +1,7 @@
 import sbtcrossproject.CrossPlugin.autoImport.{CrossType, crossProject}
 import scalanative.build._
 
-val scala = "3.6.0-RC1-bin-SNAPSHOT"
+val scala = "3.7.0-RC1-bin-SNAPSHOT"
 ThisBuild / scalaVersion := scala
 
 publish / skip := true
@@ -19,7 +19,7 @@ inThisBuild(
 )
 
 lazy val root =
-  crossProject(JVMPlatform, NativePlatform)
+  crossProject(JVMPlatform)
     .crossType(CrossType.Full)
     .in(file("."))
     .settings(
@@ -38,11 +38,11 @@ lazy val root =
       Seq(
         javaOptions += "--version 21"
       )
-    )
-    .nativeSettings(
-      Seq(
-        nativeConfig ~= { c =>
-          c.withMultithreading(true)
-        }
-      )
-    )
+    )// .nativeSettings(
+//   Seq(
+//     nativeConfig ~= { c =>
+//       c.withMultithreading(true)
+//     }
+//   )
+// )
+
