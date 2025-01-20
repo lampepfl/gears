@@ -278,7 +278,7 @@ object Async:
     * @see
     *   [[Async$.select Async.select]] for a convenient syntax to race sources and awaiting them with [[Async]].
     */
-  def race[T](@caps.unbox sources: Seq[Source[T]^]): Source[T]^{sources*} = raceImpl((v: T, _: SourceSymbol[T]) => v)(sources)
+  def race[T](@caps.use sources: Seq[Source[T]^]): Source[T]^{sources*} = raceImpl((v: T, _: SourceSymbol[T]) => v)(sources)
   def race[T](s1: Source[T]^): Source[T]^{s1} = race(Seq(s1))
   def race[T](s1: Source[T]^, s2: Source[T]^): Source[T]^{s1, s2} = race(Seq(s1, s2))
   def race[T](s1: Source[T]^, s2: Source[T]^, s3: Source[T]^): Source[T]^{s1, s2, s3} = race(Seq(s1, s2, s3))
@@ -287,11 +287,11 @@ object Async:
     * @see
     *   [[Async$.select Async.select]] for a convenient syntax to race sources and awaiting them with [[Async]].
     */
-  def raceWithOrigin[T](@caps.unbox sources: (Source[T]^)*): Source[(T, SourceSymbol[T])]^{sources*} =
+  def raceWithOrigin[T](@caps.use sources: (Source[T]^)*): Source[(T, SourceSymbol[T])]^{sources*} =
     raceImpl((v: T, src: SourceSymbol[T]) => (v, src))(sources)
 
   /** Pass first result from any of `sources` to the continuation */
-  private def raceImpl[T, U](map: (U, SourceSymbol[U]) -> T)(@caps.unbox sources: Seq[Source[U]^]): Source[T]^{sources*} =
+  private def raceImpl[T, U](map: (U, SourceSymbol[U]) -> T)(@caps.use sources: Seq[Source[U]^]): Source[T]^{sources*} =
     new Source[T]:
       val selfSrc = this
       def poll(k: Listener[T]^): Boolean =
@@ -415,7 +415,7 @@ object Async:
     * )
     *   }}}
     */
-  def select[T](@caps.unbox cases: (SelectCase[T]^)*)(using Async) =
+  def select[T](@caps.use cases: (SelectCase[T]^)*)(using Async) =
     val (input, which) = raceWithOrigin(cases.map(_.src)*).awaitResult
     val sc = cases.find(_.src.symbol == which).get
     sc(input.asInstanceOf[sc.Src])

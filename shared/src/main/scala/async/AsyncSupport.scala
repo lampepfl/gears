@@ -35,7 +35,7 @@ trait AsyncSupport extends SuspendSupport:
 
   /** Schedule a computation with the suspension boundary already created. */
   private[async] def scheduleBoundary[Cap^](body: Label[Unit, Cap] ?-> Unit)(using s: Scheduler): Unit =
-    s.execute(() => boundary(body))
+    s.execute(() => boundary[Unit, Cap](body))
 
 /** A scheduler implementation, with the ability to execute a computation immediately or after a delay. */
 trait Scheduler:

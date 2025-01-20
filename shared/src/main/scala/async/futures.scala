@@ -168,7 +168,7 @@ object Future:
             cancellable.unlink()
             res.get
 
-      override def withGroup(group: CompletionGroup): Async = FutureAsync(group)
+      override def withGroup(group: CompletionGroup): Async = FutureAsync[Cap](group)
 
     override def cancel(): Unit = if setCancelled() then this.innerGroup.cancel()
 
@@ -387,7 +387,7 @@ object Future:
     inline def add(future: Future[T]^{Cap^}) = addFuture(future)
     inline def +=(future: Future[T]^{Cap^}) = add(future)
 
-  extension [T](@caps.unbox fs: Seq[Future[T]^])
+  extension [T](@caps.use fs: Seq[Future[T]^])
     /** `.await` for all futures in the sequence, returns the results in a sequence, or throws if any futures fail. */
     def awaitAll(using Async) =
       val collector = Collector(fs*)
