@@ -19,6 +19,7 @@ jobs:
       with:
         distribution: temurin
         java-version: 21
+    - uses: sbt/setup-sbt@v1
     - name: Test Formatting
       run: sbt scalafmtCheckAll
   test-jvm:
@@ -35,6 +36,7 @@ jobs:
       with:
         distribution: temurin
         java-version: 21
+    - uses: sbt/setup-sbt@v1
     - name: Test
       run: sbt rootJVM/test
   test-native:
@@ -51,6 +53,7 @@ jobs:
       with:
         distribution: temurin
         java-version: 21
+    - uses: sbt/setup-sbt@v1
     - name: Install scala-native dependencies
       run: sudo apt-get install clang libstdc++-12-dev libgc-dev
     - name: Test
