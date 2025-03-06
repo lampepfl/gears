@@ -447,4 +447,28 @@ class FutureBehavior extends munit.FunSuite {
       reader.awaitResult
       assertEquals(ch.read(), Right(2))
   }
+
+  test("deferred futures") {
+    Async.blocking:
+      val counter = AtomicInteger(0)
+      val a = new Array[Future.DeferredFuture[Int]](4)
+
+      a(0) = Future.deferred:
+        counter.incrementAndGet()
+        a(1).await + a(2).await
+      a(1) = Future.deferred:
+        counter.incrementAndGet()
+        a(3).await + 4
+      a(2) = Future.deferred:
+        counter.incrementAndGet()
+        a(3).await + 2
+      a(3) = Future.deferred:
+        counter.incrementAndGet()
+        1
+
+      a.foreach(_.start())
+
+      assertEquals(a(0).await, 8)
+      assertEquals(counter.get(), 4)
+  }
 }
