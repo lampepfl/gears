@@ -31,7 +31,11 @@ lazy val root =
     )
     .jvmSettings(
       Seq(
-        javaOptions += "--version 21"
+        javaOptions += "--version 21",
+        Test / javaOptions ++= Seq(
+          "--add-opens=java.base/java.lang=ALL-UNNAMED",
+          "--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED"
+        )
       )
     )
     .nativeSettings(
