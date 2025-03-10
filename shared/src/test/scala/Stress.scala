@@ -1,11 +1,16 @@
+import gears.async.Async
+import gears.async.AsyncOperations
 import gears.async.AsyncOperations.*
+import gears.async.AsyncSupport
+import gears.async.Future
 import gears.async.Future.MutableCollector
+import gears.async.Task
 import gears.async.Timer
 import gears.async.default.given
-import gears.async.{Async, AsyncSupport, Future, uninterruptible}
+import gears.async.uninterruptible
 
 import java.util.concurrent.atomic.AtomicInteger
-import scala.concurrent.duration._
+import scala.concurrent.duration.*
 
 class StressTest extends munit.FunSuite:
   test("survives a stress test that hammers on creating futures") {
@@ -43,4 +48,20 @@ class StressTest extends munit.FunSuite:
         collector += Future { compute }
       for i <- 1L to parallelism do sum += collector.results.read().right.get.await
       assertEquals(sum, total * (total + 1) / 2)
+  }
+
+  test("1 million concurrent tasks") {
+    val count = 1_000_000
+    def task(i: Int) = Task {
+      AsyncOperations.sleep(100L)
+      i * 2
+    }
+    Async.blocking {
+      val start = System.currentTimeMillis()
+      val res = 1.to(count).map(i => task(i).start()).awaitAll
+      val end = System.currentTimeMillis()
+      assert(end - start > 100)
+      assert(res.size == count)
+      assert(res.sum == (1 + count) * count)
+    }
   }
