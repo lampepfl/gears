@@ -1,3 +1,4 @@
+import org.scalajs.jsenv.nodejs._
 import sbtcrossproject.CrossPlugin.autoImport.{CrossType, crossProject}
 import scalanative.build._
 
@@ -18,7 +19,7 @@ inThisBuild(
 )
 
 lazy val root =
-  crossProject(JVMPlatform, NativePlatform)
+  crossProject(JSPlatform, JVMPlatform, NativePlatform)
     .crossType(CrossType.Full)
     .in(file("."))
     .settings(
@@ -38,6 +39,31 @@ lazy val root =
       Seq(
         nativeConfig ~= { c =>
           c.withMultithreading(true)
+        }
+      )
+    )
+    .jsSettings(
+      Seq(
+        scalaVersion := "3.7.1-RC1-bin-20250417-05b102a-NIGHTLY",
+        // Emit ES modules with the Wasm backend
+        scalaJSLinkerConfig := {
+          scalaJSLinkerConfig.value
+            .withExperimentalUseWebAssembly(true) // use the Wasm backend
+            .withModuleKind(ModuleKind.ESModule) // required by the Wasm backend
+        },
+        // Configure Node.js (at least v23) to support the required Wasm features
+        jsEnv := {
+          val config = NodeJSEnv
+            .Config()
+            .withArgs(
+              List(
+                "--experimental-wasm-exnref", // always required
+                "--experimental-wasm-jspi", // required for js.async/js.await
+                "--experimental-wasm-imported-strings", // optional (good for performance)
+                "--turboshaft-wasm" // optional, but significantly increases stability
+              )
+            )
+          new NodeJSEnv(config)
         }
       )
     )
