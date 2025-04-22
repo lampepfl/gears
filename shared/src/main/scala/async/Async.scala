@@ -45,9 +45,16 @@ trait Async(using val support: AsyncSupport, val scheduler: support.Scheduler):
   /** Returns an [[Async]] context of the same kind as this one, with a new cancellation group. */
   def withGroup(group: CompletionGroup): Async
 
-object Async:
-  private class Blocking(val group: CompletionGroup)(using support: AsyncSupport, scheduler: support.Scheduler)
-      extends Async(using support, scheduler):
+object Async extends AsyncImpl:
+  /** The [[Async]] implementation based on blocking locks.
+    *
+    * @note
+    *   Does not currently work on Scala.js, due to locks and condvars not being available.
+    */
+  private[async] class LockingAsync(val group: CompletionGroup)(using
+      support: AsyncSupport,
+      scheduler: support.Scheduler
+  ) extends Async(using support, scheduler):
     private val lock = ReentrantLock()
     private val condVar = lock.newCondition()
 
@@ -71,13 +78,39 @@ object Async:
           finally lock.unlock()
 
     /** An Async of the same kind as this one, with a new cancellation group */
-    override def withGroup(group: CompletionGroup): Async = Blocking(group)
+    override def withGroup(group: CompletionGroup): Async = Async.LockingAsync(group)
+
+  /** A way to introduce asynchronicity into a synchronous environment. */
+  sealed trait FromSync:
+    private[async] type Output[+T]
+    private[async] def apply[T](
+        body: Async.Spawn ?=> T
+    )(using support: AsyncSupport, scheduler: support.Scheduler): Output[T]
+
+  object FromSync:
+
+    /** Implements [[FromSync]] by directly blocking the current thread. */
+    object BlockingWithLocks extends FromSync:
+      type Output[T] = T
+      private[async] def apply[T](
+          body: Async.Spawn ?=> T
+      )(using support: AsyncSupport, scheduler: support.Scheduler): Output[T] =
+        Async.group(body)(using Async.LockingAsync(CompletionGroup.Unlinked))
 
   /** Execute asynchronous computation `body` on currently running thread. The thread will suspend when the computation
     * waits.
     */
-  def blocking[T](body: Async.Spawn ?=> T)(using support: AsyncSupport, scheduler: support.Scheduler): T =
-    group(body)(using Blocking(CompletionGroup.Unlinked))
+  def blocking[T](
+      body: Async.Spawn ?=> T
+  )(using support: AsyncSupport, scheduler: support.Scheduler, blocking: FromSync { type Output[T] = T }): T =
+    blocking(body)
+
+  /** Execute asynchronous computation `body` from the context.
+    */
+  def fromSync[T](
+      body: Async.Spawn ?=> T
+  )(using support: AsyncSupport, scheduler: support.Scheduler, fromSync: FromSync): fromSync.Output[T] =
+    fromSync(body)
 
   /** Returns the currently executing Async context. Equivalent to `summon[Async]`. */
   inline def current(using async: Async): Async = async
