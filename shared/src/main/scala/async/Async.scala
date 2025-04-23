@@ -81,35 +81,29 @@ object Async extends AsyncImpl:
     override def withGroup(group: CompletionGroup): Async = Async.LockingAsync(group)
 
   /** A way to introduce asynchronicity into a synchronous environment. */
-  sealed trait FromSync:
+  trait FromSync private[async] ():
     private[async] type Output[+T]
-    private[async] def apply[T](
-        body: Async.Spawn ?=> T
-    )(using support: AsyncSupport, scheduler: support.Scheduler): Output[T]
+    private[async] def apply[T](body: Async ?=> T): Output[T]
 
   object FromSync:
 
     /** Implements [[FromSync]] by directly blocking the current thread. */
-    object BlockingWithLocks extends FromSync:
+    class BlockingWithLocks(using support: AsyncSupport, scheduler: support.Scheduler) extends FromSync:
       type Output[T] = T
-      private[async] def apply[T](
-          body: Async.Spawn ?=> T
-      )(using support: AsyncSupport, scheduler: support.Scheduler): Output[T] =
+      private[async] def apply[T](body: Async.Spawn ?=> T): Output[T] =
         Async.group(body)(using Async.LockingAsync(CompletionGroup.Unlinked))
 
   /** Execute asynchronous computation `body` on currently running thread. The thread will suspend when the computation
     * waits.
     */
-  def blocking[T](
-      body: Async.Spawn ?=> T
-  )(using support: AsyncSupport, scheduler: support.Scheduler, blocking: FromSync { type Output[T] = T }): T =
-    blocking(body)
+  // def blocking[T](body: Async.Spawn ?=> T)(using blocking: FromSync { type Output[T] = T }): T =
+  //   blocking(body)
 
   /** Execute asynchronous computation `body` from the context.
     */
-  def fromSync[T](
+  def blocking[T](
       body: Async.Spawn ?=> T
-  )(using support: AsyncSupport, scheduler: support.Scheduler, fromSync: FromSync): fromSync.Output[T] =
+  )(using fromSync: FromSync): fromSync.Output[T] =
     fromSync(body)
 
   /** Returns the currently executing Async context. Equivalent to `summon[Async]`. */
