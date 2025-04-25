@@ -1,7 +1,7 @@
 import sbtcrossproject.CrossPlugin.autoImport.{CrossType, crossProject}
 import scalanative.build._
 
-val scala = "3.7.0-RC1-bin-SNAPSHOT"
+val scala = "3.7.1-RC1-bin-SNAPSHOT"
 ThisBuild / scalaVersion := scala
 
 publish / skip := true
@@ -30,7 +30,7 @@ lazy val root =
         version := "0.2.0-SNAPSHOT",
         libraryDependencies += "org.scalameta" %%% "munit" % "1.0.0" % Test,
         libraryDependencies += "org.scala-lang" %% "scala2-library-cc-tasty-experimental" % scala,
-        // scalacOptions ++= Seq("-Ycc-log", "-Yprint-debug"),
+        scalacOptions ++= Seq("-explain"),
         testFrameworks += new TestFramework("munit.Framework")
       )
     )
