@@ -1,4 +1,5 @@
 import gears.async.Async
+import gears.async.AsyncOperations
 import gears.async.AsyncOperations.sleep
 import gears.async.Future
 import gears.async.Semaphore
@@ -48,18 +49,19 @@ class SemaphoreBehavior extends munit.FunSuite {
   test("no release high-numbered semaphore") {
     Async.blocking:
       val futs =
-        val sem = Semaphore(100)
-        val count = AtomicInteger()
+        Async.group:
+          val sem = Semaphore(100)
+          val count = AtomicInteger()
 
-        val futs = Seq.fill(1_000)(Future {
-          sem.acquire()
-          count.incrementAndGet()
-        })
+          val futs = Seq.fill(1_000)(Future {
+            sem.acquire()
+            count.incrementAndGet()
+          })
 
-        while count.get() < 100 do Thread.`yield`()
-        sleep(100)
-        assertEquals(count.get(), 100)
-        futs
+          while count.get() < 100 do AsyncOperations.`yield`()
+          sleep(100)
+          assertEquals(count.get(), 100)
+          futs
       val (succ, fail) = futs.partition(f => f.poll().get.isSuccess)
       assertEquals(succ.size, 100)
       assertEquals(fail.size, 900)

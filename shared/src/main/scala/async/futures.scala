@@ -128,7 +128,12 @@ object Future:
             Listener.ListenerLock,
             Listener.NumberedLock,
             Cancellable:
-        var cancelled = false // true = resumed due to cancellation - only set with lock held immediately before resume
+        val stateUnused = 0
+        val stateLocked = 1
+        val stateDone = 2
+        val stateCancelled = 3
+        var state = stateUnused // 0 -> unused, 1 -> locked, 2 -> done, 3 -> cancelled
+        // resumed due to cancellation - only set with lock held immediately before resume
 
         // guarded by lock; null = before apply or after resume
         private var sus: ac.support.Suspension[T | Null, Unit] | Null = null
@@ -143,14 +148,15 @@ object Future:
         // == Cancellable, to be registered with Async's CompletionGroup (see apply)
         def cancel(): Unit =
           cancelRequest = true // set before tryLock -> other thread will see after releasing lock (if I fail)
-          if numberedLock.tryLock() then // if lock is held -> will handle cancellation in complete or release
+          if numberedLock.tryLock() && state == stateUnused
+          then // if lock is held -> will handle cancellation in complete or release
             cancelLocked()
 
         private def cancelLocked(): Unit =
           val cancelledNow =
             try
               if sus != null then
-                cancelled = true // this will let the resuming code know, it was cancelled
+                state = stateCancelled // this will let the resuming code know, it was cancelled
                 ac.support.resumeAsync(sus.asInstanceOf[ac.support.Suspension[T | Null, Unit]])(null)
                 sus = null // update lock-guarded state to not resume again
                 true
@@ -165,7 +171,9 @@ object Future:
         val selfNumber: Long = number // from Listener.NumberedLock
         def acquire(): Boolean =
           numberedLock.lock()
-          if sus != null then true
+          if sus != null then
+            state = stateLocked
+            true
           else
             numberedLock.unlock()
             false
@@ -173,6 +181,7 @@ object Future:
           // we still have the numberedLock -> might have missed the cancelRequest
           if cancelRequest then cancelLocked() // just to prioritize cancellation higher
           else
+            state = stateUnused
             numberedLock.unlock()
             // now, I see writes that happened before a failed concurrent acquire, after I release
             if cancelRequest then cancel()
@@ -183,7 +192,10 @@ object Future:
           // might have missed the cancelled -> but we ignore it -> still cancelled = false
           ac.support.resumeAsync(sus.asInstanceOf[ac.support.Suspension[T | Null, Unit]])(data)
           sus = null
+          state = stateDone
           numberedLock.unlock()
+
+        inline def cancelled = state == stateCancelled
       end AwaitListener
 
       /** Await a source first by polling it, and, if that fails, by suspending in a onComplete call.

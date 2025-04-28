@@ -8,10 +8,14 @@ import scala.scalajs.js.wasm.JSPI.allowOrphanJSAwait
 
 opaque type AsyncToken = Unit
 
-/** Capability-safe wrapper around [[js.async]]. */
-private[async] inline def async[T](body: AsyncToken ?=> T): js.Promise[T] = js.async(body(using ()))
+object AsyncToken:
+  /** Assumes that we are under an `async` scope. */
+  def unsafeAssumed: AsyncToken = ()
 
-/** Note that this assumes that the root context is **already** under `js.async`. */
+/** Capability-safe wrapper around [[JSPI.async]]. */
+private[async] inline def async[T](body: AsyncToken ?=> T): js.Promise[T] = JSPI.async(body(using ()))
+
+/** Note that this assumes that the root context is **already** under `JSPI.async`. */
 trait WasmJSPISuspend(using AsyncToken) extends SuspendSupport:
   protected class WasmLabel[T]():
     var (promise, resolve) = mkPromise[T]
@@ -28,38 +32,34 @@ trait WasmJSPISuspend(using AsyncToken) extends SuspendSupport:
 
   opaque type Label[T] = WasmLabel[T]
 
-  def boundary[T](body: Label[T] ?=> T): T =
+  override def boundary[T](body: Label[T] ?=> T): T =
     val label = WasmLabel[T]()
-    js.async:
-      label.resolve(body(using label))
-    js.await(label.promise)
+    JSPI.async:
+      val r = body(using label)
+      label.resolve(r)
+    JSPI.await(label.promise)
 
   protected class WasmSuspension[-T, +R](label: Label[R], resolve: T => Any) extends gears.async.Suspension[T, R]:
     def resume(arg: T): R =
       label.reset()
       resolve(arg)
-      js.await(label.promise)
+      JSPI.await(label.promise)
 
   opaque type Suspension[-T, +R] <: gears.async.Suspension[T, R] = WasmSuspension[T, R]
 
   /** Should return immediately if resume is called from within body */
-  def suspend[T, R](body: Suspension[T, R] => R)(using label: Label[R]): T =
+  override def suspend[T, R](body: Suspension[T, R] => R)(using label: Label[R]): T =
     val (suspPromise, suspResolve) = mkPromise[T]
     val suspend = WasmSuspension[T, R](label, suspResolve)
     label.resolve(body(suspend))
-    js.await(suspPromise)
+    JSPI.await(suspPromise)
 
 object JsAsyncOperations extends AsyncOperations:
-  def sleep(millis: Long)(using Async) =
-    import scala.concurrent.duration.*
-    Future
-      .withResolver: resolver =>
-        val handle = js.timers.setTimeout(millis.millis)(resolver.resolve(()))
-        resolver.onCancel(() => js.timers.clearTimeout(handle))
-      .await
+  override def `yield`()(using Async) =
+    sleep(1)
 
 object JsAsyncScheduler extends Scheduler:
-  def execute(body: Runnable) = js.async(body)
+  def execute(body: Runnable) = JSPI.async(body.run())
   def schedule(delay: scala.concurrent.duration.FiniteDuration, body: Runnable) =
     new Cancellable:
       val handle = js.timers.setTimeout(delay)(body.run())
@@ -75,7 +75,7 @@ private[async] class JsAsync(val group: CompletionGroup)(using support: WasmAsyn
     src
       .poll()
       .getOrElse:
-        js.await:
+        JSPI.await:
           js.Promise: (resolve, _) =>
             src.onComplete:
               Listener: (item, _) =>
@@ -83,9 +83,19 @@ private[async] class JsAsync(val group: CompletionGroup)(using support: WasmAsyn
   def withGroup(group: CompletionGroup) = JsAsync(group)
 
 object JsAsyncFromSync extends Async.FromSync:
-  type Output[+T] = js.Promise[T]
+  type Output[+T] = scala.concurrent.Future[T]
   def apply[T](body: Async ?=> T): Output[T] =
     async:
       given WasmAsyncSupport = WasmAsyncSupport()
       given JsAsyncScheduler.type = JsAsyncScheduler
-      body(using JsAsync(CompletionGroup.Unlinked))
+      Async.group(body)(using JsAsync(CompletionGroup.Unlinked))
+    .toFuture
+
+/** Alternative [[Async.FromAsync]] implementation. Assumes** that we are under an `async` scope.
+  */
+object UnsafeJsAsyncFromSync extends Async.FromSync:
+  type Output[+T] = T
+  def apply[T](body: Async ?=> T): Output[T] =
+    given WasmAsyncSupport = WasmAsyncSupport(using AsyncToken.unsafeAssumed)
+    given JsAsyncScheduler.type = JsAsyncScheduler
+    Async.group(body)(using JsAsync(CompletionGroup.Unlinked))

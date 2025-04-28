@@ -83,15 +83,6 @@ class SuspendExecutorWithSleep(exec: ExecutionContext)
     with AsyncOperations
     with NativeSuspend {
   type Scheduler = this.type
-  override def sleep(millis: Long)(using Async): Unit =
-    Future
-      .withResolver[Unit]: resolver =>
-        val cancellable = schedule(millis.millis, () => resolver.resolve(()))
-        resolver.onCancel: () =>
-          cancellable.cancel()
-          resolver.rejectAsCancelled()
-      .link()
-      .await
 }
 
 class ForkJoinSupport extends SuspendExecutorWithSleep(new ForkJoinPool())

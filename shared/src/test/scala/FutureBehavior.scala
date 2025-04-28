@@ -1,14 +1,14 @@
+import gears.async.*
 import gears.async.AsyncOperations.*
 import gears.async.Future.{Promise, zip}
-import gears.async.Listener
 import gears.async.default.given
-import gears.async.{Async, Future, Task, TaskSchedule, uninterruptible}
 
 import java.util.concurrent.CancellationException
 import java.util.concurrent.atomic.AtomicInteger
 import scala.collection.mutable
 import scala.collection.mutable.Set
 import scala.concurrent.ExecutionContext
+import scala.concurrent.duration.*
 import scala.util.Random
 import scala.util.{Failure, Success, Try}
 
@@ -211,8 +211,8 @@ class FutureBehavior extends munit.FunSuite {
       }
       assertEquals(f.await, 10)
       assertEquals(zombieModifiedThis, false)
-    Thread.sleep(300)
-    assertEquals(zombieModifiedThis, true)
+      AsyncOperations.sleep(300.millis)
+      assertEquals(zombieModifiedThis, true)
   }
 
   // test("zip on tuples with EmptyTuple") {

@@ -252,7 +252,8 @@ private class TestListener(expected: Int)(using asst: munit.Assertions) extends 
     asst.assertEquals(data, expected)
 
 private class NumberedTestListener private (sleep: AtomicBoolean, fail: Boolean, expected: Int)(using munit.Assertions)
-    extends TestListener(expected):
+    extends TestListener(expected)
+    with TestListenerImpl:
   // A promise that is waited for inside `lock` until `continue` is called.
   private val waiter = if sleep.get() then Some(Promise[Unit]()) else None
   // A promise that is resolved right before the lock starts waiting for `waiter`.

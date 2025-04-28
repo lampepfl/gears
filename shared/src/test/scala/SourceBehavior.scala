@@ -1,6 +1,6 @@
+import gears.async.*
 import gears.async.AsyncOperations.*
 import gears.async.default.given
-import gears.async.{Async, Future, Listener, withTimeout}
 
 import java.util.concurrent.CancellationException
 import scala.concurrent.ExecutionContext
@@ -48,7 +48,7 @@ class SourceBehavior extends munit.FunSuite {
       }
       f.onComplete(Listener.acceptingListener { (_, _) => itRan = true })
       f.await
-      Thread.sleep(100) // onComplete of await and manual may be scheduled
+      AsyncOperations.sleep(100) // onComplete of await and manual may be scheduled
       assertEquals(itRan, true)
   }
 
@@ -104,7 +104,7 @@ class SourceBehavior extends munit.FunSuite {
       assertEquals(aRan, false)
       assertEquals(bRan, false)
       f.await
-      Thread.sleep(100) // onComplete of await and manual may be scheduled
+      AsyncOperations.sleep(100) // onComplete of await and manual may be scheduled
       assertEquals(aRan, true)
       assertEquals(bRan, true)
   }
@@ -124,7 +124,7 @@ class SourceBehavior extends munit.FunSuite {
       assertEquals(bRan, false)
       f.dropListener(l)
       f.await
-      Thread.sleep(100) // onComplete of await and manual may be scheduled
+      AsyncOperations.sleep(100) // onComplete of await and manual may be scheduled
       assertEquals(aRan, false)
       assertEquals(bRan, true)
   }

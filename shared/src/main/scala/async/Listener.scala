@@ -98,11 +98,10 @@ object Listener:
       case l: ListenerLock => body(l)
 
   /** A helper instance that provides an uniquely numbered mutex. */
-  trait NumberedLock:
+  trait NumberedLock extends NumberedLockImpl:
     import NumberedLock._
 
     protected val number = listenerNumber.getAndIncrement()
-    protected val numberedLock: Lock = ReentrantLock()
 
   object NumberedLock:
     private val listenerNumber = java.util.concurrent.atomic.AtomicLong()

@@ -1,6 +1,6 @@
+import gears.async.*
 import gears.async.AsyncOperations.*
 import gears.async.default.given
-import gears.async.{Async, AsyncSupport, Future, uninterruptible}
 
 import java.util.concurrent.CancellationException
 import scala.concurrent.duration.{Duration, DurationInt}
@@ -22,6 +22,9 @@ class CancellationBehavior extends munit.FunSuite:
     def assertCancelled() =
       synchronized:
         assertEquals(state, State.Cancelled)
+    def ended = state match
+      case State.Failed(_) | State.Cancelled | State.Completed => true
+      case _                                                   => false
     def run() =
       synchronized:
         state match
@@ -53,7 +56,8 @@ class CancellationBehavior extends munit.FunSuite:
         case e =>
           info.state = State.Failed(e)
           throw e
-    info.initialize(f)
+    info.synchronized:
+      if !info.ended then info.initialize(f)
     f
 
   test("no cancel"):
@@ -61,8 +65,8 @@ class CancellationBehavior extends munit.FunSuite:
     Async.blocking:
       Future:
         x = 1
-      Thread.sleep(400)
-    assertEquals(x, 1)
+      AsyncOperations.sleep(400)
+      assertEquals(x, 1)
 
   test("group cancel"):
     var x = 0
