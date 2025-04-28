@@ -347,7 +347,6 @@ class ChannelBehavior extends munit.FunSuite {
   test("ChannelMultiplexer multiple readers and writers") {
     Async.blocking:
       val m = ChannelMultiplexer[Int]()
-      val start = java.util.concurrent.CountDownLatch(5)
 
       val sendersCount = 3
       val sendersMessage = 4

@@ -1,24 +1,21 @@
-import gears.async.Async
-import gears.async.Async.Spawn
-import gears.async.CancellationException
-import gears.async.Future
-import gears.async.Listener
-import gears.async.SyncChannel
-import gears.async.UnboundedChannel
+import gears.async.*
 import gears.async.default.given
 
+import scala.concurrent.duration.*
 import scala.util.Success
 import scala.util.Try
 
 class AwaitBehavior extends munit.FunSuite:
   given munit.Assertions = this
 
+  override val munitTimeout = 1.seconds
+
   class FutHandle(using a: Async, sp: a.type & Async.Spawn):
     val source = TSource()
     private var res0 = Future.Promise[Int]()
     // cancelled Futures complete with CancellationException even if the body terminated -> store result externally
-    private val fut = Future { res0.complete(Try(source.awaitResult)) }
-    while (source.listener.isEmpty) do Thread.`yield`()
+    val fut = Future { res0.complete(Try(source.awaitResult)) }
+    while (source.listener.isEmpty) do AsyncOperations.`yield`()
     val listener = source.listener.get
     val locker = AsyncLocker(listener, source)
 
@@ -37,6 +34,8 @@ class AwaitBehavior extends munit.FunSuite:
     Async.blocking:
       val handle = FutHandle()
       assert(handle.locker.lockAndWait())
+      println(handle.listener)
+      println(handle.fut)
       handle.cancel()
       handle.locker.complete(1)
       assertEquals(handle.res(), Success(1))
@@ -56,7 +55,7 @@ class AwaitBehavior extends munit.FunSuite:
       val handle = FutHandle()
       assert(handle.locker.lockAndWait())
       val fut2 = Future(assert(!handle.listener.acquireLock()))
-      Thread.sleep(100) // cannot detect when fut2 starts waiting for lock
+      AsyncOperations.sleep(100) // cannot detect when fut2 starts waiting for lock
 
       handle.cancel()
       handle.locker.release()
@@ -100,8 +99,10 @@ class AwaitBehavior extends munit.FunSuite:
       f.await
 
     val f = Future:
-      var loop = true
-      while loop && !Async.current.group.isCancelled do
+      var loop = 0
+      while loop >= 0 && !Async.current.group.isCancelled do
+        if loop == 0 then AsyncOperations.sleep(1)
+        loop = (loop + 1) % 10
         // on scnative, suspending and changing the carrier thread currently kills lock monitors
         reqCh.readSource.poll().map(_.right.get).foreach {
           case ReqMessage.Lock =>
@@ -112,9 +113,10 @@ class AwaitBehavior extends munit.FunSuite:
           case ReqMessage.Complete(data) =>
             l.complete(data, s)
             resCh.sendImmediately(ResMessage.Done)
-          case ReqMessage.Quit => loop = false
+          case ReqMessage.Quit => loop = -1
           case _               => ??? // does not happen
         }
+
     f.onComplete(Listener { (res, _) =>
       res.failed.foreach: err =>
         println("Async locker failed with:")

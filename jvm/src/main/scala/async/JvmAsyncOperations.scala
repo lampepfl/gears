@@ -4,6 +4,8 @@ object JvmAsyncOperations extends AsyncOperations:
   override def sleep(millis: Long)(using Async): Unit =
     jvmInterruptible(Thread.sleep(millis))
 
+  override def `yield`()(using Async): Unit = Thread.`yield`()
+
   /** Runs `fn` in a [[cancellationScope]] where it will be interrupted (as a Java thread) upon cancellation.
     *
     * Note that `fn` will need to handle both [[java.util.concurrent.CancellationException]] (when performing Gears

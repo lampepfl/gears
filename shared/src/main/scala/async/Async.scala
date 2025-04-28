@@ -30,7 +30,7 @@ import scala.util.boundary
   * @see
   *   [[Async$.group Async.group]] and [[Future$.apply Future.apply]] for [[Async]]-subscoping operations.
   */
-trait Async(using val support: AsyncSupport, val scheduler: support.Scheduler):
+trait Async private[async] (using val support: AsyncSupport, val scheduler: support.Scheduler):
   /** Waits for completion of source `src` and returns the result. Suspends the computation.
     *
     * @see
@@ -86,6 +86,8 @@ object Async extends AsyncImpl:
     private[async] def apply[T](body: Async ?=> T): Output[T]
 
   object FromSync:
+    /** A [[FromSync]] implementation that blocks the current runtime. */
+    type Blocking = FromSync { type Output[+T] = T }
 
     /** Implements [[FromSync]] by directly blocking the current thread. */
     class BlockingWithLocks(using support: AsyncSupport, scheduler: support.Scheduler) extends FromSync:

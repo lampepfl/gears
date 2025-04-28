@@ -43,11 +43,10 @@ class CompletionGroup extends Cancellable.Tracking:
   def isCancelled = canceled
 
 object CompletionGroup:
-
   /** A sentinel group of cancellables that are in fact not linked to any real group. `cancel`, `add`, and `drop` do
     * nothing when called on this group.
     */
-  object Unlinked extends CompletionGroup:
+  val Unlinked = new CompletionGroup:
     override def cancel(): Unit = ()
     override def waitCompletion()(using Async): Unit = ()
     override def add(member: Cancellable): Unit = ()

@@ -18,9 +18,9 @@ class RetryBehavior extends munit.FunSuite {
       Retry.untilSuccess.withDelay(Delay.backoff(1.second, 50.millis)):
         i += 1
         if i < 5 then throw Exception("try again!")
-    val end = System.currentTimeMillis()
-    assert(end - start >= 50 + 100 + 200 + 400)
-    assert(end - start < 50 + 100 + 200 + 400 + 800)
+      val end = System.currentTimeMillis()
+      assert(end - start >= 50 + 100 + 200 + 400)
+      assert(end - start < 50 + 100 + 200 + 400 + 800)
 
   test("UntilSuccess 150ms"):
     val start = System.currentTimeMillis()
@@ -32,9 +32,9 @@ class RetryBehavior extends munit.FunSuite {
           throw AssertionError()
         else i
       assertEquals(ret, 4)
-    val end = System.currentTimeMillis()
-    assert(end - start >= 4 * 150)
-    assert(end - start < 5 * 150)
+      val end = System.currentTimeMillis()
+      assert(end - start >= 4 * 150)
+      assert(end - start < 5 * 150)
 
   test("UntilFailure 150ms") {
     val start = System.currentTimeMillis()
@@ -48,9 +48,9 @@ class RetryBehavior extends munit.FunSuite {
         else throw ex
       )
       assertEquals(ret, Failure(ex))
-    val end = System.currentTimeMillis()
-    assert(end - start >= 4 * 150)
-    assert(end - start < 5 * 150)
+      val end = System.currentTimeMillis()
+      assert(end - start >= 4 * 150)
+      assert(end - start < 5 * 150)
   }
 
   test("delay policies") {
