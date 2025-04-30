@@ -63,7 +63,7 @@ class AwaitBehavior extends munit.FunSuite:
       fut2.await
       handle.locker.quit()
 
-  class AsyncLocker(l: Listener[Int], s: Async.Source[Int])(using a: Async, sp: a.type & Async.Spawn):
+  class AsyncLocker(l: Listener[Int], s: Async.Source[Int])(using a: Async, spawn: Async.Spawn & a.type):
     private enum ReqMessage:
       case Lock
       case Release
@@ -99,23 +99,25 @@ class AwaitBehavior extends munit.FunSuite:
       f.await
 
     val f = Future:
-      var loop = 0
-      while loop >= 0 && !Async.current.group.isCancelled do
-        if loop == 0 then AsyncOperations.sleep(1)
-        loop = (loop + 1) % 10
-        // on scnative, suspending and changing the carrier thread currently kills lock monitors
-        reqCh.readSource.poll().map(_.right.get).foreach {
-          case ReqMessage.Lock =>
-            resCh.sendImmediately(ResMessage.LockResult(l.acquireLock()))
-          case ReqMessage.Release =>
-            l.releaseLock()
-            resCh.sendImmediately(ResMessage.Done)
-          case ReqMessage.Complete(data) =>
-            l.complete(data, s)
-            resCh.sendImmediately(ResMessage.Done)
-          case ReqMessage.Quit => loop = -1
-          case _               => ??? // does not happen
-        }
+      // on scnative, suspending and changing the carrier thread currently kills lock monitors
+      // so we run the body in a special single-threaded context
+      Async.blocking {
+        var loop = 0
+        while loop >= 0 && !Async.current.group.isCancelled do
+          if loop == 0 then AsyncOperations.`yield`()
+          loop = (loop + 1) % 10
+          reqCh.readSource.poll().map(_.right.get).foreach {
+            case ReqMessage.Lock =>
+              resCh.sendImmediately(ResMessage.LockResult(l.acquireLock()))
+            case ReqMessage.Release =>
+              l.releaseLock()
+              resCh.sendImmediately(ResMessage.Done)
+            case ReqMessage.Complete(data) =>
+              l.complete(data, s)
+              resCh.sendImmediately(ResMessage.Done)
+            case ReqMessage.Quit => loop = -1
+          }
+      }(using SingleThreadedSupport)
 
     f.onComplete(Listener { (res, _) =>
       res.failed.foreach: err =>
