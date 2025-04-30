@@ -60,3 +60,23 @@ jobs:
       run: sbt rootNative/test
     - name: Stress Test with Lower Memory
       run: env GC_MAXIMUM_HEAP_SIZE=140M sbt 'rootNative/testOnly StressTest'
+  test-js:
+    strategy:
+      fail-fast: false
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+        fetch-depth: 0
+    - uses: coursier/cache-action@v6
+    - uses: actions/setup-java@v3
+      with:
+        distribution: temurin
+        java-version: 21
+    - uses: actions/setup-node@v4
+      with:
+          node-version: '>=23'
+    - uses: sbt/setup-sbt@v1
+    - name: Test
+      run: sbt rootJS/test
