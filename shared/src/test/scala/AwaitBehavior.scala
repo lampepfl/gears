@@ -101,23 +101,25 @@ class AwaitBehavior extends munit.FunSuite:
     val f = Future:
       // on scnative, suspending and changing the carrier thread currently kills lock monitors
       // so we run the body in a special single-threaded context
-      Async.blocking {
+      given SingleThreadedSupport.type = SingleThreadedSupport
+      Async.blocking:
         var loop = 0
         while loop >= 0 && !Async.current.group.isCancelled do
           if loop == 0 then AsyncOperations.`yield`()
           loop = (loop + 1) % 10
-          reqCh.readSource.poll().map(_.right.get).foreach {
-            case ReqMessage.Lock =>
-              resCh.sendImmediately(ResMessage.LockResult(l.acquireLock()))
-            case ReqMessage.Release =>
-              l.releaseLock()
-              resCh.sendImmediately(ResMessage.Done)
-            case ReqMessage.Complete(data) =>
-              l.complete(data, s)
-              resCh.sendImmediately(ResMessage.Done)
-            case ReqMessage.Quit => loop = -1
-          }
-      }(using SingleThreadedSupport)
+          reqCh.readSource
+            .poll()
+            .map(_.right.get)
+            .foreach:
+              case ReqMessage.Lock =>
+                resCh.sendImmediately(ResMessage.LockResult(l.acquireLock()))
+              case ReqMessage.Release =>
+                l.releaseLock()
+                resCh.sendImmediately(ResMessage.Done)
+              case ReqMessage.Complete(data) =>
+                l.complete(data, s)
+                resCh.sendImmediately(ResMessage.Done)
+              case ReqMessage.Quit => loop = -1
 
     f.onComplete(Listener { (res, _) =>
       res.failed.foreach: err =>

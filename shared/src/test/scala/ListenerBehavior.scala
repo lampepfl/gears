@@ -133,10 +133,9 @@ class ListenerBehavior extends munit.FunSuite:
         completed
       assert(f1.await || f2.await)
       assert(!f1.await || !f2.await)
-      println(s"${f1.await} ${f2.await}")
 
-    assert(source1.listener.isEmpty)
-    assert(source2.listener.isEmpty)
+      assert(source1.listener.isEmpty)
+      assert(source2.listener.isEmpty)
 
   test("race polling"):
     val source1 = new Async.Source[Int]():

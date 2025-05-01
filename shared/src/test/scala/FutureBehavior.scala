@@ -97,23 +97,24 @@ class FutureBehavior extends munit.FunSuite {
 
   test("orWithCancel of 2 futures") {
     Async.blocking:
-      var touched = 0
-      Future {
-        sleep(200)
-        touched += 1
-      }.or(Future {
-        10
-      }).awaitResult
-      sleep(300)
-      assertEquals(touched, 1)
-    Async.blocking:
-      var touched = 0
-      Future {
-        sleep(200)
-        touched += 1
-      }.orWithCancel(Future { 10 }).awaitResult
-      sleep(300)
-      assertEquals(touched, 0)
+      Async.group:
+        var touched = 0
+        Future {
+          sleep(200)
+          touched += 1
+        }.or(Future {
+          10
+        }).awaitResult
+        sleep(300)
+        assertEquals(touched, 1)
+      Async.group:
+        var touched = 0
+        Future {
+          sleep(200)
+          touched += 1
+        }.orWithCancel(Future { 10 }).awaitResult
+        sleep(300)
+        assertEquals(touched, 0)
   }
 
   test("zip") {
@@ -181,7 +182,7 @@ class FutureBehavior extends munit.FunSuite {
       }
       f.cancel()
       f.awaitResult match
-        case _: Failure[CancellationException] => ()
+        case Failure(_: CancellationException) => ()
         case _                                 => assert(false)
   }
 
@@ -327,7 +328,7 @@ class FutureBehavior extends munit.FunSuite {
       (1 to 20)
         .map(_ => Future { fut.cancel() })
         .awaitAll
-    assertEquals(num.get(), 1)
+      assertEquals(num.get(), 1)
   }
 
   test("Future.withResolver cancel handler is not run after being completed") {

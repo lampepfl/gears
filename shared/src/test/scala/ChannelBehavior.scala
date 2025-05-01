@@ -126,8 +126,8 @@ class ChannelBehavior extends munit.FunSuite {
   }
 
   test("values arrive in order") {
-    for c <- getChannels do
-      Async.blocking {
+    Async.blocking {
+      for c <- getChannels do
         val f1 = Future:
           for (i <- 0 to 1000)
             c.send(i)
@@ -158,7 +158,7 @@ class ChannelBehavior extends munit.FunSuite {
         assertEquals(i1, 1001)
         assertEquals(i2, 3001)
         assertEquals(i3, 5001)
-      }
+    }
   }
 
   test("reading a closed channel returns Failure(ChannelClosedException)") {
@@ -187,9 +187,9 @@ class ChannelBehavior extends munit.FunSuite {
   }
 
   test("send a lot of values via a channel and check their sum") {
-    for (c <- getChannels) {
-      var sum = 0L
-      Async.blocking:
+    Async.blocking:
+      for (c <- getChannels) {
+        var sum = 0L
         val f1 = Future:
           for (i <- 1 to 10000)
             c.send(i)
@@ -200,12 +200,12 @@ class ChannelBehavior extends munit.FunSuite {
 
         f2.awaitResult
         assertEquals(sum, 50005000L)
-    }
+      }
   }
 
   test("multiple writers, multiple readers") {
-    for (c <- getChannels) {
-      Async.blocking:
+    Async.blocking:
+      for (c <- getChannels) {
         val f11 = Future:
           for (i <- 1 to 10000)
             c.send(i)
@@ -244,7 +244,7 @@ class ChannelBehavior extends munit.FunSuite {
         f11.awaitResult
         f12.awaitResult
         f13.awaitResult
-    }
+      }
   }
 
   test("race reads") {
@@ -268,13 +268,13 @@ class ChannelBehavior extends munit.FunSuite {
     for i <- 0 to 10 do ch.sendImmediately(i)
     Async.blocking:
       for i <- 0 to 10 do assertEquals(ch.read().right.get, i)
-    ch.close()
-    try {
-      ch.sendImmediately(0)
-      assert(false)
-    } catch {
-      case _: ChannelClosedException => ()
-    }
+      ch.close()
+      try {
+        ch.sendImmediately(0)
+        assert(false)
+      } catch {
+        case _: ChannelClosedException => ()
+      }
   }
 
   test("race sends") {
@@ -306,13 +306,13 @@ class ChannelBehavior extends munit.FunSuite {
       var valuesSent = 0
       for i <- 1 to 2 do
         Async.select(
-          a.readSource handle { case Right(v) =>
-            assertEquals(v, 0)
-          },
-          b.sendSource(10) handle { case Right(_) =>
-            valuesSent += 1
-            assertEquals(valuesSent, 1)
-          }
+          a.readSource.handle: v =>
+            assertEquals(v, Right(0)),
+          b.sendSource(10)
+            .handle: v =>
+              assert(v.isRight)
+              valuesSent += 1
+              assertEquals(valuesSent, 1)
         )
 
       a.close()
