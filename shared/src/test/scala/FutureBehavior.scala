@@ -440,8 +440,7 @@ class FutureBehavior extends munit.FunSuite {
       val ch = gears.async.UnboundedChannel[Int]()
       val reader = Future:
         gears.async.uninterruptible:
-          val i = ch.read().right.get
-          println(i)
+          ch.read().right.get
       reader.cancel()
       ch.sendImmediately(1)
       ch.sendImmediately(2)
