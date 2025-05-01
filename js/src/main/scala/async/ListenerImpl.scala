@@ -11,7 +11,7 @@ import scala.scalajs.js
 private[async] trait NumberedLockImpl:
   protected val numberedLock = new Lock:
     var locked = false
-    val queue = scala.collection.mutable.Queue[() => Unit]()
+    val queue = scala.collection.mutable.Queue[(Unit) => Any]()
 
     override def newCondition(): Condition =
       throw NotImplementedError()
@@ -28,13 +28,13 @@ private[async] trait NumberedLockImpl:
     override def lock(): Unit =
       while !tryLock() do
         val promise = js.Promise[Unit]: (resolve, _) =>
-          queue += (() => resolve(()))
+          queue += resolve
         JSPI.await(promise)
 
     override def unlock(): Unit =
       assert(locked, "unlocking an unlocked lock")
       locked = false
-      if !queue.isEmpty then queue.dequeue()()
+      if !queue.isEmpty then queue.dequeue()(())
 
     override def lockInterruptibly(): Unit =
       throw NotImplementedError()
