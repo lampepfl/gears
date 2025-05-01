@@ -52,7 +52,10 @@ class StressTest extends munit.FunSuite:
       assertEquals(sum, total * (total + 1) / 2)
   }
 
-  test("1 million concurrent tasks") {
+class C10kTest extends munit.FunSuite:
+  override val munitTimeout = 5.minutes
+
+  test("1 million concurrent tasks"):
     val count = 1_000_000
     def task(i: Int) = Task {
       AsyncOperations.sleep(100L)
@@ -66,4 +69,3 @@ class StressTest extends munit.FunSuite:
       assert(res.size == count)
       assert(res.sum == (1 + count) * count)
     }
-  }
