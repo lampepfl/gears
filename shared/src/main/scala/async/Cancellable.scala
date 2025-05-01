@@ -3,7 +3,7 @@ package gears.async
 /** A trait for cancellable entities that can be grouped. */
 trait Cancellable:
 
-  private var group: CompletionGroup = CompletionGroup.Unlinked
+  private var group: CompletionGroup = scala.compiletime.uninitialized
 
   /** Issue a cancel request */
   def cancel(): Unit
@@ -11,7 +11,7 @@ trait Cancellable:
   /** Add this cancellable to the given group after removing it from the previous group in which it was.
     */
   def link(group: CompletionGroup): this.type = synchronized:
-    this.group.drop(this)
+    if this.group != null then this.group.drop(this)
     this.group = group
     this.group.add(this)
     this
