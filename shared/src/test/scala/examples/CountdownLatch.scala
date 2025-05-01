@@ -1,4 +1,6 @@
-package gears.async
+package examples
+
+import gears.async.*
 
 import scala.collection.mutable
 
@@ -7,7 +9,7 @@ class CountdownLatch(private var count: Int) extends Async.OriginalSource[Unit]:
   val listeners = mutable.Set[Listener[Unit]]()
 
   override def poll(l: Listener[Unit]) =
-    if count == 0 then l.completeNow((), this)
+    if count == 0 then l.completeNow((), this) || true
     else false
 
   override def addListener(l: Listener[Unit]) = synchronized:
