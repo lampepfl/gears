@@ -59,13 +59,10 @@ lazy val root =
             .Config()
             .withArgs(
               List(
-                "--stack_size=4096",
-                "--stack-trace-limit=50",
                 "--experimental-wasm-exnref", // always required
                 "--experimental-wasm-jspi", // required for js.async/js.await
                 "--experimental-wasm-imported-strings", // optional (good for performance)
                 "--turboshaft-wasm" // optional, but significantly increases stability
-
               )
             )
           new NodeJSEnv(config)
