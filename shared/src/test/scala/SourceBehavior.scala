@@ -18,7 +18,7 @@ class SourceBehavior extends munit.FunSuite {
     Async.blocking:
       val f = Future.now(Success(10))
       f.onComplete(Listener.acceptingListener { (_, _) => itRan = true })
-    assertEquals(itRan, true)
+      assertEquals(itRan, true)
   }
 
   test("poll is asynchronous") {
@@ -76,8 +76,8 @@ class SourceBehavior extends munit.FunSuite {
         Future { sleep(300) }
         1
       }.await
-    val timeAfter = System.currentTimeMillis()
-    assert(timeAfter - timeBefore < 290)
+      val timeAfter = System.currentTimeMillis()
+      assert(timeAfter - timeBefore < 290)
   }
 
   test("poll()") {
@@ -132,9 +132,21 @@ class SourceBehavior extends munit.FunSuite {
   test("transform values with") {
     Async.blocking:
       val f: Future[Int] = Future { 10 }
-      assertEquals(f.transformValuesWith({ case Success(i) => i + 1 }).awaitResult, 11)
+      assertEquals(
+        f.transformValuesWith:
+          case Success(i) => i + 1
+          case _          => -1
+        .awaitResult,
+        11
+      )
       val g: Future[Int] = Future.now(Failure(AssertionError(1123)))
-      assertEquals(g.transformValuesWith({ case Failure(_) => 17 }).awaitResult, 17)
+      assertEquals(
+        g.transformValuesWith:
+          case Failure(_) => 17
+          case _          => -1
+        .awaitResult,
+        17
+      )
   }
 
   test("all listeners in chain fire") {

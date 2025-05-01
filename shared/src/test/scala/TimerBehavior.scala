@@ -31,9 +31,9 @@ class TimerBehavior extends munit.FunSuite {
       val t = Future { sleep(d.toMillis) }
       Try:
         Async.select(
-          t handle: _ =>
+          t.handle: _ =>
             throw TimeoutException(),
-          f handle: v =>
+          f.handle: v =>
             v.get
         )
 

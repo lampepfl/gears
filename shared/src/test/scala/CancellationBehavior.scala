@@ -75,7 +75,7 @@ class CancellationBehavior extends munit.FunSuite:
         Future:
           sleep(400)
           x = 1
-    assertEquals(x, 0)
+      assertEquals(x, 0)
 
   test("link group"):
     val info = Info()
