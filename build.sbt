@@ -1,7 +1,7 @@
 import sbtcrossproject.CrossPlugin.autoImport.{CrossType, crossProject}
 import scalanative.build._
 
-ThisBuild / scalaVersion := "3.3.4"
+ThisBuild / scalaVersion := "3.3.5"
 
 publish / skip := true
 
@@ -25,7 +25,7 @@ lazy val root =
       Seq(
         name := "Gears",
         versionScheme := Some("early-semver"),
-        libraryDependencies += "org.scalameta" %%% "munit" % "1.0.4" % Test,
+        libraryDependencies += "org.scalameta" %%% "munit" % "1.1.1" % Test,
         testFrameworks += new TestFramework("munit.Framework")
       )
     )
