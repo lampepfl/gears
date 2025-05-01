@@ -23,7 +23,7 @@ class AwaitBehavior extends munit.FunSuite:
     def res()(using Async) = res0.awaitResult
 
   test("completion after cancellation"):
-    Async.blocking:
+    Async.fromSync:
       val handle = FutHandle()
       handle.cancel()
       assert(!handle.locker.completeNow(1))
@@ -31,7 +31,7 @@ class AwaitBehavior extends munit.FunSuite:
       handle.locker.quit()
 
   test("cancellation of await during completion"):
-    Async.blocking:
+    Async.fromSync:
       val handle = FutHandle()
       assert(handle.locker.lockAndWait())
       println(handle.listener)
@@ -42,7 +42,7 @@ class AwaitBehavior extends munit.FunSuite:
       handle.locker.quit()
 
   test("cancellation of await during lock+release"):
-    Async.blocking:
+    Async.fromSync:
       val handle = FutHandle()
       assert(handle.locker.lockAndWait())
       handle.cancel()
@@ -51,7 +51,7 @@ class AwaitBehavior extends munit.FunSuite:
       handle.locker.quit()
 
   test("cancellation of await with contending lock after release"):
-    Async.blocking:
+    Async.fromSync:
       val handle = FutHandle()
       assert(handle.locker.lockAndWait())
       val fut2 = Future(assert(!handle.listener.acquireLock()))
@@ -101,8 +101,7 @@ class AwaitBehavior extends munit.FunSuite:
     val f = Future:
       // on scnative, suspending and changing the carrier thread currently kills lock monitors
       // so we run the body in a special single-threaded context
-      given SingleThreadedSupport.type = SingleThreadedSupport
-      Async.blocking:
+      Async.blocking(using SingleThreadedSupport):
         var loop = 0
         while loop >= 0 && !Async.current.group.isCancelled do
           if loop == 0 then AsyncOperations.`yield`()

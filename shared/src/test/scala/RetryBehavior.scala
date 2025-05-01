@@ -13,7 +13,7 @@ import Retry.Delay
 class RetryBehavior extends munit.FunSuite {
   test("Exponential backoff(2) 50ms, 5 times total schedule"):
     val start = System.currentTimeMillis()
-    Async.blocking:
+    Async.fromSync:
       var i = 0
       Retry.untilSuccess.withDelay(Delay.backoff(1.second, 50.millis)):
         i += 1
@@ -24,7 +24,7 @@ class RetryBehavior extends munit.FunSuite {
 
   test("UntilSuccess 150ms"):
     val start = System.currentTimeMillis()
-    Async.blocking:
+    Async.fromSync:
       var i = 0
       val ret = Retry.untilSuccess.withDelay(Delay.constant(150.millis)):
         if (i < 4) then
@@ -39,7 +39,7 @@ class RetryBehavior extends munit.FunSuite {
   test("UntilFailure 150ms") {
     val start = System.currentTimeMillis()
     val ex = AssertionError()
-    Async.blocking:
+    Async.fromSync:
       var i = 0
       val ret = Try(Retry.untilFailure.withDelay(Delay.constant(150.millis)):
         if (i < 4) then

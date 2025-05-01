@@ -62,7 +62,7 @@ class CancellationBehavior extends munit.FunSuite:
 
   test("no cancel"):
     var x = 0
-    Async.blocking:
+    Async.fromSync:
       Future:
         x = 1
       AsyncOperations.sleep(400)
@@ -70,7 +70,7 @@ class CancellationBehavior extends munit.FunSuite:
 
   test("group cancel"):
     var x = 0
-    Async.blocking:
+    Async.fromSync:
       Async.group:
         Future:
           sleep(400)
@@ -79,7 +79,7 @@ class CancellationBehavior extends munit.FunSuite:
 
   test("link group"):
     val info = Info()
-    Async.blocking:
+    Async.fromSync:
       val promise = Future.Promise[Unit]()
       Async.group:
         startFuture(info, promise.complete(Success(())))
@@ -89,7 +89,7 @@ class CancellationBehavior extends munit.FunSuite:
   test("nested link group"):
     val (info1, info2) = (Info(), Info())
     val (promise1, promise2) = (Future.Promise[Unit](), Future.Promise[Unit]())
-    Async.blocking:
+    Async.fromSync:
       Async.group:
         startFuture(
           info1, {
@@ -108,7 +108,7 @@ class CancellationBehavior extends munit.FunSuite:
   test("link to already cancelled"):
     var x1 = 0
     var x2 = 0
-    Async.blocking:
+    Async.fromSync:
       val f = Future:
         uninterruptible:
           sleep(500)
@@ -124,7 +124,7 @@ class CancellationBehavior extends munit.FunSuite:
 
   test("link to already cancelled awaited"):
     val info = Info()
-    Async.blocking:
+    Async.fromSync:
       val promise = Future.Promise[Unit]()
       Async.group:
         Async.current.group.cancel() // cancel now
