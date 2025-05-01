@@ -20,7 +20,7 @@ class TaskScheduleBehavior extends munit.FunSuite {
 
   test("Every 100ms, 3 times total schedule") {
     val m = TimeMeasure()
-    Async.blocking:
+    Async.fromSync:
       var i = 0
       val f = Task {
         i += 1
@@ -33,7 +33,7 @@ class TaskScheduleBehavior extends munit.FunSuite {
 
   test("Exponential backoff(2) 50ms, 5 times total schedule") {
     val m = TimeMeasure()
-    Async.blocking:
+    Async.fromSync:
       var i = 0
       val f = Task {
         i += 1
@@ -46,7 +46,7 @@ class TaskScheduleBehavior extends munit.FunSuite {
 
   test("Fibonacci backoff 10ms, 6 times total schedule") {
     val m = TimeMeasure()
-    Async.blocking:
+    Async.fromSync:
       var i = 0
       val f = Task {
         i += 1
@@ -59,7 +59,7 @@ class TaskScheduleBehavior extends munit.FunSuite {
 
   test("UntilSuccess 150ms") {
     val m = TimeMeasure()
-    Async.blocking:
+    Async.fromSync:
       var i = 0
       val t = Task {
         if (i < 4) {
@@ -76,7 +76,7 @@ class TaskScheduleBehavior extends munit.FunSuite {
   test("UntilFailure 150ms") {
     val m = TimeMeasure()
     val ex = AssertionError()
-    Async.blocking:
+    Async.fromSync:
       var i = 0
       val t = Task {
         if (i < 4) {

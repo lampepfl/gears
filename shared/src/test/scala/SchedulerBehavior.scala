@@ -9,7 +9,7 @@ import concurrent.duration.DurationInt
 
 class SchedulerBehavior extends munit.FunSuite {
   test("schedule cancellation works") {
-    Async.blocking:
+    Async.fromSync:
       var bodyRan = false
       val cancellable = Async.current.scheduler.schedule(1.seconds, () => bodyRan = true)
 
@@ -21,14 +21,14 @@ class SchedulerBehavior extends munit.FunSuite {
   }
 
   test("schedule cancellation doesn't abort inner code") {
-    Async.blocking:
+    Async.fromSync:
       var bodyRan = false
       val fut = Promise[Unit]()
       val cancellable = Async.current.scheduler.schedule(
         50.milliseconds,
         () =>
           fut.complete(Success(()))
-          Async.blocking:
+          Async.fromSync:
             sleep(500)
             bodyRan = true
       )
@@ -43,7 +43,7 @@ class SchedulerBehavior extends munit.FunSuite {
   }
 
   test("execute works") {
-    Async.blocking:
+    Async.fromSync:
       val fut = Promise[Int]()
 
       Async.current.scheduler.execute: () =>

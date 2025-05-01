@@ -15,13 +15,13 @@ import concurrent.duration.DurationInt
 class ResourceBehavior extends munit.FunSuite {
 
   def use(container: Container) =
-    Async.blocking:
+    Async.fromSync:
       container.assertInitial()
       container.res.use(_ => container.waitAcquired())
       container.waitReleased()
 
   def allocated(container: Container) =
-    Async.blocking:
+    Async.fromSync:
       container.assertInitial()
       val res = container.res.allocated
       try container.waitAcquired()
@@ -29,7 +29,7 @@ class ResourceBehavior extends munit.FunSuite {
       container.waitReleased()
 
   def mappedUse(container: Container) =
-    Async.blocking:
+    Async.fromSync:
       val res = container.res.map: _ =>
         container.waitAcquired()
         "a"
@@ -40,7 +40,7 @@ class ResourceBehavior extends munit.FunSuite {
       container.waitReleased()
 
   def mappedAllocated(container: Container) =
-    Async.blocking:
+    Async.fromSync:
       val res = container.res.map: _ =>
         container.waitAcquired()
         "a"
@@ -64,7 +64,7 @@ class ResourceBehavior extends munit.FunSuite {
   do test(s"$implName - $testName")(testCase(impl()))
 
   test("leak future") {
-    Async.blocking:
+    Async.fromSync:
       val container = AsyncResContainer()
       val res = Async.group:
         container.res.allocated

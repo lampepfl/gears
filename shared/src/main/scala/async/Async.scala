@@ -64,12 +64,13 @@ object Async extends AsyncImpl:
         .poll()
         .getOrElse:
           var result: Option[T] = None
-          src onComplete Listener.acceptingListener: (t, _) =>
-            lock.lock()
-            try
-              result = Some(t)
-              condVar.signalAll()
-            finally lock.unlock()
+          src.onComplete:
+            Listener.acceptingListener: (t, _) =>
+              lock.lock()
+              try
+                result = Some(t)
+                condVar.signalAll()
+              finally lock.unlock()
 
           lock.lock()
           try
@@ -95,17 +96,15 @@ object Async extends AsyncImpl:
       private[async] def apply[T](body: Async.Spawn ?=> T): Output[T] =
         Async.group(body)(using Async.LockingAsync(CompletionGroup.Unlinked))
 
-  /** Execute asynchronous computation `body` on currently running thread. The thread will suspend when the computation
-    * waits.
+  /** Execute asynchronous computation `body` using the given [[FromSync]] implementation.
     */
-  // def blocking[T](body: Async.Spawn ?=> T)(using blocking: FromSync { type Output[T] = T }): T =
-  //   blocking(body)
+  inline def fromSync[T](using fs: FromSync)(body: Async.Spawn ?=> T): fs.Output[T] =
+    fs(body)
 
-  /** Execute asynchronous computation `body` from the context.
-    */
-  def blocking[T](
+  /** Execute asynchronous computation `body` from the context. Requires a [[FromSync.Blocking]] implementation. */
+  inline def blocking[T](using fromSync: FromSync.Blocking)(
       body: Async.Spawn ?=> T
-  )(using fromSync: FromSync): fromSync.Output[T] =
+  ): T =
     fromSync(body)
 
   /** Returns the currently executing Async context. Equivalent to `summon[Async]`. */

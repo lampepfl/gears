@@ -13,7 +13,7 @@ import concurrent.duration.DurationInt
 class SemaphoreBehavior extends munit.FunSuite {
 
   test("single threaded semaphore") {
-    Async.blocking:
+    Async.fromSync:
       val sem = Semaphore(2)
       sem.acquire().release()
       sem.acquire()
@@ -21,7 +21,7 @@ class SemaphoreBehavior extends munit.FunSuite {
   }
 
   test("single threaded semaphore blocked") {
-    Async.blocking:
+    Async.fromSync:
       val sem = Semaphore(2)
       val guard = sem.acquire()
       sem.acquire()
@@ -32,7 +32,7 @@ class SemaphoreBehavior extends munit.FunSuite {
   }
 
   test("binary semaphore") {
-    Async.blocking:
+    Async.fromSync:
       val sem = Semaphore(1)
       var count = 0
 
@@ -47,7 +47,7 @@ class SemaphoreBehavior extends munit.FunSuite {
   }
 
   test("no release high-numbered semaphore") {
-    Async.blocking:
+    Async.fromSync:
       val futs =
         Async.group:
           val sem = Semaphore(100)

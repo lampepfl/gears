@@ -12,7 +12,7 @@ class StressTest extends munit.FunSuite:
 
   test("survives a stress test that hammers on creating futures") {
     val total = 200_000L
-    Async.blocking:
+    Async.fromSync:
       Seq[Long](1, 2, 4, 16, 10000).foreach: parallelism =>
         val k = AtomicInteger(0)
         def compute(using Async) =
@@ -29,7 +29,7 @@ class StressTest extends munit.FunSuite:
   test("survives a stress test that hammers on suspending") {
     val total = 100_000L
     val parallelism = 5000L
-    Async.blocking:
+    Async.fromSync:
       val sleepy =
         val timer = Timer(1.second)
         Future { timer.run() }

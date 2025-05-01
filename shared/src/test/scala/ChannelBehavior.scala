@@ -29,7 +29,7 @@ class ChannelBehavior extends munit.FunSuite {
   given ExecutionContext = ExecutionContext.global
 
   test("sending is blocking in SyncChannel") {
-    Async.blocking:
+    Async.fromSync:
       val c = SyncChannel[Int]()
       var touched = false
       val f1 = Future:
@@ -46,7 +46,7 @@ class ChannelBehavior extends munit.FunSuite {
   }
 
   test("sending is nonblocking in empty BufferedChannel") {
-    Async.blocking:
+    Async.fromSync:
       val c = BufferedChannel[Int](1)
       var touched = false
       val f1 = Future:
@@ -63,7 +63,7 @@ class ChannelBehavior extends munit.FunSuite {
   }
 
   test("sending is blocking in full BufferedChannel") {
-    Async.blocking:
+    Async.fromSync:
       val c = BufferedChannel[Int](3)
       var touched = false
       val f1 = Future:
@@ -84,7 +84,7 @@ class ChannelBehavior extends munit.FunSuite {
   }
 
   test("read blocks until value is available in SyncChannel") {
-    Async.blocking:
+    Async.fromSync:
       val c = SyncChannel[Int]()
       var touched = false
       val f1 = Future:
@@ -105,7 +105,7 @@ class ChannelBehavior extends munit.FunSuite {
   }
 
   test("read blocks until value is available in BufferedChannel") {
-    Async.blocking:
+    Async.fromSync:
       val c = BufferedChannel[Int](3)
       var touched = false
       val f1 = Future:
@@ -126,7 +126,7 @@ class ChannelBehavior extends munit.FunSuite {
   }
 
   test("values arrive in order") {
-    Async.blocking {
+    Async.fromSync {
       for c <- getChannels do
         val f1 = Future:
           for (i <- 0 to 1000)
@@ -162,7 +162,7 @@ class ChannelBehavior extends munit.FunSuite {
   }
 
   test("reading a closed channel returns Failure(ChannelClosedException)") {
-    Async.blocking:
+    Async.fromSync:
       val channels = getChannels
       channels.foreach(_.close())
       for c <- channels do
@@ -173,7 +173,7 @@ class ChannelBehavior extends munit.FunSuite {
   }
 
   test("writing to a closed channel throws ChannelClosedException") {
-    Async.blocking:
+    Async.fromSync:
       val channels = getChannels
       channels.foreach(_.close())
       for c <- channels do
@@ -187,7 +187,7 @@ class ChannelBehavior extends munit.FunSuite {
   }
 
   test("send a lot of values via a channel and check their sum") {
-    Async.blocking:
+    Async.fromSync:
       for (c <- getChannels) {
         var sum = 0L
         val f1 = Future:
@@ -204,7 +204,7 @@ class ChannelBehavior extends munit.FunSuite {
   }
 
   test("multiple writers, multiple readers") {
-    Async.blocking:
+    Async.fromSync:
       for (c <- getChannels) {
         val f11 = Future:
           for (i <- 1 to 10000)
@@ -248,7 +248,7 @@ class ChannelBehavior extends munit.FunSuite {
   }
 
   test("race reads") {
-    Async.blocking:
+    Async.fromSync:
       val channels = (0 until 1000).map(_ => SyncChannel[Int]()).toArray
       val sends = channels.toIterator.zipWithIndex.foreach { case (ch, idx) =>
         Future { ch.send(idx) }
@@ -266,7 +266,7 @@ class ChannelBehavior extends munit.FunSuite {
   test("unbounded channels with sync sending") {
     val ch = UnboundedChannel[Int]()
     for i <- 0 to 10 do ch.sendImmediately(i)
-    Async.blocking:
+    Async.fromSync:
       for i <- 0 to 10 do assertEquals(ch.read().right.get, i)
       ch.close()
       try {
@@ -278,7 +278,7 @@ class ChannelBehavior extends munit.FunSuite {
   }
 
   test("race sends") {
-    Async.blocking:
+    Async.fromSync:
       val ch = SyncChannel[Int]()
       var timesSent = 0
       val race = Async.race(
@@ -297,7 +297,7 @@ class ChannelBehavior extends munit.FunSuite {
   }
 
   test("race syntax") {
-    Async.blocking:
+    Async.fromSync:
       val a = SyncChannel[Int]()
       val b = SyncChannel[Int]()
 
@@ -321,7 +321,7 @@ class ChannelBehavior extends munit.FunSuite {
   }
 
   test("ChannelMultiplexer multiplexes - all subscribers read the same stream") {
-    Async.blocking:
+    Async.fromSync:
       val m = ChannelMultiplexer[Int]()
       val c = SyncChannel[Int]()
       m.addPublisher(c)
@@ -345,7 +345,7 @@ class ChannelBehavior extends munit.FunSuite {
   }
 
   test("ChannelMultiplexer multiple readers and writers") {
-    Async.blocking:
+    Async.fromSync:
       val m = ChannelMultiplexer[Int]()
 
       val sendersCount = 3
