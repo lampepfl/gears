@@ -128,10 +128,7 @@ object Future:
             Listener.ListenerLock,
             Listener.NumberedLock,
             Cancellable:
-        val stateUnused = 0
-        val stateLocked = 1
-        val stateDone = 2
-        val stateCancelled = 3
+        import AwaitListener.*
         var state = stateUnused // 0 -> unused, 1 -> locked, 2 -> done, 3 -> cancelled
         // resumed due to cancellation - only set with lock held immediately before resume
 
@@ -197,6 +194,11 @@ object Future:
 
         inline def cancelled = state == stateCancelled
       end AwaitListener
+      object AwaitListener:
+        inline val stateUnused = 0
+        inline val stateLocked = 1
+        inline val stateDone = 2
+        inline val stateCancelled = 3
 
       /** Await a source first by polling it, and, if that fails, by suspending in a onComplete call.
         */
