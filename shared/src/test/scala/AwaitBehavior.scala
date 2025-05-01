@@ -34,8 +34,6 @@ class AwaitBehavior extends munit.FunSuite:
     Async.fromSync:
       val handle = FutHandle()
       assert(handle.locker.lockAndWait())
-      println(handle.listener)
-      println(handle.fut)
       handle.cancel()
       handle.locker.complete(1)
       assertEquals(handle.res(), Success(1))
