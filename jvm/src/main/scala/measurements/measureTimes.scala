@@ -1,5 +1,7 @@
 package measurements
 
+import language.experimental.captureChecking
+
 import gears.async.default.given
 import gears.async.{Async, BufferedChannel, ChannelMultiplexer, Future, SyncChannel}
 

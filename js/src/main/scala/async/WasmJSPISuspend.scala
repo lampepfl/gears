@@ -1,5 +1,7 @@
 package gears.async.js
 
+import language.experimental.captureChecking
+
 import gears.async.*
 
 import scala.compiletime.uninitialized
@@ -28,7 +30,7 @@ trait WasmJSPISuspend(using AsyncToken) extends SuspendSupport:
     * Due to the promise possibly changing over time, within [[boundary]], we have to dynamically resolve the reference
     * _after_ running the `body`.
     */
-  protected class WasmLabel[T]():
+  protected class WasmLabel[T]() extends caps.Capability:
     var (promise, resolve) = mkPromise[T]
 
     def reset() =
@@ -37,12 +39,12 @@ trait WasmJSPISuspend(using AsyncToken) extends SuspendSupport:
       resolve = q
 
   /** Creates a new [[js.Promise]] and returns both the Promise and its `resolve` function. */
-  inline def mkPromise[T]: (js.Promise[T], T => Any) =
-    var resolve: (T => Any) | Null = null
+  inline def mkPromise[T]: (js.Promise[T], T -> Any) =
+    var resolve: (T -> Any) | Null = null
     val promise = js.Promise[T]((res, rej) => resolve = res)
     (promise, resolve)
 
-  protected class WasmSuspension[-T, +R](label: Label[R], resolve: T => Any) extends gears.async.Suspension[T, R]:
+  protected class WasmSuspension[-T, +R](label: WasmLabel[R], resolve: T => Any) extends gears.async.Suspension[T, R]:
     def resume(arg: T): R =
       label.reset()
       resolve(arg)
@@ -50,11 +52,11 @@ trait WasmJSPISuspend(using AsyncToken) extends SuspendSupport:
 
   // Implementation of the [[SuspendSupport]] interface.
 
-  opaque type Label[T] = WasmLabel[T]
+  opaque type Label[T, Cap^] = WasmLabel[T]
 
   opaque type Suspension[-T, +R] <: gears.async.Suspension[T, R] = WasmSuspension[T, R]
 
-  override def boundary[T](body: Label[T] ?=> T): T =
+  override def boundary[T, Cap^](body: Label[T, Cap]^ ?->{Cap^} T): T =
     val label = WasmLabel[T]()
     JSPI.async:
       val r = body(using label)
@@ -66,10 +68,13 @@ trait WasmJSPISuspend(using AsyncToken) extends SuspendSupport:
     * @note
     *   Should return immediately if resume is called from within body
     */
-  override def suspend[T, R](body: Suspension[T, R] => R)(using label: Label[R]): T =
+  override def suspend[T, R, Cap^](body: Suspension[T, R]^{Cap^} ->{Cap^} R)(using label: Label[R, Cap]^): T =
     val (suspPromise, suspResolve) = mkPromise[T]
     val suspend = WasmSuspension[T, R](label, suspResolve)
-    label.resolve(body(suspend))
+    label.resolve(body(
+      // SAFETY: will only be stored and returned by the Suspension resumption mechanism
+      caps.unsafe.unsafeAssumePure(suspend)
+    ))
     JSPI.await(suspPromise)
 end WasmJSPISuspend
 
@@ -102,7 +107,7 @@ final class WasmAsyncSupport(using AsyncToken) extends AsyncSupport with WasmJSP
   */
 private[async] class JsAsync(val group: CompletionGroup)(using support: WasmAsyncSupport, sched: JsAsyncScheduler.type)
     extends Async(using support, sched):
-  override def await[T](src: Async.Source[T]) =
+  override def await[T](src: Async.Source[T]^) =
     src
       .poll()
       .getOrElse:

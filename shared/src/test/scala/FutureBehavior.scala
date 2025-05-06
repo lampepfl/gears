@@ -1,3 +1,5 @@
+import language.experimental.captureChecking
+
 import gears.async.*
 import gears.async.AsyncOperations.*
 import gears.async.Future.{Promise, zip}
@@ -53,7 +55,7 @@ class FutureBehavior extends munit.FunSuite {
         }
         val res = a.or(b).await
         res
-      val _: Future[Int | Boolean] = z
+      val _: Future[Int | Boolean]^{z} = z
       assertEquals(x.await, 33)
       assertEquals(y.await, (22, 11))
   }
@@ -332,8 +334,8 @@ class FutureBehavior extends munit.FunSuite {
   }
 
   test("Future.withResolver cancel handler is not run after being completed") {
-    val num = AtomicInteger(0)
-    val fut = Future.withResolver[Int]: r =>
+    val num: AtomicInteger^ = AtomicInteger(0)
+    val fut = Future.withResolver[Int, caps.CapSet^{num}]: r =>
       r.onCancel { () => num.incrementAndGet() }
       r.resolve(1)
     fut.cancel()
@@ -342,7 +344,7 @@ class FutureBehavior extends munit.FunSuite {
 
   test("Future.withResolver is only completed after handler decides") {
     val prom = Future.Promise[Unit]()
-    val fut = Future.withResolver[Unit]: r =>
+    val fut = Future.withResolver[Unit, caps.CapSet]: r =>
       r.onCancel(() => prom.onComplete(Listener { (_, _) => r.rejectAsCancelled() }))
 
     assert(fut.poll().isEmpty)

@@ -1,3 +1,5 @@
+import language.experimental.captureChecking
+
 import gears.async.*
 import gears.async.AsyncOperations.*
 import gears.async.default.given
@@ -12,9 +14,9 @@ import boundary.break
 class CancellationBehavior extends munit.FunSuite:
   enum State:
     case Ready
-    case Initialized(f: Future[?])
+    case Initialized
     case RunningEarly
-    case Running(f: Future[?])
+    case Running
     case Failed(t: Throwable)
     case Cancelled
     case Completed
@@ -30,19 +32,21 @@ class CancellationBehavior extends munit.FunSuite:
         state match
           case State.Ready =>
             state = State.RunningEarly
-          case State.Initialized(f) =>
-            state = State.Running(f)
+          case State.Initialized =>
+            state = State.Running
           case _ => fail(s"running failed, state is $state")
-    def initialize(f: Future[?]) =
+    def initialize(f: Future[?]^) =
       synchronized:
         state match
           case State.Ready =>
-            state = State.Initialized(f)
+            state = State.Initialized
           case State.RunningEarly =>
-            state = State.Running(f)
+            state = State.Running
           case _ => fail(s"initializing failed, state is $state")
 
-  private def startFuture(info: Info, body: Async ?=> Unit = {})(using a: Async, s: Async.Spawn & a.type) =
+  private def startFuture(info: Info, body: Async ?=> Unit = {})(using a: Async, s: Async.Spawn)(using
+      a.type =:= s.type
+  ) =
     val f = Future:
       info.run()
       try
@@ -71,7 +75,7 @@ class CancellationBehavior extends munit.FunSuite:
   test("group cancel"):
     var x = 0
     Async.fromSync:
-      Async.group:
+      Async.group[Unit]:
         Future:
           sleep(400)
           x = 1
@@ -114,7 +118,7 @@ class CancellationBehavior extends munit.FunSuite:
           sleep(500)
           x1 = 1
         x2 = 1
-      Async.group:
+      Async.group: groupSpawn ?=>
         Async.current.group.cancel() // cancel now
         f.link()
         assertEquals(x1, 0)

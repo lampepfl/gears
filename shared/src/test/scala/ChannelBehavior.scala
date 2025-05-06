@@ -1,3 +1,5 @@
+import language.experimental.captureChecking
+
 import gears.async.AsyncOperations.*
 import gears.async.default.given
 import gears.async.{
@@ -255,8 +257,8 @@ class ChannelBehavior extends munit.FunSuite {
       }
       val race = Async.race(
         (0 until 100).map(i =>
-          Async.race((10 * i until 10 * i + 10).map(idx => channels(idx).readSource.transformValuesWith(_.right.get))*)
-        )*
+          Async.race((10 * i until 10 * i + 10).map(idx => channels(idx).readSource.transformValuesWith(_.right.get)))
+        )
       )
       var sum = 0
       for i <- 0 until 1000 do sum += race.awaitResult
@@ -282,7 +284,7 @@ class ChannelBehavior extends munit.FunSuite {
       val ch = SyncChannel[Int]()
       var timesSent = 0
       val race = Async.race(
-        (for i <- 0 until 1000 yield ch.sendSource(i))*
+        (for i <- 0 until 1000 yield ch.sendSource(i))
       )
       Future {
         while race.awaitResult.isRight do {

@@ -1,8 +1,9 @@
 package gears.async
 
+import language.experimental.captureChecking
+
 /** A trait for cancellable entities that can be grouped. */
 trait Cancellable:
-
   private var group: CompletionGroup = scala.compiletime.uninitialized
 
   /** Issue a cancel request */
@@ -11,9 +12,9 @@ trait Cancellable:
   /** Add this cancellable to the given group after removing it from the previous group in which it was.
     */
   def link(group: CompletionGroup): this.type = synchronized:
-    if this.group != null then this.group.drop(this)
+    if this.group != null then this.group.drop(this.unsafeAssumePure)
     this.group = group
-    this.group.add(this)
+    this.group.add(this.unsafeAssumePure)
     this
 
   /** Link this cancellable to the cancellable group of the current async context.
@@ -24,6 +25,10 @@ trait Cancellable:
   /** Unlink this cancellable from its group. */
   def unlink(): this.type =
     link(CompletionGroup.Unlinked)
+
+  /** Assume that the [[Cancellable]] is pure, in the case that cancellation does *not* refer to captured resources.
+    */
+  inline def unsafeAssumePure: Cancellable = caps.unsafe.unsafeAssumePure(this)
 
 end Cancellable
 

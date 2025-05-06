@@ -3,7 +3,8 @@ import org.scalajs.linker.interface.ESVersion
 import sbtcrossproject.CrossPlugin.autoImport.{CrossType, crossProject}
 import scalanative.build._
 
-ThisBuild / scalaVersion := "3.3.5"
+val scala = "3.7.0"
+ThisBuild / scalaVersion := scala
 
 publish / skip := true
 
@@ -27,6 +28,7 @@ lazy val root =
       Seq(
         name := "Gears",
         versionScheme := Some("early-semver"),
+        libraryDependencies += "org.scala-lang" %% "scala2-library-cc-tasty-experimental" % scala,
         libraryDependencies += "org.scalameta" %%% "munit" % "1.1.1" % Test,
         testFrameworks += new TestFramework("munit.Framework")
       )
@@ -45,7 +47,6 @@ lazy val root =
     )
     .jsSettings(
       Seq(
-        scalaVersion := "3.7.0",
         // Emit ES modules with the Wasm backend
         scalaJSLinkerConfig := {
           scalaJSLinkerConfig.value

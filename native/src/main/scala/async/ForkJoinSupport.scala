@@ -1,5 +1,7 @@
 package gears.async.native
 
+import language.experimental.captureChecking
+
 import gears.async.Future.Promise
 import gears.async._
 
@@ -15,14 +17,18 @@ class NativeContinuation[-T, +R] private[native] (val cont: T => R) extends Susp
   def resume(arg: T): R = cont(arg)
 
 trait NativeSuspend extends SuspendSupport:
-  type Label[R] = nativeContinuations.BoundaryLabel[R]
+  import caps.unsafe.unsafeAssumePure
+  type Label[R, Cap^] = nativeContinuations.BoundaryLabel[R]
   type Suspension[T, R] = NativeContinuation[T, R]
 
-  override def boundary[R](body: (Label[R]) ?=> R): R =
-    nativeContinuations.boundary(body)
+  override def boundary[R, Cap^](body: (Label[R, Cap]^) ?->{Cap^} R): R =
+    val f = (l: Label[R, Cap]^) => body(using l)
+    val pf = f.unsafeAssumePure
+    run(v ?=> pf(v))
 
-  override def suspend[T, R](body: Suspension[T, R] => R)(using Label[R]): T =
-    nativeContinuations.suspend[T, R](f => body(NativeContinuation(f)))
+  override def suspend[T, R, Cap^](body: Suspension[T, R]^{Cap^} ->{Cap^} R)(using Label[R, Cap]^): T =
+    val pbody = body.unsafeAssumePure
+    nativeContinuations.suspend[T, R](f => pbody(NativeContinuation(f)))
 end NativeSuspend
 
 /** Spawns a single thread that does all the sleeping. */
@@ -82,7 +88,7 @@ class SuspendExecutorWithSleep(exec: ExecutionContext)
     with AsyncSupport
     with AsyncOperations
     with NativeSuspend {
-  type Scheduler = this.type
+  type Scheduler = ExecutorWithSleepThread
 }
 
 class ForkJoinSupport extends SuspendExecutorWithSleep(new ForkJoinPool())

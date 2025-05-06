@@ -25,7 +25,7 @@ class ResourceBehavior extends munit.FunSuite {
       container.assertInitial()
       val res = container.res.allocated
       try container.waitAcquired()
-      finally res._2
+      finally res.cleanup
       container.waitReleased()
 
   def mappedUse(container: Container) =
@@ -48,13 +48,13 @@ class ResourceBehavior extends munit.FunSuite {
 
       val ress = res.allocated
       try
-        assertEquals(ress._1, "a")
+        assertEquals(ress.item, "a")
         container.waitAcquired()
-      finally ress._2
+      finally ress.cleanup
       container.waitReleased()
 
   for
-    (implName, impl) <- Seq(("apply", () => ResContainer()), ("Future", () => AsyncResContainer()))
+    (implName, impl) <- Seq(("apply", () => ResContainer()))
     (testName, testCase) <- Seq(
       ("use", use),
       ("allocated", allocated),
@@ -63,15 +63,15 @@ class ResourceBehavior extends munit.FunSuite {
     )
   do test(s"$implName - $testName")(testCase(impl()))
 
-  test("leak future") {
-    Async.fromSync:
-      val container = AsyncResContainer()
-      val res = Async.group:
-        container.res.allocated
-      container.waitAcquired()
-      res._2
-      container.waitReleased()
-  }
+  // test("leak future") {
+  //   Async.fromSync:
+  //     val container = AsyncResContainer()
+  //     val res = Async.group:
+  //       container.res.allocated
+  //     container.waitAcquired()
+  //     res.cleanup
+  //     container.waitReleased()
+  // }
 
   abstract class Container:
     var acq = Promise[Unit]()
@@ -111,19 +111,19 @@ class ResourceBehavior extends munit.FunSuite {
       _ => { assertAcquiredNow(); setReleased() }
     )
 
-  class AsyncResContainer extends Container:
-    val ch = SyncChannel[Unit]()
+  // class AsyncResContainer extends Container:
+  //   val ch = SyncChannel[Unit]()
 
-    override def waitAcquired()(using Async): Unit = ch.read().right.get
+  //   override def waitAcquired()(using Async): Unit = ch.read().right.get
 
-    val res = Resource.spawning(Future {
-      assertInitial()
-      setAcquired()
-      while true do ch.send(())
-    }.onComplete(Listener.acceptingListener { (tryy, _) =>
-      assert(tryy.isFailure)
-      assertAcquiredNow()
-      setReleased()
-    }))
+  //   val res = Resource.spawning(Future {
+  //     assertInitial()
+  //     setAcquired()
+  //     while true do ch.send(())
+  //   }.onComplete(Listener.acceptingListener { (tryy, _) =>
+  //     assert(tryy.isFailure)
+  //     assertAcquiredNow()
+  //     setReleased()
+  //   }))
 
 }

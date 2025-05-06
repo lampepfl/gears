@@ -1,5 +1,7 @@
 package gears.async
 
+import language.experimental.captureChecking
+
 import scala.concurrent.duration._
 
 /** The delimited continuation suspension interface. Represents a suspended computation asking for a value of type `T`
@@ -11,16 +13,16 @@ trait Suspension[-T, +R]:
 /** Support for suspension capabilities through a delimited continuation interface. */
 trait SuspendSupport:
   /** A marker for the "limit" of "delimited continuation". */
-  type Label[R]
+  type Label[R, Cap^]
 
   /** The provided suspension type. */
   type Suspension[-T, +R] <: gears.async.Suspension[T, R]
 
   /** Set the suspension marker as the body's caller, and execute `body`. */
-  def boundary[R](body: Label[R] ?=> R): R
+  def boundary[R, Cap^](body: Label[R, Cap]^ ?->{Cap^} R): R
 
   /** Should return immediately if resume is called from within body */
-  def suspend[T, R](body: Suspension[T, R] => R)(using Label[R]): T
+  def suspend[T, R, Cap^](body: Suspension[T, R]^{Cap^} ->{Cap^} R)(using Label[R, Cap]^): T
 
 /** Extends [[SuspendSupport]] with "asynchronous" boundary/resume functions, in the presence of a [[Scheduler]] */
 trait AsyncSupport extends SuspendSupport:
@@ -31,8 +33,8 @@ trait AsyncSupport extends SuspendSupport:
     s.execute(() => suspension.resume(arg))
 
   /** Schedule a computation with the suspension boundary already created. */
-  private[async] def scheduleBoundary(body: Label[Unit] ?=> Unit)(using s: Scheduler): Unit =
-    s.execute(() => boundary(body))
+  private[async] def scheduleBoundary[Cap^](body: Label[Unit, Cap]^ ?-> Unit)(using s: Scheduler): Unit =
+    s.execute(() => boundary[Unit, Cap](body))
 
 /** A scheduler implementation, with the ability to execute a computation immediately or after a delay. */
 trait Scheduler:

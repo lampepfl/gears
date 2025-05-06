@@ -1,3 +1,5 @@
+import language.experimental.captureChecking
+
 import gears.async.default.given
 import gears.async.{Async, Future, Task, TaskSchedule}
 

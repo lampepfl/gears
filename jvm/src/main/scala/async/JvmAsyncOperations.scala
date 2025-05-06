@@ -1,5 +1,7 @@
 package gears.async
 
+import language.experimental.captureChecking
+
 object JvmAsyncOperations extends AsyncOperations:
   override def sleep(millis: Long)(using Async): Unit =
     jvmInterruptible(Thread.sleep(millis))
