@@ -32,7 +32,7 @@ class CaptureCheckingBehavior extends munit.FunSuite:
 
   test("good") {
     // don't do this in real code! capturing Async.blocking's Async context across functions is hard to track
-    Async.blocking: async ?=>
+    Async.fromSync: async ?=>
       def good1[T, E](@use frs: List[Future[Result[T, E]]^]): Future[Result[List[T], E]]^{frs*, async} =
         Future: fut ?=>
           Result: ret ?=>
@@ -73,7 +73,7 @@ class CaptureCheckingBehavior extends munit.FunSuite:
 
     def readAll(@caps.use files: (File^)*) = files.map(_.readFut())
 
-    Async.blocking:
+    Async.fromSync:
       File.open("a.txt"): a =>
         File.open("b.txt"): b =>
           val futs = readAll(a, b)
@@ -97,7 +97,7 @@ class CaptureCheckingBehavior extends munit.FunSuite:
   // }
 
   test("very bad") {
-    Async.blocking: async ?=>
+    Async.fromSync: async ?=>
       def fail3[T, E](fr: Future[Result[T, E]]^): Result[Any, Any] =
         Result: label ?=>
           Future: fut ?=>
