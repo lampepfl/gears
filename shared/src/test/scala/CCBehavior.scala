@@ -69,7 +69,9 @@ class CaptureCheckingBehavior extends munit.FunSuite:
     trait File extends caps.Capability:
       def readFut(): Future[Int]^{this}
     object File:
-      def open[T](filename: String)(body: File => T)(using Async): T = ???
+      def open[T](filename: String)(body: File => T)(using Async): T = body:
+        new File:
+          def readFut(): Future[Int]^{this} = Future.resolved(0)
 
     def readAll(@caps.use files: (File^)*) = files.map(_.readFut())
 
