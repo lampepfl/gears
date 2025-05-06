@@ -132,37 +132,23 @@ class SourceBehavior extends munit.FunSuite {
   }
 
   test("transform values with") {
-    <<<<<<< HEAD
-      Async.blocking:
-        val f = Future { 10 }
-        assertEquals(f.transformValuesWith({ case Success(i) => i + 1 }).awaitResult, 11)
-        val g = Future.now(Failure(AssertionError(1123)))
-        assertEquals(g.transformValuesWith({ case Failure(_) => 17 }).awaitResult, 17)
-      ||||||| d1b4a3e
-    Async.blocking:
-      val f: Future[Int] = Future { 10 }
-      assertEquals(f.transformValuesWith({ case Success(i) => i + 1 }).awaitResult, 11)
-      val g: Future[Int] = Future.now(Failure(AssertionError(1123)))
-      assertEquals(g.transformValuesWith({ case Failure(_) => 17 }).awaitResult, 17)
-    =======
-      Async.fromSync:
-        val f: Future[Int] = Future { 10 }
-        assertEquals(
-          f.transformValuesWith:
-            case Success(i) => i + 1
-            case _          => -1
-          .awaitResult,
-          11
-        )
-        val g: Future[Int] = Future.now(Failure(AssertionError(1123)))
-        assertEquals(
-          g.transformValuesWith:
-            case Failure(_) => 17
-            case _          => -1
-          .awaitResult,
-          17
-        )
-      >>>>>>> upstream / main
+    Async.fromSync:
+      val f = Future { 10 }
+      assertEquals(
+        f.transformValuesWith:
+          case Success(i) => i + 1
+          case _          => -1
+        .awaitResult,
+        11
+      )
+      val g = Future.now(Failure(AssertionError(1123)))
+      assertEquals(
+        g.transformValuesWith:
+          case Failure(_) => 17
+          case _          => -1
+        .awaitResult,
+        17
+      )
   }
 
   test("all listeners in chain fire") {
