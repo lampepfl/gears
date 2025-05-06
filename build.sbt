@@ -45,13 +45,6 @@ lazy val root =
         }
       )
     )
-    .nativeSettings(
-      Seq(
-        nativeConfig ~= { c =>
-          c.withMultithreading(true)
-        }
-      )
-    )
     .jsSettings(
       Seq(
         // Emit ES modules with the Wasm backend
