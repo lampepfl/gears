@@ -125,48 +125,133 @@ object Future:
     private def checkCancellation(): Unit =
       if cancelRequest.get() then throw new CancellationException()
 
-    private class FutureAsync[Cap^](val group: CompletionGroup)(using label: acSupport.Label[Unit, Cap])
-        extends Async(using acSupport, acScheduler):
+    private class FutureAsync[Cap^](val group: CompletionGroup)(using label: ac.support.Label[Unit, Cap])
+        extends Async(using ac.support, ac.scheduler):
+
+      private class AwaitListener[T](src: Async.Source[T])
+          extends Function[ac.support.Suspension[T | Null, Unit], Unit],
+            Listener[T],
+            Listener.ListenerLock,
+            Listener.NumberedLock,
+            Cancellable:
+        import AwaitListener.*
+        var state: State = stateUnused
+
+        // guarded by lock; null = before apply or after resume
+        private var sus: ac.support.Suspension[T | Null, Unit] | Null = null
+        @volatile private var cancelRequest = false // if cancellation request received, checked after releasing lock
+
+        // == Function, to be passed to suspend. Call this only once and before any other usage of this class.
+        def apply(sus: ac.support.Suspension[T | Null, Unit]): Unit =
+          this.sus = sus
+          this.link(group) // may resume + remove listener immediately
+          if !cancelled then src.onComplete(this)
+
+        // == Cancellable, to be registered with Async's CompletionGroup (see apply)
+        def cancel(): Unit =
+          cancelRequest = true // set before tryLock -> other thread will see after releasing lock (if I fail)
+          if numberedLock.tryLock() && state == stateUnused
+          then // if lock is held -> will handle cancellation in complete or release
+            cancelLocked()
+
+        private def cancelLocked(): Unit =
+          val cancelledNow =
+            try
+              if sus != null then
+                state = stateCancelled // this will let the resuming code know, it was cancelled
+                ac.support.resumeAsync(sus.asInstanceOf[ac.support.Suspension[T | Null, Unit]])(null)
+                sus = null // update lock-guarded state to not resume again
+                true
+              else false // if sus is null, then was already completed before -> cancellation is ignored
+            finally numberedLock.unlock() // ignore concurrent cancelRequest
+
+          // drop the listener without the lock held (might deadlock in Source otherwise)
+          if cancelledNow then src.dropListener(this)
+        end cancelLocked
+
+        // == ListenerLock, to be exposed by Listener interface (see lock)
+        val selfNumber: Long = number // from Listener.NumberedLock
+        def acquire(): Boolean =
+          numberedLock.lock()
+          if sus != null then
+            state = stateLocked
+            true
+          else
+            numberedLock.unlock()
+            false
+        def release(): Unit =
+          // we still have the numberedLock -> might have missed the cancelRequest
+          if cancelRequest then cancelLocked() // just to prioritize cancellation higher
+          else
+            state = stateUnused
+            numberedLock.unlock()
+            // now, I see writes that happened before a failed concurrent acquire, after I release
+            if cancelRequest then cancel()
+
+        // == Listener, to be registered with Source (see apply)
+        val lock: Listener.ListenerLock | Null = this
+        def complete(data: T, source: Async.Source[T]): Unit =
+          // might have missed the cancelled -> but we ignore it -> still cancelled = false
+          ac.support.resumeAsync(sus.asInstanceOf[ac.support.Suspension[T | Null, Unit]])(data)
+          sus = null
+          state = stateDone
+          numberedLock.unlock()
+
+        inline def cancelled = state == stateCancelled
+      end AwaitListener
+      object AwaitListener:
+        type State = stateUnused.type | stateLocked.type | stateDone.type | stateCancelled.type
+        inline val stateUnused = 0
+        inline val stateLocked = 1
+        inline val stateDone = 2
+        inline val stateCancelled = 3 // resumed due to cancellation - only set with lock held immediately before resume
+
+//       override def await[U](src: Async.Source[U]^): U =
+//         class CancelSuspension extends Cancellable:
+//           var suspension: acSupport.Suspension[Try[U], Unit]^{Cap^} = uninitialized
+//           var listener: Listener[U]^{this, Cap^} = uninitialized
+//           var completed = false
+
+//           def complete() = synchronized:
+//             val completedBefore = completed
+//             completed = true
+//             completedBefore
+
+//           override def cancel() =
+//             val completedBefore = complete()
+//             if !completedBefore then
+//               src.dropListener(listener)
+//               // SAFETY: we always await for this suspension to end
+//               val pureSusp = caps.unsafe.unsafeAssumePure(suspension)
+//               acSupport.resumeAsync(pureSusp)(Failure(new CancellationException()))
       /** Await a source first by polling it, and, if that fails, by suspending in a onComplete call.
         */
-      override def await[U](src: Async.Source[U]^): U =
-        class CancelSuspension extends Cancellable:
-          var suspension: acSupport.Suspension[Try[U], Unit]^{Cap^} = uninitialized
-          var listener: Listener[U]^{this, Cap^} = uninitialized
-          var completed = false
-
-          def complete() = synchronized:
-            val completedBefore = completed
-            completed = true
-            completedBefore
-
-          override def cancel() =
-            val completedBefore = complete()
-            if !completedBefore then
-              src.dropListener(listener)
-              // SAFETY: we always await for this suspension to end
-              val pureSusp = caps.unsafe.unsafeAssumePure(suspension)
-              acSupport.resumeAsync(pureSusp)(Failure(new CancellationException()))
-
+      override def await[U](src: Async.Source[U]): U =
         if group.isCancelled then throw new CancellationException()
 
         src
           .poll()
           .getOrElse:
-            val cancellable = CancelSuspension()
-            val res = acSupport.suspend[Try[U], Unit, Cap](k =>
-              val listener = Listener.acceptingListener[U]: (x, _) =>
-                val completedBefore = cancellable.complete()
-                // SAFETY: Future should already capture Cap^
-                val purek = caps.unsafe.unsafeAssumePure(k)
-                if !completedBefore then acSupport.resumeAsync(purek)(Success(x))
-              cancellable.suspension = k
-              cancellable.listener = listener
-              cancellable.link(group) // may resume + remove listener immediately
-              src.onComplete(listener)
-            )
-            cancellable.unlink()
-            res.get
+            // val cancellable = CancelSuspension()
+            // val res = acSupport.suspend[Try[U], Unit, Cap](k =>
+            //   val listener = Listener.acceptingListener[U]: (x, _) =>
+            //     val completedBefore = cancellable.complete()
+            //     // SAFETY: Future should already capture Cap^
+            //     val purek = caps.unsafe.unsafeAssumePure(k)
+            //     if !completedBefore then acSupport.resumeAsync(purek)(Success(x))
+            //   cancellable.suspension = k
+            //   cancellable.listener = listener
+            //   cancellable.link(group) // may resume + remove listener immediately
+            //   src.onComplete(listener)
+            // )
+            // cancellable.unlink()
+            // res.get
+            val listener = AwaitListener[U](src)
+            val res = ac.support.suspend(listener) // linking and src.onComplete happen in listener
+            listener.unlink()
+            if listener.cancelled then throw CancellationException()
+            else
+              res.asInstanceOf[U] // not cancelled -> result from Source -> type U (not U | Null, still could be null)
 
       override def withGroup(group: CompletionGroup): Async = FutureAsync[Cap](group)
 

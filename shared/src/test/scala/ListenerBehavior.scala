@@ -21,7 +21,7 @@ class ListenerBehavior extends munit.FunSuite:
   test("race two futures"):
     val prom1 = Promise[Unit]()
     val prom2 = Promise[Unit]()
-    Async.blocking:
+    Async.fromSync:
       val raced = race(Future { prom1.await; 10 }, Future { prom2.await; 20 })
       assert(!raced.poll(Listener.acceptingListener((x, _) => fail(s"race uncomplete $x"))))
       prom1.complete(Success(()))
@@ -109,7 +109,7 @@ class ListenerBehavior extends munit.FunSuite:
     val lock = source1.listener.get.acquireLock()
     assertEquals(lock, true)
 
-    Async.blocking:
+    Async.fromSync:
       val l2 = source2.listener.get
       val f = Future(assertEquals(l2.acquireLock(), false))
       source1.completeWith(1)
@@ -125,7 +125,7 @@ class ListenerBehavior extends munit.FunSuite:
 
     val l2 = source2.listener.get
 
-    Async.blocking:
+    Async.fromSync:
       val f1 = Future(source1.completeNowWith(1))
       listener.sleeping.await
       listener.continue()
@@ -135,10 +135,9 @@ class ListenerBehavior extends munit.FunSuite:
         completed
       assert(f1.await || f2.await)
       assert(!f1.await || !f2.await)
-      println(s"${f1.await} ${f2.await}")
 
-    assert(source1.listener.isEmpty)
-    assert(source2.listener.isEmpty)
+      assert(source1.listener.isEmpty)
+      assert(source2.listener.isEmpty)
 
   test("race polling"):
     val source1 = new Async.Source[Int]():
@@ -169,7 +168,7 @@ class ListenerBehavior extends munit.FunSuite:
     val other = new NumberedTestListener(true, false, 1)
     val s1listener = source1.listener.get
 
-    Async.blocking:
+    Async.fromSync:
       val f1 = Future(lockBoth(s1listener, other))
       other.sleeping.await
       assert(source2.listener.get.completeNow(1, source2))
@@ -254,7 +253,8 @@ private class TestListener(expected: Int)(using asst: munit.Assertions) extends 
     asst.assertEquals(data, expected)
 
 private class NumberedTestListener private (sleep: AtomicBoolean, fail: Boolean, expected: Int)(using munit.Assertions)
-    extends TestListener(expected):
+    extends TestListener(expected)
+    with TestListenerImpl:
   // A promise that is waited for inside `lock` until `continue` is called.
   private val waiter = if sleep.get() then Some(Promise[Unit]()) else None
   // A promise that is resolved right before the lock starts waiting for `waiter`.

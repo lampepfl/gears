@@ -13,8 +13,26 @@ import scala.concurrent.duration.FiniteDuration
   *   [[Scheduler]] for the definition of the scheduler itself.
   */
 trait AsyncOperations:
+  import scala.concurrent.duration.*
+
   /** Suspends the current [[Async]] context for at least `millis` milliseconds. */
-  def sleep(millis: Long)(using Async): Unit
+  def sleep(millis: Long)(using async: Async): Unit =
+    Future
+      .withResolver[Unit]: resolver =>
+        val cancellable = async.scheduler.schedule(millis.millis, () => resolver.resolve(()))
+        resolver.onCancel: () =>
+          cancellable.cancel()
+          resolver.rejectAsCancelled()
+      .link()
+      .await
+
+  /** Yields the current [[Async]] context, possibly allowing other computations to run. */
+  def `yield`()(using async: Async) =
+    Future
+      .withResolver[Unit]: resolver =>
+        async.scheduler.execute(() => resolver.resolve(()))
+      .link()
+      .await
 
 object AsyncOperations:
   /** Suspends the current [[Async]] context for at least `millis` milliseconds.
@@ -30,6 +48,10 @@ object AsyncOperations:
     */
   inline def sleep(duration: FiniteDuration)(using AsyncOperations, Async): Unit =
     sleep(duration.toMillis)
+
+  /** Yields the current [[Async]] context, possibly allowing other computations to run. */
+  inline def `yield`()(using AsyncOperations, Async) =
+    summon[AsyncOperations].`yield`()
 
 /** Runs `op` with a timeout. When the timeout occurs, `op` is cancelled through the given [[Async]] context, and
   * [[java.util.concurrent.TimeoutException]] is thrown.

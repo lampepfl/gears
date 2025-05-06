@@ -13,7 +13,7 @@ class TimerBehavior extends munit.FunSuite {
   import gears.async.default.given
 
   test("sleeping does sleep") {
-    Async.blocking:
+    Async.fromSync:
       val now1 = System.currentTimeMillis()
       sleep(200)
       val now2 = System.currentTimeMillis()
@@ -21,7 +21,7 @@ class TimerBehavior extends munit.FunSuite {
   }
 
   test("timer does sleep") {
-    Async.blocking:
+    Async.fromSync:
       val timer = Timer(1.second)
       Future { timer.run() }
       assert(timer.src.awaitResult == timer.TimerEvent.Tick)
@@ -33,15 +33,15 @@ class TimerBehavior extends munit.FunSuite {
       val t = Future { sleep(d.toMillis) }
       Try:
         Async.select(
-          t handle: _ =>
+          t.handle: _ =>
             throw TimeoutException(),
-          f handle: v =>
+          f.handle: v =>
             v.get
         )
 
   test("racing with a sleeping future") {
     var touched = false
-    Async.blocking:
+    Async.fromSync:
       val t = `cancel future after timeout`(
         250.millis,
         Future:

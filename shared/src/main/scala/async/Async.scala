@@ -32,7 +32,7 @@ import scala.util.boundary
   * @see
   *   [[Async$.group Async.group]] and [[Future$.apply Future.apply]] for [[Async]]-subscoping operations.
   */
-trait Async(using val support: AsyncSupport, val scheduler: support.Scheduler) extends caps.Capability:
+trait Async private[async] (using val support: AsyncSupport, val scheduler: support.Scheduler) extends caps.Capability:
   /** Waits for completion of source `src` and returns the result. Suspends the computation.
     *
     * @see
@@ -47,9 +47,16 @@ trait Async(using val support: AsyncSupport, val scheduler: support.Scheduler) e
   /** Returns an [[Async]] context of the same kind as this one, with a new cancellation group. */
   def withGroup(group: CompletionGroup): Async
 
-object Async:
-  private class Blocking(val group: CompletionGroup)(using support: AsyncSupport, scheduler: support.Scheduler)
-      extends Async(using support, scheduler):
+object Async extends AsyncImpl:
+  /** The [[Async]] implementation based on blocking locks.
+    *
+    * @note
+    *   Does not currently work on Scala.js, due to locks and condvars not being available.
+    */
+  private[async] class LockingAsync(val group: CompletionGroup)(using
+      support: AsyncSupport,
+      scheduler: support.Scheduler
+  ) extends Async(using support, scheduler):
     private val lock = ReentrantLock()
     private val condVar = lock.newCondition()
 
@@ -74,13 +81,33 @@ object Async:
           finally lock.unlock()
 
     /** An Async of the same kind as this one, with a new cancellation group */
-    override def withGroup(group: CompletionGroup): Async = Blocking(group)
+    override def withGroup(group: CompletionGroup): Async = Async.LockingAsync(group)
 
-  /** Execute asynchronous computation `body` on currently running thread. The thread will suspend when the computation
-    * waits.
+  /** A way to introduce asynchronicity into a synchronous environment. */
+  trait FromSync private[async] ():
+    private[async] type Output[+T]
+    private[async] def apply[T](body: Async ?=> T): Output[T]
+
+  object FromSync:
+    /** A [[FromSync]] implementation that blocks the current runtime. */
+    type Blocking = FromSync { type Output[+T] = T }
+
+    /** Implements [[FromSync]] by directly blocking the current thread. */
+    class BlockingWithLocks(using support: AsyncSupport, scheduler: support.Scheduler) extends FromSync:
+      type Output[T] = T
+      private[async] def apply[T](body: Async.Spawn ?=> T): Output[T] =
+        Async.group(body)(using Async.LockingAsync(CompletionGroup.Unlinked))
+
+  /** Execute asynchronous computation `body` using the given [[FromSync]] implementation.
     */
-  def blocking[T](body: Async.Spawn ?=> T)(using support: AsyncSupport, scheduler: support.Scheduler): T =
-    group(body)(using Blocking(CompletionGroup.Unlinked))
+  inline def fromSync[T](using fs: FromSync)(body: Async.Spawn ?=> T): fs.Output[T] =
+    fs(body)
+
+  /** Execute asynchronous computation `body` from the context. Requires a [[FromSync.Blocking]] implementation. */
+  inline def blocking[T](using fromSync: FromSync.Blocking)(
+      body: Async.Spawn ?=> T
+  ): T =
+    fromSync(body)
 
   /** Returns the currently executing Async context. Equivalent to `summon[Async]`. */
   inline def current(using async: Async): async.type = async
@@ -98,21 +125,33 @@ object Async:
   def group[T](body: Async.Spawn ?=> T)(using Async): T =
     withNewCompletionGroup(CompletionGroup().link())(body)
 
+  private def cancelAndWaitGroup(group: CompletionGroup)(using async: Async) =
+    val completionAsync =
+      if CompletionGroup.Unlinked == async.group
+      then async
+      else async.withGroup(CompletionGroup.Unlinked)
+    group.cancel()
+    group.waitCompletion()(using completionAsync)
+
   /** Runs a body within another completion group. When the body returns, the group is cancelled and its completion
     * awaited with the `Unlinked` group.
     */
   private[async] def withNewCompletionGroup[T](group: CompletionGroup)(body: Async.Spawn ?=> T)(using
       async: Async
   ): T =
-    val completionAsync =
-      if CompletionGroup.Unlinked == async.group
-      then async
-      else async.withGroup(CompletionGroup.Unlinked)
-
     try body(using async.withGroup(group))
-    finally
-      group.cancel()
-      group.waitCompletion()(using completionAsync)
+    finally cancelAndWaitGroup(group)(using async)
+
+  /** A Resource that grants access to the [[Spawn]] capability. On cleanup, every spawned [[Future]] is cancelled and
+    * awaited, similar to [[Async.group]].
+    *
+    * Note that the [[Spawn]] from the resource must not be used for awaiting after allocation.
+    */
+  val spawning = new Resource[Spawn]:
+    override def use[V](body: Spawn => V)(using Async): V = group(spawn ?=> body(spawn))
+    override def allocated(using allocAsync: Async): (Spawn, (Async) ?=> Unit) =
+      val group = CompletionGroup() // not linked to allocAsync's group because it would not unlink itself
+      (allocAsync.withGroup(group), closeAsync ?=> cancelAndWaitGroup(group)(using closeAsync))
 
   /** An asynchronous data source. Sources can be persistent or ephemeral. A persistent source will always pass same
     * data to calls of [[Source!.poll]] and [[Source!.onComplete]]. An ephemeral source can pass new data in every call.
@@ -340,14 +379,14 @@ object Async:
                 def acquire() =
                   if found then false
                   else
-                    acquireLock()
+                    numberedLock.lock()
                     if found then
-                      releaseLock()
+                      numberedLock.unlock()
                       // no cleanup needed here, since we have done this by an earlier `complete` or `lockNext`
                       false
                     else true
                 def release() =
-                  releaseLock()
+                  numberedLock.unlock()
 
           var found = false
 

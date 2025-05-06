@@ -1,16 +1,16 @@
 import language.experimental.captureChecking
 
+import gears.async.*
 import gears.async.AsyncOperations.*
 import gears.async.Future.{Promise, zip}
-import gears.async.Listener
 import gears.async.default.given
-import gears.async.{Async, Future, Task, TaskSchedule, uninterruptible}
 
 import java.util.concurrent.CancellationException
 import java.util.concurrent.atomic.AtomicInteger
 import scala.collection.mutable
 import scala.collection.mutable.Set
 import scala.concurrent.ExecutionContext
+import scala.concurrent.duration.*
 import scala.util.Random
 import scala.util.{Failure, Success, Try}
 
@@ -18,7 +18,7 @@ class FutureBehavior extends munit.FunSuite {
   given ExecutionContext = ExecutionContext.global
 
   test("Old test") {
-    Async.blocking:
+    Async.fromSync:
       val x = Future:
         val a = Future {
           22
@@ -61,7 +61,7 @@ class FutureBehavior extends munit.FunSuite {
   }
 
   test("Constant returns") {
-    Async.blocking:
+    Async.fromSync:
       for (i <- -5 to 5)
         val f1 = Future { i }
         val f2 = Future.now(Success(i))
@@ -70,13 +70,13 @@ class FutureBehavior extends munit.FunSuite {
   }
 
   test("Future.now returning") {
-    Async.blocking:
+    Async.fromSync:
       val f = Future.now(Success(116))
       assertEquals(f.await, 116)
   }
 
   test("Constant future with timeout") {
-    Async.blocking:
+    Async.fromSync:
       val f = Future {
         sleep(50)
         55
@@ -85,7 +85,7 @@ class FutureBehavior extends munit.FunSuite {
   }
 
   test("or") {
-    Async.blocking:
+    Async.fromSync:
       val error = new AssertionError()
       val fail = Future.now(Failure(error))
       val fail1 = Future.now(Failure(error))
@@ -98,28 +98,29 @@ class FutureBehavior extends munit.FunSuite {
   }
 
   test("orWithCancel of 2 futures") {
-    Async.blocking:
-      var touched = 0
-      Future {
-        sleep(200)
-        touched += 1
-      }.or(Future {
-        10
-      }).awaitResult
-      sleep(300)
-      assertEquals(touched, 1)
-    Async.blocking:
-      var touched = 0
-      Future {
-        sleep(200)
-        touched += 1
-      }.orWithCancel(Future { 10 }).awaitResult
-      sleep(300)
-      assertEquals(touched, 0)
+    Async.fromSync:
+      Async.group:
+        var touched = 0
+        Future {
+          sleep(200)
+          touched += 1
+        }.or(Future {
+          10
+        }).awaitResult
+        sleep(300)
+        assertEquals(touched, 1)
+      Async.group:
+        var touched = 0
+        Future {
+          sleep(200)
+          touched += 1
+        }.orWithCancel(Future { 10 }).awaitResult
+        sleep(300)
+        assertEquals(touched, 0)
   }
 
   test("zip") {
-    Async.blocking:
+    Async.fromSync:
       val error = new AssertionError()
       val fail = Future.now(Failure(error))
       val fail1 = Future.now(Failure(error))
@@ -132,20 +133,20 @@ class FutureBehavior extends munit.FunSuite {
   }
 
   test("result wraps exceptions") {
-    Async.blocking:
+    Async.fromSync:
       for (i <- -5 to 5)
         val error = new AssertionError(i)
         assertEquals(Future { throw error }.awaitResult, Failure(error))
   }
 
   test("result wraps values") {
-    Async.blocking:
+    Async.fromSync:
       for (i <- -5 to 5)
         assertEquals(Future { i }.awaitResult, Success(i))
   }
 
   test("value propagates exceptions exceptions through futures") {
-    Async.blocking:
+    Async.fromSync:
       val e = AssertionError(1151)
       val f = Future {
         val f1 = Future {
@@ -161,7 +162,7 @@ class FutureBehavior extends munit.FunSuite {
   }
 
   test("futures can be nested") {
-    Async.blocking:
+    Async.fromSync:
       val z = Future {
         sleep(Random.between(0, 15L))
         Future {
@@ -176,19 +177,19 @@ class FutureBehavior extends munit.FunSuite {
   }
 
   test("future are cancelled via .interrupt() and not checking the flag in async") {
-    Async.blocking:
+    Async.fromSync:
       val f = Future {
         sleep(150L)
         10
       }
       f.cancel()
       f.awaitResult match
-        case _: Failure[CancellationException] => ()
+        case Failure(_: CancellationException) => ()
         case _                                 => assert(false)
   }
 
   test("future should cancel its group when the main body is completed") {
-    Async.blocking:
+    Async.fromSync:
       var touched = false
       val fut = Future:
         Future:
@@ -201,9 +202,9 @@ class FutureBehavior extends munit.FunSuite {
       assertEquals(touched, false)
   }
 
-  test("zombie threads exist and run to completion after the Async.blocking barrier") {
+  test("zombie threads exist and run to completion after the Async.fromSync barrier") {
     var zombieModifiedThis = false
-    Async.blocking:
+    Async.fromSync:
       val f = Future {
         Future {
           sleep(200)
@@ -213,12 +214,12 @@ class FutureBehavior extends munit.FunSuite {
       }
       assertEquals(f.await, 10)
       assertEquals(zombieModifiedThis, false)
-    Thread.sleep(300)
-    assertEquals(zombieModifiedThis, true)
+      AsyncOperations.sleep(300.millis)
+      assertEquals(zombieModifiedThis, true)
   }
 
   // test("zip on tuples with EmptyTuple") {
-  //   Async.blocking:
+  //   Async.fromSync:
   //     val z1 = Future { sleep(500); 10 } *: Future { sleep(10); 222 } *: Future { sleep(150); 333 } *: Future {
   //       EmptyTuple
   //     }
@@ -226,14 +227,14 @@ class FutureBehavior extends munit.FunSuite {
   // }
 
   // test("zip on tuples with last zip") {
-  //   Async.blocking:
+  //   Async.fromSync:
   //     val z1 = Future { 10 } *: Future { 222 }.zip(Future { 333 })
   //     assertEquals(z1.await, (10, 222, 333))
   // }
 
   // test("zip(3) first error") {
   //   for (_ <- 1 to 20)
-  //     Async.blocking:
+  //     Async.fromSync:
   //       val e1 = AssertionError(111)
   //       val e2 = AssertionError(211)
   //       val e3 = AssertionError(311)
@@ -253,7 +254,7 @@ class FutureBehavior extends munit.FunSuite {
   // }
 
   test("cancelled futures return the same constant CancellationException with no stack attached".ignore) {
-    Async.blocking:
+    Async.fromSync:
       val futures = List(
         Future { sleep(100); 1 },
         Future { sleep(100); 1 },
@@ -273,7 +274,7 @@ class FutureBehavior extends munit.FunSuite {
   }
 
   test("noninterruptible future immediate return") {
-    Async.blocking:
+    Async.fromSync:
       for (i <- -5 to 5)
         var j = -1
         uninterruptible {
@@ -285,7 +286,7 @@ class FutureBehavior extends munit.FunSuite {
   }
 
   test("Noninterruptible future cannot be interrupted immediately but throws later") {
-    Async.blocking:
+    Async.fromSync:
       var touched = false
       val f = Future {
         uninterruptible {
@@ -303,7 +304,7 @@ class FutureBehavior extends munit.FunSuite {
   }
 
   test("Promise can be cancelled") {
-    Async.blocking:
+    Async.fromSync:
       val p = Promise[Int]()
       val f = p.asFuture
       f.cancel()
@@ -314,7 +315,7 @@ class FutureBehavior extends munit.FunSuite {
   }
 
   test("Promise can't be cancelled after completion") {
-    Async.blocking:
+    Async.fromSync:
       val p = Promise[Int]()
       p.complete(Success(10))
       val f = p.asFuture
@@ -325,11 +326,11 @@ class FutureBehavior extends munit.FunSuite {
   test("Future.withResolver cancel handler is run once") {
     val num = AtomicInteger(0)
     val fut = Future.withResolver { _.onCancel { () => num.incrementAndGet() } }
-    Async.blocking:
+    Async.fromSync:
       (1 to 20)
         .map(_ => Future { fut.cancel() })
         .awaitAll
-    assertEquals(num.get(), 1)
+      assertEquals(num.get(), 1)
   }
 
   test("Future.withResolver cancel handler is not run after being completed") {
@@ -354,7 +355,7 @@ class FutureBehavior extends munit.FunSuite {
   }
 
   test("Nesting of cancellations") {
-    Async.blocking:
+    Async.fromSync:
       var touched1 = false
       var touched2 = false
       val f1 = Future {
@@ -372,7 +373,7 @@ class FutureBehavior extends munit.FunSuite {
   }
 
   test("future collector") {
-    Async.blocking:
+    Async.fromSync:
       val range = (0 to 10)
       val futs = range.map(i => Future { sleep(i * 100); i })
       val collector = Future.Collector(futs*)
@@ -383,7 +384,7 @@ class FutureBehavior extends munit.FunSuite {
   }
 
   test("mutable collector") {
-    Async.blocking:
+    Async.fromSync:
       val range = (0 to 10)
       val futs = range.map(i => Future { sleep(i * 100); i })
       val collector = Future.MutableCollector(futs*)
@@ -401,7 +402,7 @@ class FutureBehavior extends munit.FunSuite {
   }
 
   test("future collection: awaitAll*") {
-    Async.blocking:
+    Async.fromSync:
       val range = (0 to 10)
       def futs = range.map(i => Future { sleep(i * 100); i })
       assertEquals(futs.awaitAll, range.toSeq)
@@ -417,7 +418,7 @@ class FutureBehavior extends munit.FunSuite {
   }
 
   test("future collection: awaitFirst*") {
-    Async.blocking:
+    Async.fromSync:
       val range = (0 to 10)
       def futs = range.map(i => Future { sleep(i * 100); i })
       assert(range contains futs.awaitFirst)
@@ -437,12 +438,11 @@ class FutureBehavior extends munit.FunSuite {
   }
 
   test("uninterruptible should continue even when Future is cancelled") {
-    Async.blocking:
+    Async.fromSync:
       val ch = gears.async.UnboundedChannel[Int]()
       val reader = Future:
         gears.async.uninterruptible:
-          val i = ch.read().right.get
-          println(i)
+          ch.read().right.get
       reader.cancel()
       ch.sendImmediately(1)
       ch.sendImmediately(2)

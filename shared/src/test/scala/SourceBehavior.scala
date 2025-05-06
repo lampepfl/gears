@@ -1,8 +1,8 @@
 import language.experimental.captureChecking
 
+import gears.async.*
 import gears.async.AsyncOperations.*
 import gears.async.default.given
-import gears.async.{Async, Future, Listener, withTimeout}
 
 import java.util.concurrent.CancellationException
 import scala.concurrent.ExecutionContext
@@ -17,15 +17,15 @@ class SourceBehavior extends munit.FunSuite {
 
   test("onComplete register after completion runs immediately") {
     @volatile var itRan = false
-    Async.blocking:
+    Async.fromSync:
       val f = Future.now(Success(10))
       f.onComplete(Listener.acceptingListener { (_, _) => itRan = true })
-    assertEquals(itRan, true)
+      assertEquals(itRan, true)
   }
 
   test("poll is asynchronous") {
     @volatile var itRan = false
-    Async.blocking:
+    Async.fromSync:
       val f = Future { sleep(50); 10 }
       f.poll(Listener.acceptingListener { (_, _) => itRan = true })
       assertEquals(itRan, false)
@@ -33,7 +33,7 @@ class SourceBehavior extends munit.FunSuite {
 
   test("onComplete is asynchronous") {
     @volatile var itRan = false
-    Async.blocking:
+    Async.fromSync:
       val f = Future {
         sleep(50); 10
       }
@@ -43,19 +43,19 @@ class SourceBehavior extends munit.FunSuite {
 
   test("await is synchronous") {
     @volatile var itRan = false
-    Async.blocking:
+    Async.fromSync:
       val f = Future {
         sleep(250);
         10
       }
       f.onComplete(Listener.acceptingListener { (_, _) => itRan = true })
       f.await
-      Thread.sleep(100) // onComplete of await and manual may be scheduled
+      AsyncOperations.sleep(100) // onComplete of await and manual may be scheduled
       assertEquals(itRan, true)
   }
 
   test("sources wait on children sources when they block") {
-    Async.blocking:
+    Async.fromSync:
       val timeBefore = System.currentTimeMillis()
       val f = Future {
         sleep(50)
@@ -73,17 +73,17 @@ class SourceBehavior extends munit.FunSuite {
 
   test("sources do not wait on zombie sources (which are killed at the end of Async.Blocking)") {
     val timeBefore = System.currentTimeMillis()
-    Async.blocking:
+    Async.fromSync:
       val f = Future {
         Future { sleep(300) }
         1
       }.await
-    val timeAfter = System.currentTimeMillis()
-    assert(timeAfter - timeBefore < 290)
+      val timeAfter = System.currentTimeMillis()
+      assert(timeAfter - timeBefore < 290)
   }
 
   test("poll()") {
-    Async.blocking:
+    Async.fromSync:
       val f = Future {
         sleep(100)
         1
@@ -94,7 +94,7 @@ class SourceBehavior extends munit.FunSuite {
   }
 
   test("onComplete() fires") {
-    Async.blocking:
+    Async.fromSync:
       @volatile var aRan = false
       @volatile var bRan = false
       val f = Future {
@@ -106,13 +106,13 @@ class SourceBehavior extends munit.FunSuite {
       assertEquals(aRan, false)
       assertEquals(bRan, false)
       f.await
-      Thread.sleep(100) // onComplete of await and manual may be scheduled
+      AsyncOperations.sleep(100) // onComplete of await and manual may be scheduled
       assertEquals(aRan, true)
       assertEquals(bRan, true)
   }
 
   test("dropped onComplete() listener does not fire") {
-    Async.blocking:
+    Async.fromSync:
       @volatile var aRan = false
       @volatile var bRan = false
       val f = Future {
@@ -126,21 +126,47 @@ class SourceBehavior extends munit.FunSuite {
       assertEquals(bRan, false)
       f.dropListener(l)
       f.await
-      Thread.sleep(100) // onComplete of await and manual may be scheduled
+      AsyncOperations.sleep(100) // onComplete of await and manual may be scheduled
       assertEquals(aRan, false)
       assertEquals(bRan, true)
   }
 
   test("transform values with") {
+    <<<<<<< HEAD
+      Async.blocking:
+        val f = Future { 10 }
+        assertEquals(f.transformValuesWith({ case Success(i) => i + 1 }).awaitResult, 11)
+        val g = Future.now(Failure(AssertionError(1123)))
+        assertEquals(g.transformValuesWith({ case Failure(_) => 17 }).awaitResult, 17)
+      ||||||| d1b4a3e
     Async.blocking:
-      val f = Future { 10 }
+      val f: Future[Int] = Future { 10 }
       assertEquals(f.transformValuesWith({ case Success(i) => i + 1 }).awaitResult, 11)
-      val g = Future.now(Failure(AssertionError(1123)))
+      val g: Future[Int] = Future.now(Failure(AssertionError(1123)))
       assertEquals(g.transformValuesWith({ case Failure(_) => 17 }).awaitResult, 17)
+    =======
+      Async.fromSync:
+        val f: Future[Int] = Future { 10 }
+        assertEquals(
+          f.transformValuesWith:
+            case Success(i) => i + 1
+            case _          => -1
+          .awaitResult,
+          11
+        )
+        val g: Future[Int] = Future.now(Failure(AssertionError(1123)))
+        assertEquals(
+          g.transformValuesWith:
+            case Failure(_) => 17
+            case _          => -1
+          .awaitResult,
+          17
+        )
+      >>>>>>> upstream / main
   }
 
   test("all listeners in chain fire") {
-    Async.blocking:
+    Async.fromSync:
       var aRan = Future.Promise[Unit]()
       var bRan = Future.Promise[Unit]()
       val wait = Future.Promise[Unit]()
@@ -161,7 +187,7 @@ class SourceBehavior extends munit.FunSuite {
 
   test("either") {
     @volatile var touched = false
-    Async.blocking:
+    Async.fromSync:
       val f1 = Future { sleep(300); touched = true; 10 }
       val f2 = Future { sleep(50); 40 }
       val g = either(f1, f2).awaitResult
@@ -171,12 +197,12 @@ class SourceBehavior extends munit.FunSuite {
   }
 
   test("source values") {
-    Async.blocking:
+    Async.fromSync:
       val src = Async.Source.values(1, 2)
       assertEquals(src.awaitResult, 1)
       assertEquals(src.awaitResult, 2)
 
-    Async.blocking:
+    Async.fromSync:
       val src = Async.Source.values(1)
       assertEquals(src.awaitResult, 1)
       assertEquals(

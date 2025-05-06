@@ -5,6 +5,7 @@ import language.experimental.captureChecking
 import gears.async.Async.Source
 import gears.async.Async.SourceSymbol
 
+import java.util.concurrent.locks.Lock
 import java.util.concurrent.locks.ReentrantLock
 import scala.annotation.tailrec
 
@@ -100,14 +101,10 @@ object Listener:
       case l: ListenerLock => body(l)
 
   /** A helper instance that provides an uniquely numbered mutex. */
-  trait NumberedLock:
+  trait NumberedLock extends NumberedLockImpl:
     import NumberedLock._
 
-    val number = listenerNumber.getAndIncrement()
-    private val lock0 = ReentrantLock()
-
-    protected def acquireLock() = lock0.lock()
-    protected def releaseLock() = lock0.unlock()
+    protected val number = listenerNumber.getAndIncrement()
 
   object NumberedLock:
     private val listenerNumber = java.util.concurrent.atomic.AtomicLong()
