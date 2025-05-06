@@ -18,7 +18,7 @@ trait AsyncOperations:
   /** Suspends the current [[Async]] context for at least `millis` milliseconds. */
   def sleep(millis: Long)(using async: Async): Unit =
     Future
-      .withResolver[Unit]: resolver =>
+      .withResolver[Unit, caps.CapSet^{}]: resolver =>
         val cancellable = async.scheduler.schedule(millis.millis, () => resolver.resolve(()))
         resolver.onCancel: () =>
           cancellable.cancel()
@@ -29,7 +29,7 @@ trait AsyncOperations:
   /** Yields the current [[Async]] context, possibly allowing other computations to run. */
   def `yield`()(using async: Async) =
     Future
-      .withResolver[Unit]: resolver =>
+      .withResolver[Unit, caps.CapSet^{}]: resolver =>
         async.scheduler.execute(() => resolver.resolve(()))
       .link()
       .await

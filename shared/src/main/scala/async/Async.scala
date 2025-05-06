@@ -100,11 +100,11 @@ object Async extends AsyncImpl:
 
   /** Execute asynchronous computation `body` using the given [[FromSync]] implementation.
     */
-  inline def fromSync[T](using fs: FromSync)(body: Async.Spawn ?=> T): fs.Output[T] =
+  def fromSync[T](using fs: FromSync)(body: Async.Spawn ?=> T): fs.Output[T] =
     fs(body)
 
   /** Execute asynchronous computation `body` from the context. Requires a [[FromSync.Blocking]] implementation. */
-  inline def blocking[T](using fromSync: FromSync.Blocking)(
+  def blocking[T](using fromSync: FromSync.Blocking)(
       body: Async.Spawn ?=> T
   ): T =
     fromSync(body)
@@ -117,7 +117,7 @@ object Async extends AsyncImpl:
     * Most functions should not take [[Spawn]] as a parameter, unless the function explicitly wants to spawn "dangling"
     * runnable [[Future]]s. Instead, functions should take [[Async]] and spawn scoped futures within [[Async.group]].
     */
-  opaque type Spawn <: Async = Async
+  final opaque type Spawn <: Async = Async
 
   /** Runs `body` inside a spawnable context where it is allowed to spawn concurrently runnable [[Future]]s. When the
     * body returns, all spawned futures are cancelled and waited for.
@@ -147,11 +147,12 @@ object Async extends AsyncImpl:
     *
     * Note that the [[Spawn]] from the resource must not be used for awaiting after allocation.
     */
-  val spawning = new Resource[Spawn]:
-    override def use[V](body: Spawn => V)(using Async): V = group(spawn ?=> body(spawn))
-    override def allocated(using allocAsync: Async): (Spawn, (Async) ?=> Unit) =
-      val group = CompletionGroup() // not linked to allocAsync's group because it would not unlink itself
-      (allocAsync.withGroup(group), closeAsync ?=> cancelAndWaitGroup(group)(using closeAsync))
+  // not sure if we can capture-check this for now
+  // val spawning = new Resource[Spawn]:
+  //   override def use[V](body: Spawn => V)(using Async): V = group(spawn ?=> body(spawn))
+  //   override def allocated(using allocAsync: Async): (Spawn, (Async) ?=> Unit) =
+  //     val group = CompletionGroup() // not linked to allocAsync's group because it would not unlink itself
+  //     (allocAsync.withGroup(group), closeAsync ?=> cancelAndWaitGroup(group)(using closeAsync))
 
   /** An asynchronous data source. Sources can be persistent or ephemeral. A persistent source will always pass same
     * data to calls of [[Source!.poll]] and [[Source!.onComplete]]. An ephemeral source can pass new data in every call.

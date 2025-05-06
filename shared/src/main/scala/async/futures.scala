@@ -12,6 +12,7 @@ import scala.util
 import scala.util.control.NonFatal
 import scala.util.{Failure, Success, Try}
 import gears.async.Async.SourceSymbol
+import scala.annotation.meta.companionMethod
 
 /** Futures are [[Async.Source Source]]s that has the following properties:
   *   - They represent a single value: Once resolved, [[Async.await await]]-ing on a [[Future]] should always return the
@@ -125,27 +126,27 @@ object Future:
     private def checkCancellation(): Unit =
       if cancelRequest.get() then throw new CancellationException()
 
-    private class FutureAsync[Cap^](val group: CompletionGroup)(using label: ac.support.Label[Unit, Cap])
+    private class FutureAsync[Cap^](val group: CompletionGroup)(using label: ac.support.Label[Unit, Cap]^)
         extends Async(using ac.support, ac.scheduler):
 
-      private class AwaitListener[T](src: Async.Source[T])
-          extends Function[ac.support.Suspension[T | Null, Unit], Unit],
-            Listener[T],
+      private class AwaitListener[T](@annotation.constructorOnly src: Async.Source[T]^)
+          extends Listener[T],
             Listener.ListenerLock,
             Listener.NumberedLock,
             Cancellable:
         import AwaitListener.*
         var state: State = stateUnused
+        val pureSrc= caps.unsafe.unsafeAssumePure(src) // we only use it for onComplete / dropListener
 
         // guarded by lock; null = before apply or after resume
-        private var sus: ac.support.Suspension[T | Null, Unit] | Null = null
+        private var sus: ac.support.Suspension[T | Null, Unit]^{Cap^} | Null = null
         @volatile private var cancelRequest = false // if cancellation request received, checked after releasing lock
 
         // == Function, to be passed to suspend. Call this only once and before any other usage of this class.
-        def apply(sus: ac.support.Suspension[T | Null, Unit]): Unit =
+        def apply(sus: ac.support.Suspension[T | Null, Unit]^{Cap^}): Unit =
           this.sus = sus
           this.link(group) // may resume + remove listener immediately
-          if !cancelled then src.onComplete(this)
+          if !cancelled then pureSrc.onComplete(this)
 
         // == Cancellable, to be registered with Async's CompletionGroup (see apply)
         def cancel(): Unit =
@@ -166,7 +167,7 @@ object Future:
             finally numberedLock.unlock() // ignore concurrent cancelRequest
 
           // drop the listener without the lock held (might deadlock in Source otherwise)
-          if cancelledNow then src.dropListener(this)
+          if cancelledNow then pureSrc.dropListener(this)
         end cancelLocked
 
         // == ListenerLock, to be exposed by Listener interface (see lock)
@@ -189,15 +190,15 @@ object Future:
             if cancelRequest then cancel()
 
         // == Listener, to be registered with Source (see apply)
-        val lock: Listener.ListenerLock | Null = this
-        def complete(data: T, source: Async.Source[T]): Unit =
+        val lock = this
+        def complete(data: T, source: Async.SourceSymbol[T]): Unit =
           // might have missed the cancelled -> but we ignore it -> still cancelled = false
           ac.support.resumeAsync(sus.asInstanceOf[ac.support.Suspension[T | Null, Unit]])(data)
           sus = null
           state = stateDone
           numberedLock.unlock()
 
-        inline def cancelled = state == stateCancelled
+        def cancelled = state == stateCancelled
       end AwaitListener
       object AwaitListener:
         type State = stateUnused.type | stateLocked.type | stateDone.type | stateCancelled.type
@@ -206,48 +207,16 @@ object Future:
         inline val stateDone = 2
         inline val stateCancelled = 3 // resumed due to cancellation - only set with lock held immediately before resume
 
-//       override def await[U](src: Async.Source[U]^): U =
-//         class CancelSuspension extends Cancellable:
-//           var suspension: acSupport.Suspension[Try[U], Unit]^{Cap^} = uninitialized
-//           var listener: Listener[U]^{this, Cap^} = uninitialized
-//           var completed = false
-
-//           def complete() = synchronized:
-//             val completedBefore = completed
-//             completed = true
-//             completedBefore
-
-//           override def cancel() =
-//             val completedBefore = complete()
-//             if !completedBefore then
-//               src.dropListener(listener)
-//               // SAFETY: we always await for this suspension to end
-//               val pureSusp = caps.unsafe.unsafeAssumePure(suspension)
-//               acSupport.resumeAsync(pureSusp)(Failure(new CancellationException()))
       /** Await a source first by polling it, and, if that fails, by suspending in a onComplete call.
         */
-      override def await[U](src: Async.Source[U]): U =
+      override def await[U](src: Async.Source[U]^): U =
         if group.isCancelled then throw new CancellationException()
 
         src
           .poll()
           .getOrElse:
-            // val cancellable = CancelSuspension()
-            // val res = acSupport.suspend[Try[U], Unit, Cap](k =>
-            //   val listener = Listener.acceptingListener[U]: (x, _) =>
-            //     val completedBefore = cancellable.complete()
-            //     // SAFETY: Future should already capture Cap^
-            //     val purek = caps.unsafe.unsafeAssumePure(k)
-            //     if !completedBefore then acSupport.resumeAsync(purek)(Success(x))
-            //   cancellable.suspension = k
-            //   cancellable.listener = listener
-            //   cancellable.link(group) // may resume + remove listener immediately
-            //   src.onComplete(listener)
-            // )
-            // cancellable.unlink()
-            // res.get
-            val listener = AwaitListener[U](src)
-            val res = ac.support.suspend(listener) // linking and src.onComplete happen in listener
+            val listener: AwaitListener[U]^{Cap^} = AwaitListener[U](src)
+            val res = ac.support.suspend(susp => listener(susp)) // linking and src.onComplete happen in listener
             listener.unlink()
             if listener.cancelled then throw CancellationException()
             else
