@@ -1,3 +1,5 @@
+import language.experimental.captureChecking
+
 import gears.async.Async
 import gears.async.AsyncOperations.sleep
 import gears.async.Future
@@ -35,7 +37,7 @@ class ResourceBehavior extends munit.FunSuite {
         "a"
       container.assertInitial()
       res.use: str =>
-        assertEquals(str, "a")
+        assertEquals(str.item: String, "a")
         container.waitAcquired()
       container.waitReleased()
 
@@ -48,7 +50,7 @@ class ResourceBehavior extends munit.FunSuite {
 
       val ress = res.allocated
       try
-        assertEquals(ress.item, "a")
+        assertEquals(ress.item: String, "a")
         container.waitAcquired()
       finally ress.cleanup
       container.waitReleased()
@@ -72,6 +74,15 @@ class ResourceBehavior extends munit.FunSuite {
   //     res.cleanup
   //     container.waitReleased()
   // }
+
+  test("leak"):
+    Async.fromSync:
+      class A()
+      val r = new Resource[A]:
+        def allocated(using Async): Pear^ = new Pear:
+          val item: A^ = A()
+          def cleanup(using Async) = ()
+      val leak = r.use[A](p => p.item)
 
   abstract class Container:
     var acq = Promise[Unit]()

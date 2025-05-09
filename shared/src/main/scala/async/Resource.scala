@@ -8,9 +8,9 @@ import language.experimental.captureChecking
 trait Resource[+T]:
   self: Resource[T]^ =>
 
-  /** Pear is a pair type without generics. */
+  /** Pear is a (T, Async ?=> Unit) pair without generics. */
   trait Pear:
-    val item: T
+    val item: T^
     def cleanup(using Async): Unit
 
   /** Run a structured action on the resource. It is allocated and released automatically.
@@ -20,9 +20,9 @@ trait Resource[+T]:
     * @return
     *   the result of [[body]]
     */
-  def use[V](body: T => V)(using Async): V =
+  def use[V](body: Pear^ => V)(using Async): V =
     val res = allocated
-    try body(res.item)
+    try body(res)
     finally res.cleanup
 
   /** Allocate the resource and leak it. **Use with caution**. The programmer is responsible for closing the resource
@@ -40,8 +40,12 @@ trait Resource[+T]:
     * @return
     *   the transformed resource used to access the mapped resource data
     */
-  def map[U](fn: T => Async ?=> U): Resource[U]^{fn, self} = new Resource[U]:
-    override def use[V](body: U => V)(using Async): V = self.use(t => body(fn(t)))
+  def map[U](fn: Async ?=> (t: T^) => U): Resource[U]^{fn, self} = new Resource[U]:
+    override def use[V](body: Pear^ => V)(using Async): V = self.use: t =>
+      body:
+        new Pear:
+          val item = fn(t.item)
+          def cleanup(using Async): Unit = t.cleanup
     override def allocated(using Async)  =
       val res = self.allocated
       try
@@ -62,8 +66,14 @@ trait Resource[+T]:
     * @return
     *   the transformed resource that provides the two-levels-in-one access
     */
-  def flatMap[U](fn: T => Async ?=> Resource[U]^): Resource[U]^{fn, this} = new Resource[U]:
-    override def use[V](body: U => V)(using Async): V = self.use(t => fn(t).use(body))
+  def flatMap[U](fn: Async ?=> (t: T^) => Resource[U]^): Resource[U]^{fn, this} = new Resource[U]:
+    override def use[V](body: Pear^ => V)(using Async): V = self.use: t =>
+      val u = fn(t.item)
+      val inner = u.allocated
+      body:
+        new Pear:
+          val item = inner.item
+          def cleanup(using Async): Unit = inner.cleanup
     override def allocated(using Async)  =
       val res = self.allocated
       try
@@ -135,7 +145,7 @@ object Resource:
     * @return
     *   a new resource wrapping access to the combined element
     */
-  def both[T, U, V](res1: Resource[T]^, res2: Resource[U]^)(join: (T, U) => V): Resource[V]^{res1, res2, join} = new Resource[V]:
+  def both[T, U, V](res1: Resource[T]^, res2: Resource[U]^)(join: (t: T^, u: U^) => V): Resource[V]^{res1, res2, join} = new Resource[V]:
     override def allocated(using async: Async) =
       val p1  = res1.allocated
       val p2  =
@@ -170,8 +180,8 @@ object Resource:
     * @return
     *   the resource of the list of elements provided by the single resources
     */
-  def all[T](ress: List[Resource[T]^]): Resource[List[T]]^{ress*} = ress match
+  def all[T](ress: List[Resource[T]^]): Resource[List[T^]]^{ress*} = ress match
     case Nil          => just(Nil)
-    case head :: Nil  => head.map(List(_))
+    case head :: Nil  => head.map(t => List(t))
     case head :: next => both(head, all(next))(_ :: _)
 end Resource
