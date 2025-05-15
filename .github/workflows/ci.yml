@@ -76,7 +76,7 @@ jobs:
         java-version: 21
     - uses: actions/setup-node@v4
       with:
-          node-version: '>=23'
+          node-version: '23'
     - uses: sbt/setup-sbt@v1
     - name: Test
       run: sbt rootJS/test
