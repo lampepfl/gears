@@ -3,7 +3,7 @@ import org.scalajs.linker.interface.ESVersion
 import sbtcrossproject.CrossPlugin.autoImport.{CrossType, crossProject}
 import scalanative.build._
 
-ThisBuild / scalaVersion := "3.3.5"
+ThisBuild / scalaVersion := "3.3.6"
 
 publish / skip := true
 
