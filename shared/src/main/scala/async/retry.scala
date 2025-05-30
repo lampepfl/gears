@@ -35,7 +35,7 @@ case class Retry(
           else boundary.break(value)
         catch
           case b: boundary.Break[?] => throw b // handle this manually as it will be otherwise caught by NonFatal
-          case NonFatal(exception) =>
+          case NonFatal(exception)  =>
             if maximumFailures.exists(_ == failures) then // maximum failure count reached
               throw exception
             else
