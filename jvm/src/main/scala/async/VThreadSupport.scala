@@ -52,7 +52,7 @@ object VThreadScheduler extends Scheduler:
 object VThreadSupport extends AsyncSupport:
   type Scheduler = VThreadScheduler.type
 
-  final class VThreadLabel[R]() extends caps.Capability:
+  final class VThreadLabel[R]() extends caps.SharedCapability:
     private var result: Option[R] = None
     private val lock = ReentrantLock()
     private val cond = lock.newCondition()
@@ -109,7 +109,7 @@ object VThreadSupport extends AsyncSupport:
 
   override opaque type Suspension[-T, +R] <: gears.async.Suspension[T, R] = VThreadSuspension[T, R]
 
-  override def boundary[R, Cap^](body: Label[R, Cap]^ ?->{Cap^} R): R =
+  override def boundary[R, Cap^](body: Label[R, Cap]^ ?->{Cap} R): R =
     val label = VThreadLabel[R]()
     VThreadScheduler.unsafeExecute: () =>
       val result = body(using label)
@@ -121,12 +121,12 @@ object VThreadSupport extends AsyncSupport:
     suspension.l.clearResult()
     suspension.setInput(arg)
 
-  override def scheduleBoundary[Cap^](body: Label[Unit, Cap] ?-> Unit)(using Scheduler): Unit =
+  override def scheduleBoundary(body: Label[Unit, {}] ?-> Unit)(using Scheduler): Unit =
     VThreadScheduler.execute: () =>
       val label = VThreadLabel[Unit]()
       body(using label)
 
-  override def suspend[T, R, Cap^](body: Suspension[T, R]^{Cap^} ->{Cap^} R)(using l: Label[R, Cap]^): T =
+  override def suspend[T, R, Cap^](body: Suspension[T, R]^{Cap} ->{Cap} R)(using l: Label[R, Cap]^): T =
     val sus = new VThreadSuspension[T, R](using caps.unsafe.unsafeAssumePure(l))
     val res = body(sus)
     l.setResult(

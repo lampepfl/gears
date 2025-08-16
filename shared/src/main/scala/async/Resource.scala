@@ -10,7 +10,7 @@ trait Resource[+T]:
 
   /** Pear is a (T, Async ?=> Unit) pair without generics. */
   trait Pear:
-    val item: T^
+    val item: T^{this}
     def cleanup(using Async): Unit
 
   /** Run a structured action on the resource. It is allocated and released automatically.
@@ -180,8 +180,8 @@ object Resource:
     * @return
     *   the resource of the list of elements provided by the single resources
     */
-  def all[T](ress: List[Resource[T]^]): Resource[List[T^]]^{ress*} = ress match
-    case Nil          => just(Nil)
-    case head :: Nil  => head.map(t => List(t))
-    case head :: next => both(head, all(next))(_ :: _)
+  // def all[T, C^](ress: List[Resource[T]^{C}]): Resource[List[T^{C}]]^{C} = ress match
+  //   case Nil          => just(Nil)
+  //   case head :: Nil  => head.map(t => List(t))
+  //   case head :: next => both(head, all(next))(_ :: _)
 end Resource

@@ -3,7 +3,7 @@ import org.scalajs.linker.interface.ESVersion
 import sbtcrossproject.CrossPlugin.autoImport.{CrossType, crossProject}
 import scalanative.build._
 
-val scala = "3.7.0"
+val scala = "3.8.0-RC1-bin-SNAPSHOT"
 ThisBuild / scalaVersion := scala
 
 publish / skip := true
@@ -28,9 +28,12 @@ lazy val root =
       Seq(
         name := "Gears",
         versionScheme := Some("early-semver"),
-        libraryDependencies += "org.scala-lang" %% "scala2-library-cc-tasty-experimental" % scala,
         libraryDependencies += "org.scalameta" %%% "munit" % "1.1.1" % Test,
-        testFrameworks += new TestFramework("munit.Framework")
+        testFrameworks += new TestFramework("munit.Framework"),
+        scalacOptions ++= Seq(
+          "-Ycc-debug",
+          "-Xprint:cc"
+        )
       )
     )
     .jvmSettings(

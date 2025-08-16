@@ -32,7 +32,7 @@ import scala.util.boundary
   * @see
   *   [[Async$.group Async.group]] and [[Future$.apply Future.apply]] for [[Async]]-subscoping operations.
   */
-trait Async private[async] (using val support: AsyncSupport, val scheduler: support.Scheduler) extends caps.Capability:
+trait Async private[async] (using val support: AsyncSupport, val scheduler: support.Scheduler) extends caps.SharedCapability:
   /** Waits for completion of source `src` and returns the result. Suspends the computation.
     *
     * @see
@@ -280,7 +280,7 @@ object Async extends AsyncImpl:
         override def dropListener(k: Listener[T]^): Unit = ()
     end values
 
-  extension [T](src: Source[T]^)
+  extension [Origin](src: Source[Origin]^)
     /** Create a new source that requires the original source to run the given transformation function on every value
       * received.
       *
@@ -291,21 +291,21 @@ object Async extends AsyncImpl:
       *   the transformation function to be run on every value. `f` is run *before* the item is passed to the
       *   [[Listener]].
       */
-    def transformValuesWith[U](f: T => U): Source[U]^{f, src} =
+    def transformValuesWith[U](f: Origin => U): Source[U]^{f, src} =
       new Source[U]:
-        val selfSrc = this
-        def transform(k: Listener[U]^): Listener.ForwardingListener[T]^{k, f} =
-          new Listener.ForwardingListener[T](selfSrc, k):
-            val lock = k.lock
-            def complete(data: T, source: SourceSymbol[T]) =
-              k.complete(f(data), selfSrc)
+        self: Source[U]^{f, src} =>
+          def transform(k: Listener[U]^): Listener.ForwardingListener[Origin]^{k, f} =
+            new Listener.ForwardingListener[Origin](self, k):
+              val lock = k.lock
+              def complete(data: Origin, source: SourceSymbol[Origin]) =
+                k.complete(f(data), self.symbol)
 
-        def poll(k: Listener[U]^): Boolean =
-          src.poll(transform(k))
-        def onComplete(k: Listener[U]^): Unit =
-          src.onComplete(transform(k))
-        def dropListener(k: Listener[U]^): Unit =
-          src.dropListener(transform(k))
+          def poll(k: Listener[U]^): Boolean =
+            src.poll(transform(k))
+          def onComplete(k: Listener[U]^): Unit =
+            src.onComplete(transform(k))
+          def dropListener(k: Listener[U]^): Unit =
+            src.dropListener(transform(k))
 
   /** Creates a source that "races" a list of sources.
     *
@@ -318,7 +318,7 @@ object Async extends AsyncImpl:
     * @see
     *   [[Async$.select Async.select]] for a convenient syntax to race sources and awaiting them with [[Async]].
     */
-  def race[T](@caps.use sources: Seq[Source[T]^]): Source[T]^{sources*} = raceImpl((v: T, _: SourceSymbol[T]) => v)(sources)
+  def race[T, C^](sources: Seq[Source[T]^{C}]): Source[T]^{C} = raceImpl((v: T, _: SourceSymbol[T]) => v)(sources)
   def race[T](s1: Source[T]^): Source[T]^{s1} = race(Seq(s1))
   def race[T](s1: Source[T]^, s2: Source[T]^): Source[T]^{s1, s2} = race(Seq(s1, s2))
   def race[T](s1: Source[T]^, s2: Source[T]^, s3: Source[T]^): Source[T]^{s1, s2, s3} = race(Seq(s1, s2, s3))
@@ -327,21 +327,20 @@ object Async extends AsyncImpl:
     * @see
     *   [[Async$.select Async.select]] for a convenient syntax to race sources and awaiting them with [[Async]].
     */
-  def raceWithOrigin[T](@caps.use sources: (Source[T]^)*): Source[(T, SourceSymbol[T])]^{sources*} =
+  def raceWithOrigin[T, C^](sources: (Source[T]^{C})*): Source[(T, SourceSymbol[T])]^{C} =
     raceImpl((v: T, src: SourceSymbol[T]) => (v, src))(sources)
 
   /** Pass first result from any of `sources` to the continuation */
-  private def raceImpl[T, U](map: (U, SourceSymbol[U]) -> T)(@caps.use sources: Seq[Source[U]^]): Source[T]^{sources*} =
-    new Source[T]:
-      val selfSrc = this
-      def poll(k: Listener[T]^): Boolean =
+  private def raceImpl[T1, U, C^](map: (U, SourceSymbol[U]) -> T1)(sources: Seq[Source[U]^{C}]): Source[T1]^{C} =
+    new Source[T1] { selfSrc: Source[T1]^{C} =>
+      def poll(k: Listener[T1]^): Boolean =
         val it = sources.iterator
         var found = false
 
         val listener: Listener[U]^{k} = new Listener.ForwardingListener[U](selfSrc, k):
           val lock = k.lock
           def complete(data: U, source: SourceSymbol[U]) =
-            k.complete(map(data, source), selfSrc)
+            k.complete(map(data, source), selfSrc.symbol)
         end listener
 
         while it.hasNext && !found do found = it.next.poll(listener)
@@ -350,8 +349,8 @@ object Async extends AsyncImpl:
 
       def dropAll(l: Listener[U]^) = sources.foreach(_.dropListener(l))
 
-      def onComplete(k: Listener[T]^): Unit =
-        val listener: Listener[U]^{k, sources*} = new Listener.ForwardingListener[U](this, k) {
+      def onComplete(k: Listener[T1]^): Unit =
+        val listener: Listener[U]^{k, C} = new Listener.ForwardingListener[U](this, k) {
           val self = this
           inline def lockIsOurs = k.lock == null
           val lock =
@@ -395,14 +394,15 @@ object Async extends AsyncImpl:
             found = true
             if lockIsOurs then lock.release()
             sources.foreach(s => if s.symbol != src then s.dropListener(self))
-            k.complete(map(item, src), selfSrc)
+            k.complete(map(item, src), selfSrc.symbol)
         } // end listener
 
         sources.foreach(_.onComplete(listener))
 
-      def dropListener(k: Listener[T]^): Unit =
+      def dropListener(k: Listener[T1]^): Unit =
         val listener = Listener.ForwardingListener.empty(this, k)
         sources.foreach(_.dropListener(listener))
+    }
 
 
   /** Cases for handling async sources in a [[select]]. [[SelectCase]] can be constructed by extension methods `handle`
@@ -415,7 +415,7 @@ object Async extends AsyncImpl:
     */
   trait SelectCase[+T]:
     type Src
-    val src: Source[Src]^
+    val src: Source[Src]^{this}
     val f: Src => T
     inline final def apply(input: Src) = f(input)
 
@@ -455,7 +455,7 @@ object Async extends AsyncImpl:
     * )
     *   }}}
     */
-  def select[T](@caps.use cases: (SelectCase[T]^)*)(using Async) =
+  def select[T, C^](cases: (SelectCase[T]^{C})*)(using Async) =
     val (input, which) = raceWithOrigin(cases.map(_.src)*).awaitResult
     val sc = cases.find(_.src.symbol == which).get
     sc(input.asInstanceOf[sc.Src])

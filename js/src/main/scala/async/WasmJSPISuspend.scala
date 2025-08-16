@@ -30,7 +30,7 @@ trait WasmJSPISuspend(using AsyncToken) extends SuspendSupport:
     * Due to the promise possibly changing over time, within [[boundary]], we have to dynamically resolve the reference
     * _after_ running the `body`.
     */
-  protected class WasmLabel[T]() extends caps.Capability:
+  protected class WasmLabel[T]() extends caps.SharedCapability:
     var (promise, resolve) = mkPromise[T]
 
     def reset() =
@@ -52,11 +52,11 @@ trait WasmJSPISuspend(using AsyncToken) extends SuspendSupport:
 
   // Implementation of the [[SuspendSupport]] interface.
 
-  opaque type Label[T, Cap^] = WasmLabel[T]
+  type Label[T, Cap^] = WasmLabel[T]
 
-  opaque type Suspension[-T, +R] <: gears.async.Suspension[T, R] = WasmSuspension[T, R]
+  type Suspension[-T, +R] = WasmSuspension[T, R]
 
-  override def boundary[T, Cap^](body: Label[T, Cap]^ ?->{Cap^} T): T =
+  override def boundary[T, Cap^](body: Label[T, Cap]^ ?->{Cap} T): T =
     val label = WasmLabel[T]()
     JSPI.async:
       val r = body(using label)
@@ -68,7 +68,7 @@ trait WasmJSPISuspend(using AsyncToken) extends SuspendSupport:
     * @note
     *   Should return immediately if resume is called from within body
     */
-  override def suspend[T, R, Cap^](body: Suspension[T, R]^{Cap^} ->{Cap^} R)(using label: Label[R, Cap]^): T =
+  override def suspend[T, R, Cap^](body: Suspension[T, R]^{Cap} ->{Cap} R)(using label: Label[R, Cap]^): T =
     val (suspPromise, suspResolve) = mkPromise[T]
     val suspend = WasmSuspension[T, R](label, suspResolve)
     label.resolve(body(
