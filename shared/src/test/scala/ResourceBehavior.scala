@@ -1,5 +1,3 @@
-import language.experimental.captureChecking
-
 import gears.async.Async
 import gears.async.AsyncOperations.sleep
 import gears.async.Future
@@ -79,8 +77,8 @@ class ResourceBehavior extends munit.FunSuite {
     Async.fromSync:
       class A()
       val r = new Resource[A]:
-        def allocated(using Async): Pear^ = new Pear:
-          val item: A^ = A()
+        def allocated(using Async): Pear = new Pear:
+          val item: A = A()
           def cleanup(using Async) = ()
       val leak = r.use[A](p => p.item)
 

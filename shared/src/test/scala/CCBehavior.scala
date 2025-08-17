@@ -8,20 +8,20 @@ import java.util.concurrent.CancellationException
 import scala.annotation.capability
 import scala.concurrent.duration.{Duration, DurationInt}
 import scala.util.Success
-import scala.util.boundary
 import gears.async.Channel
 import gears.async.SyncChannel
 
 type Result[+T, +E] = Either[E, T]
 object Result:
-  opaque type Label[-T, -E] = boundary.Label[Result[T, E]]
-  // ^ doesn't work?
+  import scala.util.boundary
+  type Label[-T, -E] = boundary.Label[Result[T, E]]
+  // ^ opaque doesn't work?
 
-  def apply[T, E](body: Label[T, E]^ ?=> T): Result[T, E] =
-    boundary(Right(body))
+  inline def apply[T, E](body: Label[T, E] ?=> T): Result[T, E] =
+    boundary(lbl ?=> Right(body(using lbl)))
 
-  extension [U, E](r: Result[U, E])(using Label[Nothing, E]^)
-    def ok: U = r match
+  extension [U, E](r: Result[U, E])(using Label[Nothing, E])
+    inline def ok: U = r match
       case Left(value)  => boundary.break(Left(value))
       case Right(value) => value
 
@@ -33,14 +33,14 @@ class CaptureCheckingBehavior extends munit.FunSuite:
   test("good") {
     // don't do this in real code! capturing Async.blocking's Async context across functions is hard to track
     Async.fromSync: async ?=>
-      def good1[T, E](@use frs: List[Future[Result[T, E]]^]): Future[Result[List[T], E]]^{frs*, async} =
+      def good1[T, E, C^](frs: List[Future[Result[T, E]]^{C}]): Future[Result[List[T], E]]^{C, async} =
         Future: fut ?=>
-          Result: ret ?=>
+          Result[List[T], E]: ret ?=>
             frs.map(_.await.ok)
 
-      def good2[T, E](@use rf: Result[Future[T]^, E]): Future[Result[T, E]]^{rf*, async} =
+      def good2[T, E, C^](rf: Result[Future[T]^{C}, E]): Future[Result[T, E]]^{C, async} =
         Future:
-          Result:
+          Result[T, E]:
             rf.ok.await // OK, Future argument has type Result[T]
 
       def useless4[T, E](fr: Future[Result[T, E]]^) =
@@ -56,32 +56,34 @@ class CaptureCheckingBehavior extends munit.FunSuite:
   // }
 
   test("future withResolver capturing") {
-    class File() extends caps.Capability:
+    class File():
       def close() = ()
       def read(callback: Int => Unit) = ()
-    val f = File()
+    val f: File^ = File()
     val read  = Future.withResolver[Int, caps.CapSet^{f}]: r =>
       f.read(r.resolve)
       r.onCancel(f.close)
   }
 
   test("awaitAll/awaitFirst") {
-    trait File extends caps.Capability:
+    trait File:
       def readFut(): Future[Int]^{this}
     object File:
-      def open[T](filename: String)(body: File => T)(using Async): T = body:
+      def open[T](filename: String)(body: File^ => T)(using Async): T = body:
         new File:
           def readFut(): Future[Int]^{this} = Future.resolved(0)
 
-    def readAll(@caps.use files: (File^)*) = files.map(_.readFut())
+    def readAll[C^](files: (File^{C})*): Seq[Future[Int]^{C}] = files.map(f => f.readFut())
 
     Async.fromSync:
       File.open("a.txt"): a =>
-        File.open("b.txt"): b =>
-          val futs = readAll(a, b)
-          val allFut = Future(futs.awaitAll)
-          allFut
-            .await // uncomment to leak
+          val aa = a // TODO workaround
+          File.open("b.txt"): b =>
+            val bb = b
+            val futs: Seq[Future[Int]^{aa, bb}] = readAll(aa, bb)
+            val allFuts = Future(futs.awaitAll)
+            allFuts
+              .await // uncomment to leak
   }
 
   // test("channel") {
