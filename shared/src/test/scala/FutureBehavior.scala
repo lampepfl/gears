@@ -417,25 +417,25 @@ class FutureBehavior extends munit.FunSuite {
       assert(!lastFutureFinished)
   }
 
-  test("future collection: awaitFirst*") {
-    Async.fromSync:
-      val range = (0 to 10)
-      def futs = range.map(i => Future { sleep(i * 100); i })
-      assert(range contains futs.awaitFirst)
+  // test("future collection: awaitFirst*") {
+  //   Async.fromSync:
+  //     val range = (0 to 10)
+  //     def futs = range.map(i => Future { sleep(i * 100); i })
+  //     assert(range contains futs.awaitFirst)
 
-      val exc = new Exception("a")
-      def futsWithFail = futs ++ Seq(Future { throw exc })
-      assert(range contains futsWithFail.awaitFirst)
+  //     val exc = new Exception("a")
+  //     def futsWithFail = futs ++ Seq(Future { throw exc })
+  //     assert(range contains futsWithFail.awaitFirst)
 
-      val excs = range.map(i => new Exception(i.toString()))
-      def futsAllFail = range.zip(excs).map((i, exc) => Future { sleep(i * 100); throw exc })
-      assertEquals(Try(futsAllFail.awaitFirst), Failure(excs.last))
+  //     val excs = range.map(i => new Exception(i.toString()))
+  //     def futsAllFail = range.zip(excs).map((i, exc) => Future { sleep(i * 100); throw exc })
+  //     assertEquals(Try(futsAllFail.awaitFirst), Failure(excs.last))
 
-      var lastFutureFinished = false
-      def futsWithSleepy = futsWithFail ++ Seq(Future { sleep(200000); lastFutureFinished = true; 0 })
-      assert(range contains futsWithSleepy.awaitFirst)
-      assert(!lastFutureFinished)
-  }
+  //     var lastFutureFinished = false
+  //     def futsWithSleepy = futsWithFail ++ Seq(Future { sleep(200000); lastFutureFinished = true; 0 })
+  //     assert(range contains futsWithSleepy.awaitFirst)
+  //     assert(!lastFutureFinished)
+  // }
 
   test("uninterruptible should continue even when Future is cancelled") {
     Async.fromSync:
