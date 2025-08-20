@@ -3,8 +3,10 @@ import org.scalajs.linker.interface.ESVersion
 import sbtcrossproject.CrossPlugin.autoImport.{CrossType, crossProject}
 import scalanative.build._
 
-val scala = "3.8.0-RC1-bin-SNAPSHOT"
+val scala3Version = "3.8.0-RC1-bin-20250819-1f13619-NIGHTLY"
+val scala = scala3Version
 ThisBuild / scalaVersion := scala
+ThisBuild / resolvers += ("Artifactory" at "https://repo.scala-lang.org/artifactory/maven-nightlies/")
 
 publish / skip := true
 
@@ -31,8 +33,8 @@ lazy val root =
         libraryDependencies += "org.scalameta" %%% "munit" % "1.1.1" % Test,
         testFrameworks += new TestFramework("munit.Framework"),
         scalacOptions ++= Seq(
-          "-Ycc-debug",
-          "-Xprint:cc"
+          // "-Ycc-debug",
+          // "-Xprint:cc"
         )
       )
     )
