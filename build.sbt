@@ -45,7 +45,7 @@ lazy val root =
     )
     .jsSettings(
       Seq(
-        scalaVersion := "3.7.2",
+        scalaVersion := "3.7.3",
         // Emit ES modules with the Wasm backend
         scalaJSLinkerConfig := {
           scalaJSLinkerConfig.value
