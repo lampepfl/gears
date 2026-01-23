@@ -61,8 +61,8 @@ lazy val root =
               List(
                 "--experimental-wasm-exnref", // always required
                 "--experimental-wasm-jspi", // required for js.async/js.await
-                "--experimental-wasm-imported-strings", // optional (good for performance)
-                "--turboshaft-wasm" // optional, but significantly increases stability
+                "--experimental-wasm-imported-strings" // optional (good for performance)
+                // "--turboshaft-wasm" // optional, but significantly increases stability
               )
             )
           new NodeJSEnv(config)
