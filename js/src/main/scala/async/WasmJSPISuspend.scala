@@ -13,12 +13,12 @@ object AsyncToken:
   /** Assumes that we are under an `async` scope. */
   def unsafeAssumed: AsyncToken = ()
 
-/** Capability-safe wrapper around [[JSPI.async]]. */
-private[async] inline def async[T](body: AsyncToken ?=> T): js.Promise[T] = JSPI.async(body(using ()))
+/** Capability-safe wrapper around [[js.async]]. */
+private[async] inline def async[T](body: AsyncToken ?=> T): js.Promise[T] = js.async(body(using ()))
 
 /** An implementation of [[SuspendSupport]] using JSPI async/await under WebAssembly.
   * @note
-  *   this assumes that the root context is **already** under `JSPI.async`.
+  *   this assumes that the root context is **already** under `js.async`.
   */
 trait WasmJSPISuspend(using AsyncToken) extends SuspendSupport:
   /** The label stores a Promise that should be resolved every time the context is suspended or is completed. Since
@@ -46,7 +46,7 @@ trait WasmJSPISuspend(using AsyncToken) extends SuspendSupport:
     def resume(arg: T): R =
       label.reset()
       resolve(arg)
-      JSPI.await(label.promise)
+      js.await(label.promise)
 
   // Implementation of the [[SuspendSupport]] interface.
 
@@ -56,10 +56,10 @@ trait WasmJSPISuspend(using AsyncToken) extends SuspendSupport:
 
   override def boundary[T](body: Label[T] ?=> T): T =
     val label = WasmLabel[T]()
-    JSPI.async:
+    js.async:
       val r = body(using label)
       label.resolve(r) // see [[WasmLabel]]
-    JSPI.await(label.promise) // this is fine to resolve immediately, since we only wait for the first return.
+    js.await(label.promise) // this is fine to resolve immediately, since we only wait for the first return.
 
   /** Suspends the context by creating a [[js.Promise]] to wait for inside the [[Suspension]] class, that would be
     * resolved once resumed.
@@ -70,7 +70,7 @@ trait WasmJSPISuspend(using AsyncToken) extends SuspendSupport:
     val (suspPromise, suspResolve) = mkPromise[T]
     val suspend = WasmSuspension[T, R](label, suspResolve)
     label.resolve(body(suspend))
-    JSPI.await(suspPromise)
+    js.await(suspPromise)
 end WasmJSPISuspend
 
 /** Overrides [[AsyncOperations]] with JavaScript-specific operations. */
@@ -84,7 +84,7 @@ object JsAsyncOperations extends AsyncOperations:
   * possible), while `schedule`d computations only run when another computation has yielded.
   */
 object JsAsyncScheduler extends Scheduler:
-  def execute(body: Runnable) = JSPI.async(body.run())
+  def execute(body: Runnable) = js.async(body.run())
   def schedule(delay: scala.concurrent.duration.FiniteDuration, body: Runnable) =
     new Cancellable:
       val handle = js.timers.setTimeout(delay)(body.run())
@@ -106,7 +106,7 @@ private[async] class JsAsync(val group: CompletionGroup)(using support: WasmAsyn
     src
       .poll()
       .getOrElse:
-        JSPI.await: // TODO: can we make this more efficient?
+        js.await: // TODO: can we make this more efficient?
           js.Promise: (resolve, _) =>
             src.onComplete:
               Listener: (item, _) =>
