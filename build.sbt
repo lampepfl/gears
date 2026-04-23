@@ -16,7 +16,7 @@ inThisBuild(
     homepage := Some(url("https://lampepfl.github.io/gears")),
     licenses := List(License.Apache2),
     developers := List(
-      Developer("natsukagami", "Natsu Kagami", "natsukagami@gmail.com", url("https://github.com/natsukagami"))
+      Developer("natsukagami", "Natsu Kagami", "nki@fastmail.com", url("https://github.com/natsukagami"))
     )
   )
 )
