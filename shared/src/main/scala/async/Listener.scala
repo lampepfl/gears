@@ -32,7 +32,7 @@ trait Listener[-T]:
   /** Represents the exposed API for synchronization on listeners at receiving time. If the listener does not have any
     * form of synchronization, [[lock]] should be `null`.
     */
-  val lock: (Listener.ListenerLock^) | Null
+  val lock: Listener.ListenerLock | Null
 
   /** Attempts to acquire locks and then calling [[complete]] with the given item and source. If locking fails,
     * [[releaseLock]] is automatically called.
