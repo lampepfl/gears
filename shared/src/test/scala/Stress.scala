@@ -7,10 +7,12 @@ import gears.async.{Async, AsyncSupport, Future, uninterruptible}
 import java.util.concurrent.atomic.AtomicInteger
 import scala.concurrent.duration._
 
+val stressTag = new munit.Tag("stress")
+
 class StressTest extends munit.FunSuite:
   override val munitTimeout: Duration = 10.minutes
 
-  test("survives a stress test that hammers on creating futures") {
+  test("survives a stress test that hammers on creating futures".tag(stressTag)) {
     val total = 200_000L
     Async.fromSync:
       Seq[Long](1, 2, 4, 16, 10000).foreach: parallelism =>
@@ -26,7 +28,7 @@ class StressTest extends munit.FunSuite:
         assertEquals(sum, total * (total + 1) / 2)
   }
 
-  test("survives a stress test that hammers on suspending") {
+  test("survives a stress test that hammers on suspending".tag(stressTag)) {
     val total = 100_000L
     val parallelism = 5000L
     Async.fromSync:
