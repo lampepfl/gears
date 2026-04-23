@@ -86,7 +86,7 @@ object Async extends AsyncImpl:
   /** A way to introduce asynchronicity into a synchronous environment. */
   trait FromSync private[async] ():
     private[async] type Output[+T]
-    private[async] def apply[T](body: Async ?=> T): Output[T]
+    private[async] def apply[T](body: Async.Spawn ?=> T): Output[T]
 
   object FromSync:
     /** A [[FromSync]] implementation that blocks the current runtime. */
@@ -341,7 +341,7 @@ object Async extends AsyncImpl:
             k.complete(map(data, source), selfSrc.symbol)
         end listener
 
-        while it.hasNext && !found do found = it.next.poll(listener)
+        while it.hasNext && !found do found = it.next().poll(listener)
 
         found
 

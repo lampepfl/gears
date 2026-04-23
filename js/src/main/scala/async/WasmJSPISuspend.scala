@@ -123,18 +123,19 @@ private[async] class JsAsync(val group: CompletionGroup)(using support: WasmAsyn
   */
 object JsAsyncFromSync extends Async.FromSync:
   type Output[+T] = scala.concurrent.Future[T]
-  def apply[T](body: Async ?=> T): Output[T] =
+  def apply[T](body: Async.Spawn ?=> T): Output[T] =
     async:
       given WasmAsyncSupport = WasmAsyncSupport()
       given JsAsyncScheduler.type = JsAsyncScheduler
-      Async.group(body)(using JsAsync(CompletionGroup.Unlinked))
+      given jsAsync: JsAsync = JsAsync(CompletionGroup.Unlinked)
+      Async.group(async ?=> body(using async))
     .toFuture
 
 /** Alternative [[Async.FromAsync]] implementation. **Assumes** that we are under an `async` scope.
   */
 object UnsafeJsAsyncFromSync extends Async.FromSync:
   type Output[+T] = T
-  def apply[T](body: Async ?=> T): Output[T] =
+  def apply[T](body: Async.Spawn ?=> T): Output[T] =
     given WasmAsyncSupport = WasmAsyncSupport(using AsyncToken.unsafeAssumed)
     given JsAsyncScheduler.type = JsAsyncScheduler
     Async.group(body)(using JsAsync(CompletionGroup.Unlinked))
