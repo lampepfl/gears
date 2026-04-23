@@ -41,7 +41,7 @@
               libunwind
               zlib
               # Scala.js deps
-              nodejs_24
+              nodejs_25
               # Dev deps
               metals
               scalafix

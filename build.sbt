@@ -7,6 +7,8 @@ ThisBuild / scalaVersion := "3.3.7"
 
 publish / skip := true
 
+val MUnitFramework = new TestFramework("munit.Framework")
+
 inThisBuild(
   Seq(
     // publish settings
@@ -28,7 +30,7 @@ lazy val root =
         name := "Gears",
         versionScheme := Some("early-semver"),
         libraryDependencies += "org.scalameta" %%% "munit" % "1.1.1" % Test,
-        testFrameworks += new TestFramework("munit.Framework")
+        testFrameworks += MUnitFramework
       )
     )
     .jvmSettings(
@@ -61,11 +63,14 @@ lazy val root =
               List(
                 "--experimental-wasm-exnref", // always required
                 "--experimental-wasm-jspi", // required for js.async/js.await
-                "--experimental-wasm-imported-strings" // optional (good for performance)
+                "--experimental-wasm-imported-strings", // optional (good for performance)
                 // "--turboshaft-wasm" // optional, but significantly increases stability
+                "--stack-size=204800"
               )
             )
           new NodeJSEnv(config)
-        }
+        },
+        // Skip until Node.js 26+, see lampepfl/gears#165
+        Test / testOptions += Tests.Argument(MUnitFramework, "--exclude-tags=stress")
       )
     )
