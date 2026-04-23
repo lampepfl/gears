@@ -9,7 +9,11 @@ An Experimental Asynchronous Programming Library for Scala 3. It aims to be:
 - **Simple**: enables direct-style programming (suspending with `.await`, calling Async-functions directly) and comes with few simple concepts.
 - **Structured**: allows an idiomatic way of structuring concurrent programs minimizing computation leaking (*structured concurrency*), while
   providing a toolbox for dealing with external, unstructured events.
-- **Cross-platform**: Works on both JVM >=21 and Scala Native.
+- **Cross-platform**: Works on JVM >= 21, Scala Native and Scala.js with WAsm support.
+
+> [!WARNING]  
+> Currently on V8 <14.2.75 (Node.js 24 and 25), there is a bug that causes stack overflows in nested async contexts, which are used extensively by Gears. Consider waiting for a later release, stay on Node.js 23, or use Deno / Bun / Firefox as the WAsm runtime target.
+> See #165 for more details.
 
 ## Getting Started
 
