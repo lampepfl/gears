@@ -1,11 +1,10 @@
 package gears.async
 
-import gears.async.js.JSPI
-
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.locks.*
 import scala.concurrent.duration.*
 import scala.scalajs.js
+import scala.scalajs.js.wasm.JSPI.allowOrphanJSAwait
 
 /** Assumes top-level await, probably will crash real hard. */
 private[async] trait NumberedLockImpl:
@@ -29,7 +28,7 @@ private[async] trait NumberedLockImpl:
       while !tryLock() do
         val promise = js.Promise[Unit]: (resolve, _) =>
           queue += resolve
-        JSPI.await(promise)
+        js.await(promise)
 
     override def unlock(): Unit =
       assert(locked, "unlocking an unlocked lock")

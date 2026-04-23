@@ -104,9 +104,7 @@ object Async extends AsyncImpl:
     fs(body)
 
   /** Execute asynchronous computation `body` from the context. Requires a [[FromSync.Blocking]] implementation. */
-  def blocking[T](using fromSync: FromSync.Blocking)(
-      body: Async.Spawn ?=> T
-  ): T =
+  def blocking[T](using fromSync: FromSync.Blocking)(body: Async.Spawn ?=> T): T =
     fromSync(body)
 
   /** Returns the currently executing Async context. Equivalent to `summon[Async]`. */

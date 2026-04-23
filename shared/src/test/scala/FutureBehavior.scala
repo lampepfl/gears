@@ -157,7 +157,7 @@ class FutureBehavior extends munit.FunSuite {
       try f.await
       catch
         case e1: AssertionError => assertEquals(e, e1)
-        case z =>
+        case z                  =>
           fail(String.valueOf(z))
   }
 
