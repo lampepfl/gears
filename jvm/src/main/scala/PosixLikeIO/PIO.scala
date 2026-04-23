@@ -1,7 +1,6 @@
 package PosixLikeIO
 
 import language.experimental.captureChecking
-import caps.CapSet
 
 import gears.async.Scheduler
 import gears.async.default.given
@@ -47,7 +46,7 @@ class File(val path: String) {
   def read(buffer: ByteBuffer): Future[Int] =
     assert(channel.isDefined)
 
-    Future.withResolver[Int, CapSet]: resolver =>
+    Future.withResolver[Int, {}]: resolver =>
       channel.get.read(
         buffer,
         0,
@@ -60,7 +59,7 @@ class File(val path: String) {
     assert(size >= 0)
 
     val buffer = ByteBuffer.allocate(size)
-    Future.withResolver[String, CapSet]: resolver =>
+    Future.withResolver[String, {}]: resolver =>
       channel.get.read(
         buffer,
         0,
@@ -75,7 +74,7 @@ class File(val path: String) {
   def write(buffer: ByteBuffer): Future[Int] =
     assert(channel.isDefined)
 
-    Future.withResolver[Int, CapSet]: resolver =>
+    Future.withResolver[Int, {}]: resolver =>
       channel.get.write(
         buffer,
         0,
@@ -117,7 +116,7 @@ class SocketUDP() {
   def send(data: ByteBuffer, address: String, port: Int): Future[Unit] =
     assert(socket.isDefined)
 
-    Future.withResolver[Unit, CapSet]: resolver =>
+    Future.withResolver[Unit, {}]: resolver =>
       resolver.spawn:
         val packet: DatagramPacket =
           new DatagramPacket(data.array(), data.limit(), InetAddress.getByName(address), port)
@@ -126,7 +125,7 @@ class SocketUDP() {
   def receive(): Future[DatagramPacket] =
     assert(socket.isDefined)
 
-    Future.withResolver[DatagramPacket, CapSet]: resolver =>
+    Future.withResolver[DatagramPacket, {}]: resolver =>
       resolver.spawn:
         val buffer = Array.fill[Byte](10 * 1024)(0)
         val packet: DatagramPacket = DatagramPacket(buffer, 10 * 1024)

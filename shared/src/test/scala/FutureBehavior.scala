@@ -335,7 +335,7 @@ class FutureBehavior extends munit.FunSuite {
 
   test("Future.withResolver cancel handler is not run after being completed") {
     val num: AtomicInteger^ = AtomicInteger(0)
-    val fut = Future.withResolver[Int, caps.CapSet^{num}]: r =>
+    val fut = Future.withResolver[Int, {num}]: r =>
       r.onCancel { () => num.incrementAndGet() }
       r.resolve(1)
     fut.cancel()
@@ -344,7 +344,7 @@ class FutureBehavior extends munit.FunSuite {
 
   test("Future.withResolver is only completed after handler decides") {
     val prom = Future.Promise[Unit]()
-    val fut = Future.withResolver[Unit, caps.CapSet]: r =>
+    val fut = Future.withResolver[Unit, {}]: r =>
       r.onCancel(() => prom.onComplete(Listener { (_, _) => r.rejectAsCancelled() }))
 
     assert(fut.poll().isEmpty)

@@ -60,7 +60,7 @@ class CaptureCheckingBehavior extends munit.FunSuite:
       def close() = ()
       def read(callback: Int => Unit) = ()
     val f: File^ = File()
-    val read  = Future.withResolver[Int, caps.CapSet^{f}]: r =>
+    val read  = Future.withResolver[Int, {f}]: r =>
       f.read(r.resolve)
       r.onCancel(f.close)
   }

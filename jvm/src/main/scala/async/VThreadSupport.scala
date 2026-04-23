@@ -76,7 +76,7 @@ object VThreadSupport extends AsyncSupport:
         result.get
       finally lock.unlock()
 
-  override type Label[R, Cap >: caps.CapSet <: caps.CapSet^] = VThreadLabel[R]
+  override type Label[R, Cap^] = VThreadLabel[R]
 
   // outside boundary: waiting on label
   //  inside boundary: waiting on suspension

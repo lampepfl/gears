@@ -21,7 +21,7 @@ class StressTest extends munit.FunSuite:
         val k = AtomicInteger(0)
         def compute(using Async) =
           k.incrementAndGet()
-        val collector = MutableCollector[Int, caps.CapSet^{ac}]((1L to parallelism).map(_ => Future { compute })*)
+        val collector = MutableCollector[Int, {ac}]((1L to parallelism).map(_ => Future { compute })*)
         var sum = 0L
         for i <- parallelism + 1 to total do
           sum += collector.results.read().right.get.await

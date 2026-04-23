@@ -271,7 +271,7 @@ object Future:
       * fail with the failure that was returned first.
       */
     def zip[U](f2: Future[U]^): Future[(T, U)]^{f1, f2} =
-      Future.withResolver[(T, U), caps.CapSet^{f1, f2}]: r =>
+      Future.withResolver[(T, U), {f1, f2}]: r =>
         Async
           .either(f1, f2)
           .onComplete(Listener { (v, _) =>
@@ -430,7 +430,7 @@ object Future:
     *   [[Future.awaitAll]] and [[Future.awaitFirst]] for simple usage of the collectors to get all results or the first
     *   succeeding one.
     */
-  class Collector[T, C^](futures: (Future[T]^{C})*) extends BaseCollector[T, caps.CapSet^{C}]:
+  class Collector[T, C^](futures: (Future[T]^{C})*) extends BaseCollector[T, {C}]:
     futures.foreach(addFuture)
   end Collector
 
