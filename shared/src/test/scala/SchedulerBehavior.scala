@@ -1,3 +1,5 @@
+import language.experimental.captureChecking
+
 import gears.async.AsyncOperations.*
 import gears.async.Future.Promise
 import gears.async.default.given

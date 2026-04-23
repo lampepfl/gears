@@ -1,8 +1,12 @@
 package gears.async
+
+import language.experimental.captureChecking
+
 import gears.async.Async.Source
 import gears.async.Listener.acceptingListener
 import gears.async.listeners.lockBoth
 
+import scala.annotation.unchecked.uncheckedCaptures
 import scala.collection.mutable
 import scala.util.control.Breaks.{break, breakable}
 import scala.util.{Failure, Success, Try}
@@ -138,11 +142,11 @@ object SyncChannel:
   def apply[T](): SyncChannel[T] = Impl()
 
   private class Impl[T] extends Channel.Impl[T] with SyncChannel[T]:
-    override def pollRead(r: Reader): Boolean = synchronized:
+    override def pollRead(r: Reader^): Boolean = synchronized:
       // match reader with buffer of senders
       checkClosed(readSource, r) || cells.matchReader(r)
 
-    override def pollSend(src: CanSend, s: Sender): Boolean = synchronized:
+    override def pollSend(src: CanSend, s: Sender^): Boolean = synchronized:
       // match reader with buffer of senders
       checkClosed(src, s) || cells.matchSender(src, s)
   end Impl
@@ -157,12 +161,12 @@ object BufferedChannel:
     val buf = new mutable.Queue[T](size)
 
     // Match a reader -> check space in buf -> fail
-    override def pollSend(src: CanSend, s: Sender): Boolean = synchronized:
+    override def pollSend(src: CanSend, s: Sender^): Boolean = synchronized:
       checkClosed(src, s) || cells.matchSender(src, s) || senderToBuf(src, s)
 
     // Check space in buf -> fail
     // If we can pop from buf -> try to feed a sender
-    override def pollRead(r: Reader): Boolean = synchronized:
+    override def pollRead(r: Reader^): Boolean = synchronized:
       if checkClosed(readSource, r) then true
       else if !buf.isEmpty then
         if r.completeNow(Right(buf.head), readSource) then
@@ -175,7 +179,7 @@ object BufferedChannel:
       else false
 
     // Try to add a sender to the buffer
-    def senderToBuf(src: CanSend, s: Sender): Boolean =
+    def senderToBuf(src: CanSend, s: Sender^): Boolean =
       if buf.size < size then
         if s.completeNow(Right(()), src) then buf += src.item
         true
@@ -195,7 +199,7 @@ object UnboundedChannel:
       pollSend(CanSend(x), acceptingListener((r, _) => result = r))
       if result.isLeft then throw ChannelClosedException()
 
-    override def pollRead(r: Reader): Boolean = synchronized:
+    override def pollRead(r: Reader^): Boolean = synchronized:
       if checkClosed(readSource, r) then true
       else if !buf.isEmpty then
         if r.completeNow(Right(buf.head), readSource) then
@@ -204,7 +208,7 @@ object UnboundedChannel:
         true
       else false
 
-    override def pollSend(src: CanSend, s: Sender): Boolean = synchronized:
+    override def pollSend(src: CanSend, s: Sender^): Boolean = synchronized:
       if checkClosed(src, s) || cells.matchSender(src, s) then true
       else if s.completeNow(Right(()), src) then
         buf += src.item
@@ -228,21 +232,21 @@ object Channel:
     var isClosed = false
     val cells = CellBuf()
     // Poll a reader, returning false if it should be put into queue
-    def pollRead(r: Reader): Boolean
+    def pollRead(r: Reader^): Boolean
     // Poll a reader, returning false if it should be put into queue
-    def pollSend(src: CanSend, s: Sender): Boolean
+    def pollSend(src: CanSend, s: Sender^): Boolean
 
-    protected final def checkClosed[T](src: Async.Source[Res[T]], l: Listener[Res[T]]): Boolean =
+    protected final def checkClosed[T](src: Async.Source[Res[T]], l: Listener[Res[T]]^): Boolean =
       if isClosed then
         l.completeNow(Left(Closed), src)
         true
       else false
 
     override val readSource: Source[ReadResult] = new Source {
-      override def poll(k: Reader): Boolean = pollRead(k)
-      override def onComplete(k: Reader): Unit = Impl.this.synchronized:
+      override def poll(k: Reader^): Boolean = pollRead(k)
+      override def onComplete(k: Reader^): Unit = Impl.this.synchronized:
         if !pollRead(k) then cells.addReader(k)
-      override def dropListener(k: Reader): Unit = Impl.this.synchronized:
+      override def dropListener(k: Reader^): Unit = Impl.this.synchronized:
         if !isClosed then cells.dropReader(k)
     }
     override final def sendSource(x: T): Source[SendResult] = CanSend(x)
@@ -253,7 +257,7 @@ object Channel:
           cells.cancel()
 
     /** Complete a pair of locked sender and reader. */
-    protected final def complete(src: CanSend, reader: Listener[ReadResult], sender: Listener[SendResult]) =
+    protected final def complete(src: CanSend, reader: Listener[ReadResult]^, sender: Listener[SendResult]^) =
       reader.complete(Right(src.item), readSource)
       sender.complete(Right(()), src)
 
@@ -261,10 +265,10 @@ object Channel:
     // dependent on a (possibly odd) equality of T. Users do not expect that
     // cancelling a send of a given item might in fact cancel that of an equal one.
     protected final class CanSend(val item: T) extends Source[SendResult] {
-      override def poll(k: Listener[SendResult]): Boolean = pollSend(this, k)
-      override def onComplete(k: Listener[SendResult]): Unit = Impl.this.synchronized:
+      override def poll(k: Listener[SendResult]^): Boolean = pollSend(this, k)
+      override def onComplete(k: Listener[SendResult]^): Unit = Impl.this.synchronized:
         if !pollSend(this, k) then cells.addSender(this, k)
-      override def dropListener(k: Listener[SendResult]): Unit = Impl.this.synchronized:
+      override def dropListener(k: Listener[SendResult]^): Unit = Impl.this.synchronized:
         if !isClosed then cells.dropSender(this, k)
     }
 
@@ -272,6 +276,8 @@ object Channel:
       * there are *only* all readers or all senders. It must be externally synchronized.
       */
     private[async] class CellBuf():
+      import caps.unsafe.unsafeAssumePure // very unsafe WIP
+
       type Cell = Reader | (CanSend, Sender)
       // reader == 0 || sender == 0 always
       private var reader = 0
@@ -292,27 +298,27 @@ object Channel:
       def dequeue() =
         pending.dequeue()
         if reader > 0 then reader -= 1 else sender -= 1
-      def addReader(r: Reader): this.type =
+      def addReader(r: Reader^): this.type =
         require(sender == 0)
         reader += 1
-        pending.enqueue(r)
+        pending.enqueue(r.unsafeAssumePure)
         this
-      def addSender(src: CanSend, s: Sender): this.type =
+      def addSender(src: CanSend, s: Sender^): this.type =
         require(reader == 0)
         sender += 1
-        pending.enqueue((src, s))
+        pending.enqueue((src, s.unsafeAssumePure))
         this
-      def dropReader(r: Reader): this.type =
+      def dropReader(r: Reader^): this.type =
         if reader > 0 then if pending.removeFirst(_ == r).isDefined then reader -= 1
         this
-      def dropSender(src: CanSend, s: Sender): this.type =
+      def dropSender(src: CanSend, s: Sender^): this.type =
         if sender > 0 then if pending.removeFirst(_ == (src, s)).isDefined then sender -= 1
         this
 
       /** Match a possible reader to a queue of senders: try to go through the queue with lock pairing, stopping when
         * finding a good pair.
         */
-      def matchReader(r: Reader): Boolean =
+      def matchReader(r: Reader^): Boolean =
         while hasSender do
           val (src, s) = nextSender
           tryComplete(src, s)(r) match
@@ -324,7 +330,7 @@ object Channel:
       /** Match a possible sender to a queue of readers: try to go through the queue with lock pairing, stopping when
         * finding a good pair.
         */
-      def matchSender(src: CanSend, s: Sender): Boolean =
+      def matchSender(src: CanSend, s: Sender^): Boolean =
         while hasReader do
           val r = nextReader
           tryComplete(src, s)(r) match
@@ -333,7 +339,7 @@ object Channel:
             case _                         => dequeue() // drop gone reader from queue
         false
 
-      private inline def tryComplete(src: CanSend, s: Sender)(r: Reader): s.type | r.type | Unit =
+      private inline def tryComplete(src: CanSend, s: Sender^)(r: Reader^): s.type | r.type | Unit =
         lockBoth(r, s) match
           case true =>
             Impl.this.complete(src, r, s)
@@ -394,30 +400,29 @@ object ChannelMultiplexer:
       while (!shouldTerminate) {
         val publishersCopy = synchronized(publishers.toSeq)
 
-        Async.select(
-          (infoChannel.readSource ~~> {
-            case Left(_) | Right(Message.Quit) =>
-              val subscribersCopy = synchronized(subscribers.toList)
-              for (s <- subscribersCopy) s.send(Failure(ChannelClosedException()))
-              shouldTerminate = true
-            case Right(Message.Refresh) => ()
-          }) +:
-            publishersCopy.map { pub =>
-              pub.readSource ~~> {
-                case Right(v) =>
-                  val subscribersCopy = synchronized(subscribers.toList)
-                  var c = 0
-                  for (s <- subscribersCopy) {
-                    c += 1
-                    try s.send(Success(v))
-                    catch
-                      case closedEx: ChannelClosedException =>
-                        removeSubscriber(s)
-                  }
-                case Left(_) => removePublisher(pub)
-              }
-            }*
-        )
+        val pubCases =
+          publishersCopy.map: pub =>
+            pub.readSource.handle:
+              case Right(v) =>
+                val subscribersCopy = synchronized(subscribers.toList)
+                var c = 0
+                for (s <- subscribersCopy) {
+                  c += 1
+                  try s.send(Success(v))
+                  catch
+                    case closedEx: ChannelClosedException =>
+                      removeSubscriber(s)
+                }
+              case Left(_) => removePublisher(pub)
+
+        val infoCase = infoChannel.readSource.handle:
+          case Left(_) | Right(Message.Quit) =>
+            val subscribersCopy = synchronized(subscribers.toList)
+            for (s <- subscribersCopy) s.send(Failure(ChannelClosedException()))
+            shouldTerminate = true
+          case Right(Message.Refresh) => ()
+          
+        Async.select((infoCase +: pubCases)*)
       }
     }
 

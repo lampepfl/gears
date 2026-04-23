@@ -1,4 +1,6 @@
 package gears.async
+import language.experimental.captureChecking
+
 import scala.collection.mutable
 import scala.util.Success
 

@@ -3,7 +3,10 @@ import org.scalajs.linker.interface.ESVersion
 import sbtcrossproject.CrossPlugin.autoImport.{CrossType, crossProject}
 import scalanative.build._
 
-ThisBuild / scalaVersion := "3.3.7"
+val scala3Version = "3.8.3"
+val scala = scala3Version
+ThisBuild / scalaVersion := scala
+ThisBuild / resolvers += ("Artifactory" at "https://repo.scala-lang.org/artifactory/maven-nightlies/")
 
 publish / skip := true
 
@@ -30,7 +33,11 @@ lazy val root =
         name := "Gears",
         versionScheme := Some("early-semver"),
         libraryDependencies += "org.scalameta" %%% "munit" % "1.1.1" % Test,
-        testFrameworks += MUnitFramework
+        testFrameworks += MUnitFramework,
+        scalacOptions ++= Seq(
+          // "-Ycc-debug",
+          // "-Xprint:cc"
+        )
       )
     )
     .jvmSettings(
@@ -47,7 +54,7 @@ lazy val root =
     )
     .jsSettings(
       Seq(
-        scalaVersion := "3.8.1",
+        scalaVersion := scala,
         // Emit ES modules with the Wasm backend
         scalaJSLinkerConfig := {
           scalaJSLinkerConfig.value

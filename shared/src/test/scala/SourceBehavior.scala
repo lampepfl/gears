@@ -1,3 +1,5 @@
+import language.experimental.captureChecking
+
 import gears.async.*
 import gears.async.AsyncOperations.*
 import gears.async.default.given
@@ -56,7 +58,7 @@ class SourceBehavior extends munit.FunSuite {
     Async.fromSync:
       val timeBefore = System.currentTimeMillis()
       val f = Future {
-        sleep(50);
+        sleep(50)
         Future {
           sleep(70)
           Future {
@@ -82,7 +84,7 @@ class SourceBehavior extends munit.FunSuite {
 
   test("poll()") {
     Async.fromSync:
-      val f: Future[Int] = Future {
+      val f = Future {
         sleep(100)
         1
       }
@@ -131,7 +133,7 @@ class SourceBehavior extends munit.FunSuite {
 
   test("transform values with") {
     Async.fromSync:
-      val f: Future[Int] = Future { 10 }
+      val f = Future { 10 }
       assertEquals(
         f.transformValuesWith:
           case Success(i) => i + 1
@@ -139,7 +141,7 @@ class SourceBehavior extends munit.FunSuite {
         .awaitResult,
         11
       )
-      val g: Future[Int] = Future.now(Failure(AssertionError(1123)))
+      val g = Future.now(Failure(AssertionError(1123)))
       assertEquals(
         g.transformValuesWith:
           case Failure(_) => 17
@@ -154,7 +156,7 @@ class SourceBehavior extends munit.FunSuite {
       var aRan = Future.Promise[Unit]()
       var bRan = Future.Promise[Unit]()
       val wait = Future.Promise[Unit]()
-      val f: Future[Int] = Future {
+      val f = Future {
         wait.await
         10
       }

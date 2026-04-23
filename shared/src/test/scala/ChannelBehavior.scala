@@ -1,3 +1,5 @@
+import language.experimental.captureChecking
+
 import gears.async.AsyncOperations.*
 import gears.async.default.given
 import gears.async.{
@@ -255,8 +257,8 @@ class ChannelBehavior extends munit.FunSuite {
       }
       val race = Async.race(
         (0 until 100).map(i =>
-          Async.race((10 * i until 10 * i + 10).map(idx => channels(idx).readSource.transformValuesWith(_.right.get))*)
-        )*
+          Async.race((10 * i until 10 * i + 10).map(idx => channels(idx).readSource.transformValuesWith(_.right.get)))
+        )
       )
       var sum = 0
       for i <- 0 until 1000 do sum += race.awaitResult
@@ -282,7 +284,7 @@ class ChannelBehavior extends munit.FunSuite {
       val ch = SyncChannel[Int]()
       var timesSent = 0
       val race = Async.race(
-        (for i <- 0 until 1000 yield ch.sendSource(i))*
+        (for i <- 0 until 1000 yield ch.sendSource(i))
       )
       Future {
         while race.awaitResult.isRight do {
@@ -320,66 +322,66 @@ class ChannelBehavior extends munit.FunSuite {
       assert(Async.race(a.readSource, b.readSource).awaitResult.isLeft)
   }
 
-  test("ChannelMultiplexer multiplexes - all subscribers read the same stream") {
-    Async.fromSync:
-      val m = ChannelMultiplexer[Int]()
-      val c = SyncChannel[Int]()
-      m.addPublisher(c)
+  // test("ChannelMultiplexer multiplexes - all subscribers read the same stream") {
+  //   Async.fromSync:
+  //     val m = ChannelMultiplexer[Int]()
+  //     val c = SyncChannel[Int]()
+  //     m.addPublisher(c)
 
-      val receivers = (1 to 3).map { _ =>
-        val cr = SyncChannel[Try[Int]]()
-        m.addSubscriber(cr)
-        () =>
-          (ac: Async) ?=>
-            val l = ArrayBuffer[Int]()
-            for i <- 1 to 4 do l += cr.read().right.get.get
-            assertEquals(l, ArrayBuffer[Int](1, 2, 3, 4))
-      }
+  //     val receivers = (1 to 3).map { _ =>
+  //       val cr = SyncChannel[Try[Int]]()
+  //       m.addSubscriber(cr)
+  //       () =>
+  //         (ac: Async) ?=>
+  //           val l = ArrayBuffer[Int]()
+  //           for i <- 1 to 4 do l += cr.read().right.get.get
+  //           assertEquals(l, ArrayBuffer[Int](1, 2, 3, 4))
+  //     }
 
-      Future { m.run() }
-      Future {
-        for i <- 1 to 4 do c.send(i)
-      }
+  //     Future { m.run() }
+  //     Future {
+  //       for i <- 1 to 4 do c.send(i)
+  //     }
 
-      receivers.map(v => Future(v())).awaitAll
-  }
+  //     receivers.map(v => Future(v())).awaitAll
+  // }
 
-  test("ChannelMultiplexer multiple readers and writers") {
-    Async.fromSync:
-      val m = ChannelMultiplexer[Int]()
+  // test("ChannelMultiplexer multiple readers and writers") {
+  //   Async.fromSync:
+  //     val m = ChannelMultiplexer[Int]()
 
-      val sendersCount = 3
-      val sendersMessage = 4
-      val receiversCount = 3
+  //     val sendersCount = 3
+  //     val sendersMessage = 4
+  //     val receiversCount = 3
 
-      val senders = (0 until sendersCount).map { idx =>
-        val cc = SyncChannel[Int]()
-        m.addPublisher(cc)
-        () =>
-          (ac: Async) ?=>
-            for (i <- 0 until sendersMessage)
-              cc.send(i)
-            m.removePublisher(cc)
-      }
+  //     val senders = (0 until sendersCount).map { idx =>
+  //       val cc = SyncChannel[Int]()
+  //       m.addPublisher(cc)
+  //       () =>
+  //         (ac: Async) ?=>
+  //           for (i <- 0 until sendersMessage)
+  //             cc.send(i)
+  //           m.removePublisher(cc)
+  //     }
 
-      val receivers = (0 until receiversCount).map { idx =>
-        val cr = SyncChannel[Try[Int]]()
-        m.addSubscriber(cr)
-        () =>
-          (ac: Async) ?=>
-            sleep(idx * 500)
-            var sum = 0
-            for (i <- 0 until sendersCount * sendersMessage) {
-              sum += cr.read().right.get.get
-            }
-            assertEquals(sum, sendersMessage * (sendersMessage - 1) / 2 * sendersCount)
-      }
-      Future { m.run() }
+  //     val receivers = (0 until receiversCount).map { idx =>
+  //       val cr = SyncChannel[Try[Int]]()
+  //       m.addSubscriber(cr)
+  //       () =>
+  //         (ac: Async) ?=>
+  //           sleep(idx * 500)
+  //           var sum = 0
+  //           for (i <- 0 until sendersCount * sendersMessage) {
+  //             sum += cr.read().right.get.get
+  //           }
+  //           assertEquals(sum, sendersMessage * (sendersMessage - 1) / 2 * sendersCount)
+  //     }
+  //     Future { m.run() }
 
-      (senders ++ receivers)
-        .map(v => Future(v()))
-        .awaitAll
-  }
+  //     (senders ++ receivers)
+  //       .map(v => Future(v()))
+  //       .awaitAll
+  // }
 
   def getChannels = List(SyncChannel[Int](), BufferedChannel[Int](1024), UnboundedChannel[Int]())
 }

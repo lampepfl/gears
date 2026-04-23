@@ -1,5 +1,8 @@
 package PosixLikeIO
 
+import language.experimental.captureChecking
+import caps.CapSet
+
 import gears.async.Scheduler
 import gears.async.default.given
 import gears.async.{Async, Future}
@@ -17,7 +20,7 @@ import scala.util.{Failure, Success, Try}
 import Future.Promise
 
 object File:
-  extension (resolver: Future.Resolver[Int])
+  extension[Cap^] (resolver: Future.Resolver[Int, Cap])
     private[File] def toCompletionHandler = new CompletionHandler[Integer, ByteBuffer] {
       override def completed(result: Integer, attachment: ByteBuffer): Unit = resolver.resolve(result)
       override def failed(e: Throwable, attachment: ByteBuffer): Unit = resolver.reject(e)
@@ -44,7 +47,7 @@ class File(val path: String) {
   def read(buffer: ByteBuffer): Future[Int] =
     assert(channel.isDefined)
 
-    Future.withResolver[Int]: resolver =>
+    Future.withResolver[Int, CapSet]: resolver =>
       channel.get.read(
         buffer,
         0,
@@ -57,7 +60,7 @@ class File(val path: String) {
     assert(size >= 0)
 
     val buffer = ByteBuffer.allocate(size)
-    Future.withResolver[String]: resolver =>
+    Future.withResolver[String, CapSet]: resolver =>
       channel.get.read(
         buffer,
         0,
@@ -72,7 +75,7 @@ class File(val path: String) {
   def write(buffer: ByteBuffer): Future[Int] =
     assert(channel.isDefined)
 
-    Future.withResolver[Int]: resolver =>
+    Future.withResolver[Int, CapSet]: resolver =>
       channel.get.write(
         buffer,
         0,
@@ -114,7 +117,7 @@ class SocketUDP() {
   def send(data: ByteBuffer, address: String, port: Int): Future[Unit] =
     assert(socket.isDefined)
 
-    Future.withResolver: resolver =>
+    Future.withResolver[Unit, CapSet]: resolver =>
       resolver.spawn:
         val packet: DatagramPacket =
           new DatagramPacket(data.array(), data.limit(), InetAddress.getByName(address), port)
@@ -123,7 +126,7 @@ class SocketUDP() {
   def receive(): Future[DatagramPacket] =
     assert(socket.isDefined)
 
-    Future.withResolver: resolver =>
+    Future.withResolver[DatagramPacket, CapSet]: resolver =>
       resolver.spawn:
         val buffer = Array.fill[Byte](10 * 1024)(0)
         val packet: DatagramPacket = DatagramPacket(buffer, 10 * 1024)
@@ -138,7 +141,7 @@ class SocketUDP() {
 }
 
 object SocketUDP:
-  extension [T](resolver: Future.Resolver[T])
+  extension [T, Cap^](resolver: Future.Resolver[T, Cap])
     private[SocketUDP] inline def spawn(body: => T)(using s: Scheduler) =
       s.execute(() =>
         resolver.complete(Try(body).recover { case _: InterruptedException =>
