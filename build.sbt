@@ -29,7 +29,7 @@ lazy val root =
       Seq(
         name := "Gears",
         versionScheme := Some("early-semver"),
-        libraryDependencies += "org.scalameta" %%% "munit" % "1.1.1" % Test,
+        libraryDependencies += "org.scalameta" %%% "munit" % "1.3.0" % Test,
         testFrameworks += MUnitFramework
       )
     )
