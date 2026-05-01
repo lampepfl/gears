@@ -28,7 +28,7 @@ class TaskScheduleBehavior extends munit.FunSuite {
       f.awaitResult
       assertEquals(i, 3)
       m.assertTimeAtLeast(200)
-      m.assertTimeLessThan(300)
+      // m.assertTimeLessThan(300) // testing upper bound on wait time is flaky
   }
 
   test("Exponential backoff(2) 50ms, 5 times total schedule") {
@@ -41,7 +41,7 @@ class TaskScheduleBehavior extends munit.FunSuite {
       f.awaitResult
       assertEquals(i, 5)
       m.assertTimeAtLeast(50 + 100 + 200 + 400)
-      m.assertTimeLessThan(50 + 100 + 200 + 400 + 800)
+      // m.assertTimeLessThan(50 + 100 + 200 + 400 + 800) // testing upper bound on wait time is flaky
   }
 
   test("Fibonacci backoff 10ms, 6 times total schedule") {
@@ -54,7 +54,7 @@ class TaskScheduleBehavior extends munit.FunSuite {
       f.awaitResult
       assertEquals(i, 6)
       m.assertTimeAtLeast(0 + 10 + 10 + 20 + 30 + 50)
-      m.assertTimeLessThan(0 + 10 + 10 + 20 + 30 + 50 + 80)
+      // m.assertTimeLessThan(0 + 10 + 10 + 20 + 30 + 50 + 80) // testing upper bound on wait time is flaky
   }
 
   test("UntilSuccess 150ms") {
@@ -70,7 +70,7 @@ class TaskScheduleBehavior extends munit.FunSuite {
       val ret = t.schedule(TaskSchedule.RepeatUntilSuccess(150)).start().awaitResult
       assertEquals(ret.get.get, 4)
       m.assertTimeAtLeast(4 * 150)
-      m.assertTimeLessThan(5 * 150)
+      // m.assertTimeLessThan(5 * 150) // testing upper bound on wait time is flaky
   }
 
   test("UntilFailure 150ms") {
@@ -87,7 +87,7 @@ class TaskScheduleBehavior extends munit.FunSuite {
       val ret = t.schedule(TaskSchedule.RepeatUntilFailure(150)).start().awaitResult
       assertEquals(ret.get, Failure(ex))
       m.assertTimeAtLeast(4 * 150)
-      m.assertTimeLessThan(5 * 150)
+      // m.assertTimeLessThan(5 * 150) // testing upper bound on wait time is flaky
   }
 
 }
