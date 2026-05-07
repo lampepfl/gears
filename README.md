@@ -12,7 +12,7 @@ An Experimental Asynchronous Programming Library for Scala 3. It aims to be:
 - **Cross-platform**: Works on JVM >= 21, Scala Native and Scala.js with WAsm support.
 
 > [!WARNING]  
-> Currently on V8 <14.2.75 (Node.js 24 and 25), there is a bug that causes stack overflows in nested async contexts, which are used extensively by Gears. Consider waiting for a later release, stay on Node.js 23, or use Deno / Bun / Firefox as the WAsm runtime target.
+> On V8 <14.2.75 (Node.js 24 and 25), there is a bug that causes stack overflows in nested async contexts, which are used extensively by Gears. Use Node.js 26+, or stay on Node.js 23, or use Deno / Bun / Firefox as the Wasm runtime target.
 > See #165 for more details.
 
 ## Getting Started
