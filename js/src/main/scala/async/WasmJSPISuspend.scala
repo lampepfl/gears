@@ -20,7 +20,7 @@ private[async] inline def async[T](body: AsyncToken ?=> T): js.Promise[T] = js.a
   * @note
   *   this assumes that the root context is **already** under `js.async`.
   */
-trait WasmJSPISuspend(using AsyncToken) extends SuspendSupport:
+trait WasmJSPISuspend(using AsyncToken) extends AsyncSupport:
   /** The label stores a Promise that should be resolved every time the context is suspended or is completed. Since
     * Promises are one-time resolvables, every resumption will "reset" the label, giving it a new Promise (see
     * [[WasmLabel.reset]]).
@@ -71,6 +71,12 @@ trait WasmJSPISuspend(using AsyncToken) extends SuspendSupport:
     val suspend = WasmSuspension[T, R](label, suspResolve)
     label.resolve(body(suspend))
     js.await(suspPromise)
+
+  override private[async] def scheduleBoundary(body: Label[Unit] ?=> Unit)(using s: Scheduler): Unit =
+    val label = WasmLabel[Unit]()
+    s.execute: () =>
+      body(using label)
+      label.resolve(())
 end WasmJSPISuspend
 
 /** Overrides [[AsyncOperations]] with JavaScript-specific operations. */
@@ -94,7 +100,7 @@ object JsAsyncScheduler extends Scheduler:
 /** An implementation of [[AsyncSupport]] where we assume a JSPI-enabled WebAssembly environment under a
   * single-threaded, event-loop driven JavaScript scheduler (as assumed by [[JsAsyncScheduler]]).
   */
-final class WasmAsyncSupport(using AsyncToken) extends AsyncSupport with WasmJSPISuspend:
+final class WasmAsyncSupport(using AsyncToken) extends WasmJSPISuspend:
   type Scheduler = JsAsyncScheduler.type
 
 /** A special root-level implementation of the [[Async]] context, that uses JSPI async/await on top-level to wait for
