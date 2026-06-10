@@ -32,7 +32,7 @@ trait Listener[-T]:
   /** Represents the exposed API for synchronization on listeners at receiving time. If the listener does not have any
     * form of synchronization, [[lock]] should be `null`.
     */
-  val lock: Listener.ListenerLock | Null
+  val lock: (Listener.ListenerLock^) | Null
 
   /** Attempts to acquire locks and then calling [[complete]] with the given item and source. If locking fails,
     * [[releaseLock]] is automatically called.
@@ -55,7 +55,7 @@ object Listener:
   /** A simple [[Listener]] that always accepts the item and sends it to the consumer. */
   /* inline bug */ def acceptingListener[T](consumer: (T, SourceSymbol[T]) => Unit): Listener[T]^{consumer} =
     new Listener[T]:
-      val lock = null
+      val lock: Null = null
       def complete(data: T, source: SourceSymbol[T]) = consumer(data, source)
 
   /** Returns a simple [[Listener]] that always accepts the item and sends it to the consumer. */
@@ -70,7 +70,7 @@ object Listener:
   object ForwardingListener:
     /** Creates an empty [[ForwardingListener]] for equality comparison. */
     def empty(src: Async.Source[?]^, inner: Listener[?]^): ForwardingListener[Any]^{src, inner} = new ForwardingListener[Any](src, inner):
-      val lock = null
+      val lock: Null = null
       override def complete(data: Any, source: SourceSymbol[Any]) = ???
 
   /** A lock required by a listener to be acquired before accepting values. Should there be multiple listeners that
@@ -95,10 +95,10 @@ object Listener:
   end ListenerLock
 
   /** Maps the lock of a listener, if it exists. */
-  inline def withLock[T](listener: Listener[?])(inline body: ListenerLock => T): T | Null =
+  inline def withLock[T](listener: Listener[?]^)(inline body: ListenerLock^ => T): T | Null =
     listener.lock match
       case null            => null
-      case l: ListenerLock => body(l)
+      case l: ListenerLock^ => body(l)
 
   /** A helper instance that provides an uniquely numbered mutex. */
   trait NumberedLock extends NumberedLockImpl:

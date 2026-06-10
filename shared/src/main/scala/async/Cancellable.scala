@@ -11,10 +11,11 @@ trait Cancellable:
 
   /** Add this cancellable to the given group after removing it from the previous group in which it was.
     */
-  def link(group: CompletionGroup): this.type = synchronized:
-    if this.group != null then this.group.drop(this.unsafeAssumePure)
-    this.group = group
-    this.group.add(this.unsafeAssumePure)
+  def link(group: CompletionGroup): this.type =
+    synchronized[Unit]:
+      if this.group != null then this.group.drop(this.unsafeAssumePure)
+      this.group = group
+      this.group.add(this.unsafeAssumePure)
     this
 
   /** Link this cancellable to the cancellable group of the current async context.

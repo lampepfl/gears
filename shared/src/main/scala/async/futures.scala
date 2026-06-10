@@ -82,9 +82,10 @@ object Future:
     override def link(group: CompletionGroup): this.type =
       // though hasCompleted is accessible without "synchronized",
       // we want it not to be run while the future was trying to complete.
-      synchronized:
-        val t: this.type = if !hasCompleted || group == CompletionGroup.Unlinked then super.link(group) else this
-        t
+      synchronized[Unit]:
+        if !hasCompleted || group == CompletionGroup.Unlinked then
+          super.link(group)
+      this
 
     /** Sets the cancellation state and returns `true` if the future has not been completed and cancelled before. */
     protected final def setCancelled(): Boolean =
@@ -134,9 +135,10 @@ object Future:
             Listener.ListenerLock,
             Listener.NumberedLock,
             Cancellable:
+       self: AwaitListener[T]^{Cap} =>
         import AwaitListener.*
         var state: State = stateUnused
-        val pureSrc= caps.unsafe.unsafeAssumePure(src) // we only use it for onComplete / dropListener
+        val pureSrc: Async.Source[T] = caps.unsafe.unsafeAssumePure(src) // we only use it for onComplete / dropListener
 
         // guarded by lock; null = before apply or after resume
         private var sus: ac.support.Suspension[T | Null, Unit]^{Cap} | Null = null
@@ -190,7 +192,7 @@ object Future:
             if cancelRequest then cancel()
 
         // == Listener, to be registered with Source (see apply)
-        val lock = this
+        val lock: Listener.ListenerLock^{this} = this
         def complete(data: T, source: Async.SourceSymbol[T]): Unit =
           // might have missed the cancelled -> but we ignore it -> still cancelled = false
           ac.support.resumeAsync(sus.asInstanceOf[ac.support.Suspension[T | Null, Unit]])(data)

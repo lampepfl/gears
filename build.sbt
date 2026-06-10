@@ -3,7 +3,7 @@ import org.scalajs.linker.interface.ESVersion
 import sbtcrossproject.CrossPlugin.autoImport.{CrossType, crossProject}
 import scalanative.build._
 
-val scala3Version = "3.8.3"
+val scala3Version = "3.10.0-RC1-bin-20260609-b34a019-NIGHTLY"
 val scala = scala3Version
 ThisBuild / scalaVersion := scala
 ThisBuild / resolvers += ("Artifactory" at "https://repo.scala-lang.org/artifactory/maven-nightlies/")
@@ -25,7 +25,7 @@ inThisBuild(
 )
 
 lazy val root =
-  crossProject(JSPlatform, JVMPlatform, NativePlatform)
+  crossProject(JSPlatform, JVMPlatform /*, NativePlatform*/ )
     .crossType(CrossType.Full)
     .in(file("."))
     .settings(
@@ -45,13 +45,13 @@ lazy val root =
         javaOptions += "--version 21"
       )
     )
-    .nativeSettings(
-      Seq(
-        nativeConfig ~= { c =>
-          c.withMultithreading(true)
-        }
-      )
-    )
+    // .nativeSettings(
+    //   Seq(
+    //     nativeConfig ~= { c =>
+    //       c.withMultithreading(true)
+    //     }
+    //   )
+    // )
     .jsSettings(
       Seq(
         scalaVersion := scala,

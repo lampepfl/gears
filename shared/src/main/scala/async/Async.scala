@@ -292,9 +292,9 @@ object Async extends AsyncImpl:
     def transformValuesWith[U](f: Origin => U): Source[U]^{f, src} =
       new Source[U]:
         self: Source[U]^{f, src} =>
-          def transform(k: Listener[U]^): Listener.ForwardingListener[Origin]^{k, f} =
+          def transform(k: Listener[U]^): Listener.ForwardingListener[Origin]^{self, k, f} =
             new Listener.ForwardingListener[Origin](self, k):
-              val lock = k.lock
+              val lock: Listener.ListenerLock^{k.lock} = k.lock
               def complete(data: Origin, source: SourceSymbol[Origin]) =
                 k.complete(f(data), self.symbol)
 
@@ -335,8 +335,8 @@ object Async extends AsyncImpl:
         val it = sources.iterator
         var found = false
 
-        val listener: Listener[U]^{k} = new Listener.ForwardingListener[U](selfSrc, k):
-          val lock = k.lock
+        val listener: Listener[U]^{selfSrc, k} = new Listener.ForwardingListener[U](selfSrc, k):
+          val lock: Listener.ListenerLock^{k.lock} = k.lock
           def complete(data: U, source: SourceSymbol[U]) =
             k.complete(map(data, source), selfSrc.symbol)
         end listener
@@ -351,8 +351,9 @@ object Async extends AsyncImpl:
         val listener: Listener[U]^{k, C} = new Listener.ForwardingListener[U](this, k) {
           val self = this
           inline def lockIsOurs = k.lock == null
-          val lock =
+          val lock: Listener.ListenerLock^{this, k} =
             if k.lock != null then
+              val innerLock = k.lock
               // if the upstream listener holds a lock already, we can utilize it.
               new Listener.ListenerLock:
                 val selfNumber = k.lock.selfNumber
@@ -413,7 +414,7 @@ object Async extends AsyncImpl:
     */
   trait SelectCase[+T]:
     type Src
-    val src: Source[Src]^{this}
+    val src: Source[Src]^
     val f: Src => T
     inline final def apply(input: Src) = f(input)
 
@@ -424,8 +425,8 @@ object Async extends AsyncImpl:
       */
     def handle[U](_f: T => U): SelectCase[U]^{_src, _f} = new SelectCase:
       type Src = T
-      val src = _src
-      val f = _f
+      val src: Source[T]^{_src} = _src
+      val f: T ->{_f} U = _f
 
     /** Alias for [[handle]]
       * @see
