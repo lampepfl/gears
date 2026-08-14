@@ -2,7 +2,8 @@ import org.scalajs.jsenv.nodejs.*
 import org.scalajs.linker.interface.ESVersion
 import sbtcrossproject.CrossPlugin.autoImport.{CrossType, crossProject}
 
-scalaVersion := "3.9.0"
+scalaVersion := "3.10.0-RC1-bin-20260813-afdb1e2-NIGHTLY"
+resolvers += Resolver.scalaNightlyRepository
 
 LocalRootProject / publish / skip := true
 
