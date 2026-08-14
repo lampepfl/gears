@@ -3,7 +3,8 @@ import org.scalajs.linker.interface.ESVersion
 import sbtcrossproject.CrossPlugin.autoImport.{CrossType, crossProject}
 import scalanative.build._
 
-ThisBuild / scalaVersion := "3.3.7"
+ThisBuild / scalaVersion := "3.10.0-RC1-bin-20260813-afdb1e2-NIGHTLY"
+ThisBuild / resolvers += Resolver.scalaNightlyRepository
 
 publish / skip := true
 
