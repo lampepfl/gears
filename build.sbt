@@ -18,7 +18,7 @@ developers := List(
 )
 
 lazy val root =
-  crossProject(JSPlatform, JVMPlatform, NativePlatform)
+  crossProject(JSPlatform, JVMPlatform /*, NativePlatform */ )
     .crossType(CrossType.Full)
     .in(file("."))
     .settings(
@@ -35,13 +35,13 @@ lazy val root =
         scalacOptions += "-release:21"
       )
     )
-    .nativeSettings(
-      Seq(
-        nativeConfig ~= { c =>
-          c.withMultithreading(true)
-        }
-      )
-    )
+    // .nativeSettings(
+    //   Seq(
+    //     nativeConfig ~= { c =>
+    //       c.withMultithreading(true)
+    //     }
+    //   )
+    // )
     .jsSettings(
       Seq(
         // Emit ES modules with the Wasm backend
