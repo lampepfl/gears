@@ -119,7 +119,7 @@ object Future:
     private def checkCancellation(): Unit =
       if cancelRequest.get() then throw new CancellationException()
 
-    private class FutureAsync(val group: CompletionGroup)(using label: ac.support.Label[Unit])
+    private class FutureAsync(val group: CompletionGroup)(using label: ac.support.Label[Unit, caps.CapSet])
         extends Async(using ac.support, ac.scheduler):
 
       private class AwaitListener[T](src: Async.Source[T])

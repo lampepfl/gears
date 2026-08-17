@@ -23,7 +23,7 @@ inThisBuild(
 )
 
 lazy val root =
-  crossProject(JSPlatform, JVMPlatform, NativePlatform)
+  crossProject(JSPlatform, JVMPlatform /*, NativePlatform */ )
     .crossType(CrossType.Full)
     .in(file("."))
     .settings(
@@ -39,16 +39,16 @@ lazy val root =
         javaOptions += "--version 21"
       )
     )
-    .nativeSettings(
-      Seq(
-        nativeConfig ~= { c =>
-          c.withMultithreading(true)
-        }
-      )
-    )
+    // .nativeSettings(
+    //   Seq(
+    //     nativeConfig ~= { c =>
+    //       c.withMultithreading(true)
+    //     }
+    //   )
+    // )
     .jsSettings(
       Seq(
-        scalaVersion := "3.8.3",
+        // scalaVersion := "3.8.3",
         // Emit ES modules with the Wasm backend
         scalaJSLinkerConfig := {
           scalaJSLinkerConfig.value

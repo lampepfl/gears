@@ -5,6 +5,9 @@ import java.util.concurrent.locks.ReentrantLock
 import scala.annotation.unchecked.uncheckedVariance
 import scala.concurrent.duration.FiniteDuration
 
+import language.experimental.captureChecking
+import caps.*
+
 object VThreadScheduler extends Scheduler:
   private val VTFactory = Thread
     .ofVirtual()
@@ -65,11 +68,11 @@ object VThreadSupport extends AsyncSupport:
         result.get
       finally lock.unlock()
 
-  override opaque type Label[R] = VThreadLabel[R]
+  override opaque type Label[R, B^] = VThreadLabel[R]
 
   // outside boundary: waiting on label
   //  inside boundary: waiting on suspension
-  private final class VThreadSuspension[-T, +R](using private[VThreadSupport] val l: Label[R] @uncheckedVariance)
+  private final class VThreadSuspension[-T, +R](private[VThreadSupport] val l: VThreadLabel[R] @uncheckedVariance)
       extends gears.async.Suspension[T, R]:
     private var nextInput: Option[T] = None
     private val lock = ReentrantLock()
@@ -96,12 +99,19 @@ object VThreadSupport extends AsyncSupport:
       setInput(arg)
       l.waitResult()
 
+  private object VThreadSuspension:
+    def apply[T, R, B^](l: Label[R, B]^): VThreadSuspension[T, R]^{B} =
+      /* Safety: suspension hides label and is only used internally. */
+      new VThreadSuspension(unsafe.unsafeAssumePure(l))
+
   override opaque type Suspension[-T, +R] <: gears.async.Suspension[T, R] = VThreadSuspension[T, R]
 
-  override def boundary[R](body: (Label[R]) ?=> R): R =
+  override def boundary[R, B^ <: {any.except[Control]}](body: (Label[R, B]^{any.only[Control]}) ?->{B} R): R =
     val label = VThreadLabel[R]()
     VThreadScheduler.execute: () =>
-      val result = body(using label)
+     /* Safety: body does not inherit control capabilities, and so can be executed off-thread.
+      * We wait for the evaluation to end, so capabilities cannot leak. */
+      val result = unsafe.unsafeDiscardUses(body(using label))
       label.setResult(result)
 
     label.waitResult()
@@ -110,13 +120,13 @@ object VThreadSupport extends AsyncSupport:
     suspension.l.clearResult()
     suspension.setInput(arg)
 
-  override def scheduleBoundary(body: (Label[Unit]) ?=> Unit)(using Scheduler): Unit =
+  override def scheduleBoundary(body: (Label[Unit, {}]^) ?-> Unit)(using Scheduler): Unit =
     VThreadScheduler.execute: () =>
       val label = VThreadLabel[Unit]()
       body(using label)
 
-  override def suspend[T, R](body: Suspension[T, R] => R)(using l: Label[R]): T =
-    val sus = new VThreadSuspension[T, R]()
+  override def suspend[T, R, B^](body: (Suspension[T, R]^{B}) ->{B, any.except[Control]} R)(using l: Label[R, B]^): T =
+    val sus = VThreadSuspension[T, R, B](l)
     val res = body(sus)
     l.setResult(res)
     sus.waitInput()
