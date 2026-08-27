@@ -1,6 +1,6 @@
 package gears.async
 
-import gears.async.Async.Source
+import gears.async.Async.{Source, SourceId}
 
 import java.util.concurrent.locks.Lock
 import java.util.concurrent.locks.ReentrantLock
@@ -27,17 +27,17 @@ trait Listener[-T]:
     *
     * The listener must automatically release its own lock upon completion.
     */
-  def complete(data: T, source: Async.Source[T]^): Unit
+  def complete(data: T, source: Async.SourceId): Unit
 
   /** Represents the exposed API for synchronization on listeners at receiving time. If the listener does not have any
     * form of synchronization, [[lock]] should be `null`.
     */
-  val lock: Listener.ListenerLock | Null
+  val lock: (Listener.ListenerLock^) | Null
 
   /** Attempts to acquire locks and then calling [[complete]] with the given item and source. If locking fails,
     * [[releaseLock]] is automatically called.
     */
-  def completeNow(data: T, source: Async.Source[T]^): Boolean =
+  def completeNow(data: T, source: Async.SourceId): Boolean =
     if acquireLock() then
       this.complete(data, source)
       true
@@ -53,13 +53,13 @@ trait Listener[-T]:
 
 object Listener:
   /** A simple [[Listener]] that always accepts the item and sends it to the consumer. */
-  def acceptingListener[T](consumer: (T, Source[T]^) => Unit): Listener[T]^{consumer} =
+  def acceptingListener[T](consumer: (T, SourceId) => Unit): Listener[T]^{consumer} =
     new Listener[T]:
-      val lock = null
-      def complete(data: T, source: Source[T]^) = consumer(data, source)
+      val lock: Null = null
+      def complete(data: T, source: SourceId) = consumer(data, source)
 
   /** Returns a simple [[Listener]] that always accepts the item and sends it to the consumer. */
-  inline def apply[T](consumer: (T, Source[T]) => Unit): Listener[T] = acceptingListener(consumer)
+  inline def apply[T](consumer: (T, SourceId) => Unit): Listener[T] = acceptingListener(consumer)
 
   /** A special class of listener that forwards the inner listener through the given source. For purposes of
     * [[Async.Source.dropListener]] these listeners are compared for equality by the hash of the source and the inner
@@ -70,8 +70,8 @@ object Listener:
   object ForwardingListener:
     /** Create an empty [[ForwardingListener]] for equality comparison. */
     def empty[T](src: Async.Source[?]^, inner: Listener[?]^): ForwardingListener[T]^{src, inner} = new ForwardingListener[T](src, inner):
-      val lock = null
-      override def complete(data: T, source: Async.Source[T]^) = ???
+      val lock: Null = null
+      override def complete(data: T, source: Async.SourceId) = ???
 
   /** A lock required by a listener to be acquired before accepting values. Should there be multiple listeners that
     * needs to be locked at the same time, they should be locked by larger-number-first.

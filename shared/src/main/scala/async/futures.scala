@@ -58,7 +58,7 @@ object Future:
 
     def poll(k: Listener[Try[T]]): Boolean =
       if hasCompleted then
-        k.completeNow(result, this)
+        k.completeNow(result, this.ident)
         true
       else false
 
@@ -101,7 +101,7 @@ object Future:
           waiting.clear()
           unlink()
           ws
-      for listener <- toNotify do listener.completeNow(result, this)
+      for listener <- toNotify do listener.completeNow(result, this.ident)
 
   end CoreFuture
 
@@ -184,7 +184,7 @@ object Future:
 
         // == Listener, to be registered with Source (see apply)
         val lock: Listener.ListenerLock | Null = this
-        def complete(data: T, source: Async.Source[T]): Unit =
+        def complete(data: T, source: Async.SourceId): Unit =
           // might have missed the cancelled -> but we ignore it -> still cancelled = false
           ac.support.resumeAsync(sus.asInstanceOf[ac.support.Suspension[T | Null, Unit]])(data)
           sus = null
