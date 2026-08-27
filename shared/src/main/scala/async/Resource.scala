@@ -1,10 +1,27 @@
 package gears.async
 
+import language.experimental.captureChecking
+import caps.*
+
+trait Allocated[+T](val item: T):
+  self: Allocated[T]^ =>
+  def cleanup(using Async^): Unit
+
+  def map[U](f: T => Async^ ?=> U)(using Async^): Allocated[U]^{this} =
+    try
+      val v = f(item)
+      new Allocated(v):
+        def cleanup(using Async^) = self.cleanup
+    catch
+      e =>
+        self.cleanup
+        throw e
+
 /** A Resource wraps allocation to some asynchronously allocatable and releasable resource and grants access to it. It
   * allows both structured access (similar to [[scala.util.Using]]) and unstructured allocation.
   */
 trait Resource[+T]:
-  self =>
+  self: Resource[T]^ =>
 
   /** Run a structured action on the resource. It is allocated and released automatically.
     *
@@ -13,10 +30,10 @@ trait Resource[+T]:
     * @return
     *   the result of [[body]]
     */
-  def use[V](body: T => V)(using Async): V =
-    val res = allocated
-    try body(res._1)
-    finally res._2
+  def use[V](body: T => V)(using Async^): V =
+    val r = allocated
+    try body(r.item)
+    finally r.cleanup
 
   /** Allocate the resource and leak it. **Use with caution**. The programmer is responsible for closing the resource
     * with the returned handle.
@@ -24,7 +41,7 @@ trait Resource[+T]:
     * @return
     *   the allocated access to the resource data as well as a handle to close it
     */
-  def allocated(using Async): (T, Async ?=> Unit)
+  def allocated(using Async^): Allocated[T]^{this}
 
   /** Create a derived resource that inherits the close operation.
     *
@@ -33,17 +50,12 @@ trait Resource[+T]:
     * @return
     *   the transformed resource used to access the mapped resource data
     */
-  def map[U](fn: T => Async ?=> U): Resource[U] = new Resource[U]:
-    override def use[V](body: U => V)(using Async): V = self.use(t => body(fn(t)))
-    override def allocated(using Async): (U, (Async) ?=> Unit) =
-      val res = self.allocated
-      try
-        (fn(res._1), res._2)
-      catch
-        e =>
-          res._2
-          throw e
-    override def map[Q](fn2: U => (Async) ?=> Q): Resource[Q] = self.map(t => fn2(fn(t)))
+  def map[U](fn: T => Async^ ?=> U): Resource[U]^{this, fn} =
+    class MapResource[T](outer: Resource[T]^, fn: T => Async^ ?=> U) extends Resource[U]:
+      override def use[V](body: U => V)(using Async^): V = outer.use(t => body(fn(t)))
+      override def allocated(using Async^): Allocated[U]^{this} = outer.allocated.map(fn)
+      override def map[Q](fn2: U => (Async^) ?=> Q): Resource[Q]^{this, fn2} = outer.map(t => fn2(fn(t)))
+    MapResource(self, fn)
 
   /** Create a derived resource that creates a inner resource from the resource data. The inner resource will be
     * acquired simultaneously, thus it can both transform the resource data and add a new cleanup action.
@@ -53,23 +65,25 @@ trait Resource[+T]:
     * @return
     *   the transformed resource that provides the two-levels-in-one access
     */
-  def flatMap[U](fn: T => Async ?=> Resource[U]): Resource[U] = new Resource[U]:
-    override def use[V](body: U => V)(using Async): V = self.use(t => fn(t).use(body))
-    override def allocated(using Async): (U, (Async) ?=> Unit) =
-      val res = self.allocated
-      try
-        val mapped = fn(res._1).allocated
-        (
-          mapped._1,
-          { closeAsync ?=>
-            try mapped._2(using closeAsync) // close inner first
-            finally res._2(using closeAsync) // then close second, even if first failed
-          }
-        )
-      catch
-        e =>
-          res._2
-          throw e
+  def flatMap[U, R^](fn: T => Async^ ?=> Resource[U]^{R}): Resource[U]^{this, fn, R} =
+    class FlatMapResource[T](outer: Resource[T]^, fn: T => Async^ ?=> Resource[U]^{R}) extends Resource[U]:
+      override def use[V](body: U => V)(using Async^): V = outer.use(t => fn(t).use(body))
+      override def allocated(using Async^): Allocated[U]^{this} =
+        val res: Allocated[T]^{this} = outer.allocated
+        try
+          val r: Resource[U]^{R} = fn(res.item)
+          val mapped: Allocated[U]^{this} =
+            // Bug: see scala/scala3#26917
+            caps.unsafe.unsafeAssumePure(r.allocated)
+          new Allocated(mapped.item):
+            def cleanup(using Async^) =
+              try mapped.cleanup
+              finally res.cleanup
+        catch
+          e =>
+            res.cleanup
+            throw e
+    FlatMapResource(self, fn)
 end Resource
 
 object Resource:
@@ -83,11 +97,12 @@ object Resource:
     * @return
     *   a new Resource exposing the allocatable object in a safe way
     */
-  inline def apply[T](inline alloc: Async ?=> T, inline close: T => Async ?=> Unit): Resource[T] =
+  inline def apply[T](inline alloc: Async^ ?=> T, inline close: T => Async^ ?=> Unit) =
     new Resource[T]:
-      def allocated(using Async): (T, (Async) ?=> Unit) =
-        val res = alloc
-        (res, close(res))
+      def allocated(using Async^): Allocated[T]^{this} =
+        val v = alloc
+        new Allocated(v):
+          def cleanup(using Async^) = close(item)
 
   /** Create a concurrent computation resource from an allocator function. It can use the given capability to spawn
     * [[Future]]s and return a handle to communicate with them. Allocation is only complete after that allocator
@@ -104,7 +119,7 @@ object Resource:
     * @return
     *   a new resource wrapping access to the spawnBody's results
     */
-  inline def spawning[T](inline spawnBody: Async.Spawn ?=> T) = Async.spawning.map(spawn => spawnBody(using spawn))
+  // inline def spawning[T](inline spawnBody: Async.Spawn^ ?=> T) = Async.spawning.map(spawn => spawnBody(using spawn))
 
   /** Create a resource that does not need asynchronous allocation nor cleanup.
     *
@@ -126,30 +141,34 @@ object Resource:
     * @return
     *   a new resource wrapping access to the combined element
     */
-  def both[T, U, V](res1: Resource[T], res2: Resource[U])(join: (T, U) => V): Resource[V] = new Resource[V]:
-    override def allocated(using Async): (V, (Async) ?=> Unit) =
-      val alloc1 = res1.allocated
-      val alloc2 =
-        try res2.allocated
+  def both[T, U, V](res1: Resource[T]^, res2: Resource[U]^)(join: (T, U) => V): Resource[V]^{res1, res2, join} =
+    class BothResource[V](res1: Resource[T]^, res2: Resource[U]^, join: (T, U) => V) extends Resource[V]:
+      override def allocated(using async: Async^): Allocated[V]^{this} =
+        import util.Try
+        val r1 = res1.allocated
+        val r2 =
+          try res2.allocated
+          catch
+            e =>
+              r1.cleanup
+              throw e
+
+        try
+          val joined = join(r1.item, r2.item)
+          new Allocated(joined):
+            def cleanup(using Async^) =
+              val t1 = Try(r1.cleanup)
+              val t2 = Try(r2.cleanup)
+              t1.get
+              t2.get
         catch
           e =>
-            alloc1._2
+            val t1 = Try(r1.cleanup)
+            val t2 = Try(r2.cleanup)
+            t1.get
+            t2.get
             throw e
-
-      try
-        val joined = join(alloc1._1, alloc2._1)
-        (
-          joined,
-          { closeAsync ?=>
-            try alloc1._2(using closeAsync)
-            finally alloc2._2(using closeAsync)
-          }
-        )
-      catch
-        e =>
-          try alloc1._2
-          finally alloc2._2
-          throw e
+    BothResource(res1, res2, join)
   end both
 
   /** Create a resource combining access to a list of resources
@@ -159,7 +178,7 @@ object Resource:
     * @return
     *   the resource of the list of elements provided by the single resources
     */
-  def all[T](ress: List[Resource[T]]): Resource[List[T]] = ress match
+  def all[T, R^](ress: List[Resource[T]^{R}]): Resource[List[T]]^{R} = ress match
     case Nil          => just(Nil)
     case head :: Nil  => head.map(List(_))
     case head :: next => both(head, all(next))(_ :: _)
