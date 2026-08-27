@@ -18,7 +18,7 @@ class Semaphore(initialValue: Int) extends Async.Source[Semaphore.Guard]:
     if k.acquireLock() then // if k is gone, we are done
       if value.getAndDecrement() > 0 then
         // we got a ticket
-        k.complete(guard, this)
+        k.complete(guard, this.ident)
       else
         // no ticket -> add to queue and reset value (was now negative - unless concurrently increased)
         k.releaseLock()
@@ -30,7 +30,7 @@ class Semaphore(initialValue: Int) extends Async.Source[Semaphore.Guard]:
   override def poll(k: Listener[Semaphore.Guard]): Boolean =
     if !k.acquireLock() then return true
     val success = value.getAndUpdate(i => if i > 0 then i - 1 else i) > 0
-    if success then k.complete(guard, self) else k.releaseLock()
+    if success then k.complete(guard, self.ident) else k.releaseLock()
     success
 
   override def poll(): Option[Semaphore.Guard] =
@@ -53,7 +53,7 @@ class Semaphore(initialValue: Int) extends Async.Source[Semaphore.Guard]:
         // we kept the ticket for now
 
         var listener = waiting.poll()
-        while listener != null && !listener.completeNow(guard, self) do listener = waiting.poll()
+        while listener != null && !listener.completeNow(guard, self.ident) do listener = waiting.poll()
         // if listener not null, then we quit because listener was completed -> ticket is reused -> we are done
 
         // if listener is null, return the ticket by incrementing, then recheck waiting queue (if incremented to >0)

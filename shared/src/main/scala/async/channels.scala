@@ -165,7 +165,7 @@ object BufferedChannel:
     override def pollRead(r: Reader): Boolean = synchronized:
       if checkClosed(readSource, r) then true
       else if !buf.isEmpty then
-        if r.completeNow(Right(buf.head), readSource) then
+        if r.completeNow(Right(buf.head), readSource.ident) then
           buf.dequeue()
           if cells.hasSender then
             val (src, s) = cells.nextSender
@@ -177,7 +177,7 @@ object BufferedChannel:
     // Try to add a sender to the buffer
     def senderToBuf(src: CanSend, s: Sender): Boolean =
       if buf.size < size then
-        if s.completeNow(Right(()), src) then buf += src.item
+        if s.completeNow(Right(()), src.ident) then buf += src.item
         true
       else false
   end Impl
@@ -198,7 +198,7 @@ object UnboundedChannel:
     override def pollRead(r: Reader): Boolean = synchronized:
       if checkClosed(readSource, r) then true
       else if !buf.isEmpty then
-        if r.completeNow(Right(buf.head), readSource) then
+        if r.completeNow(Right(buf.head), readSource.ident) then
           // there are never senders in the cells
           buf.dequeue()
         true
@@ -206,7 +206,7 @@ object UnboundedChannel:
 
     override def pollSend(src: CanSend, s: Sender): Boolean = synchronized:
       if checkClosed(src, s) || cells.matchSender(src, s) then true
-      else if s.completeNow(Right(()), src) then
+      else if s.completeNow(Right(()), src.ident) then
         buf += src.item
         true
       else false
@@ -234,7 +234,7 @@ object Channel:
 
     protected final def checkClosed[T](src: Async.Source[Res[T]], l: Listener[Res[T]]): Boolean =
       if isClosed then
-        l.completeNow(Left(Closed), src)
+        l.completeNow(Left(Closed), src.ident)
         true
       else false
 
@@ -254,8 +254,8 @@ object Channel:
 
     /** Complete a pair of locked sender and reader. */
     protected final def complete(src: CanSend, reader: Listener[ReadResult], sender: Listener[SendResult]) =
-      reader.complete(Right(src.item), readSource)
-      sender.complete(Right(()), src)
+      reader.complete(Right(src.item), readSource.ident)
+      sender.complete(Right(()), src.ident)
 
     // Not a case class because equality should be referential, as otherwise
     // dependent on a (possibly odd) equality of T. Users do not expect that
@@ -343,8 +343,8 @@ object Channel:
 
       def cancel() =
         pending.foreach {
-          case (src, s)  => s.completeNow(Left(Closed), src)
-          case r: Reader => r.completeNow(Left(Closed), readSource)
+          case (src, s)  => s.completeNow(Left(Closed), src.ident)
+          case r: Reader => r.completeNow(Left(Closed), readSource.ident)
         }
         pending.clear()
         reader = 0

@@ -116,9 +116,9 @@ final class WasmAsyncSupport(using token: AsyncToken) extends WasmJSPISuspend:
 /** A special root-level implementation of the [[Async]] context, that uses JSPI async/await on top-level to wait for
   * futures.
   */
-private[async] class JsAsync(val group: CompletionGroup)(using support: WasmAsyncSupport^, sched: JsAsyncScheduler.type)
+private[async] class JsAsync(val group: CompletionGroup)(using support: WasmAsyncSupport^{any.only[Control]}, sched: JsAsyncScheduler.type)
     extends Async(using support, sched):
-  override def await[T](src: Async.Source[T]) =
+  override def await[T](src: Async.Source[T]^) =
     src
       .poll()
       .getOrElse:
@@ -134,7 +134,7 @@ private[async] class JsAsync(val group: CompletionGroup)(using support: WasmAsyn
   */
 object JsAsyncFromSync extends Async.FromSync:
   type Output[+T] = scala.concurrent.Future[T]
-  def apply[T](body: Async ?=> T): Output[T] =
+  def apply[T](body: Async^ ?=> T): Output[T] =
     async:
       val support = WasmAsyncSupport()
       Async.group(body)(using JsAsync(CompletionGroup.Unlinked)(using support, JsAsyncScheduler))
@@ -144,7 +144,7 @@ object JsAsyncFromSync extends Async.FromSync:
   */
 object UnsafeJsAsyncFromSync extends Async.FromSync:
   type Output[+T] = T
-  def apply[T](body: Async ?=> T): Output[T] =
+  def apply[T](body: Async^ ?=> T): Output[T] =
     given WasmAsyncSupport = WasmAsyncSupport(using AsyncToken.unsafeAssumed)
     given JsAsyncScheduler.type = JsAsyncScheduler
     Async.group(body)(using JsAsync(CompletionGroup.Unlinked))
