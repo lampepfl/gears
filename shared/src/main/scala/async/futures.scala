@@ -303,10 +303,10 @@ object Future:
         .onComplete(Listener { case ((v, which), _) =>
           v match
             case Success(value) =>
-              inline if withCancel then (if which == f1 then f2 else f1).cancel()
+              inline if withCancel then (if which == f1.ident then f2 else f1).cancel()
               r.resolve(value)
             case Failure(_) =>
-              (if which == f1 then f2 else f1).onComplete(Listener((v, _) => r.complete(v)))
+              (if which == f1.ident then f2 else f1).onComplete(Listener((v, _) => r.complete(v)))
         })
 
   end extension
@@ -400,12 +400,9 @@ object Future:
     /** Output channels of all finished futures. */
     final def results = ch.asReadable
 
-    private val listener = Listener((_, fut) =>
-      // safe, as we only attach this listener to Future[T]
-      ch.sendImmediately(fut.asInstanceOf[Future[T]])
-    )
-
-    protected final def addFuture(future: Future[T]) = future.onComplete(listener)
+    protected final def addFuture(future: Future[T]) =
+      // the listener is per-future, as the completion only carries the source's identity
+      future.onComplete(Listener((_, _) => ch.sendImmediately(future)))
 
     futures.foreach(addFuture)
   end Collector

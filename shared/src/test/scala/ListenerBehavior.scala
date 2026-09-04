@@ -36,7 +36,7 @@ class ListenerBehavior extends munit.FunSuite:
     var listener1Locked = false
     val listener1 = new Listener[Nothing]:
       val lock = null
-      def complete(data: Nothing, src: Async.Source[Nothing]): Unit =
+      def complete(data: Nothing, src: Async.SourceId): Unit =
         fail("should not succeed")
       def release() =
         listener1Locked = false
@@ -247,7 +247,7 @@ class ListenerBehavior extends munit.FunSuite:
 private class TestListener(expected: Int)(using asst: munit.Assertions) extends Listener[Int]:
   val lock = null
 
-  def complete(data: Int, source: Source[Int]): Unit =
+  def complete(data: Int, source: Async.SourceId): Unit =
     asst.assertEquals(data, expected)
 
 private class NumberedTestListener private (sleep: AtomicBoolean, fail: Boolean, expected: Int)(using munit.Assertions)

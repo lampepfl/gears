@@ -240,10 +240,18 @@ object Channel:
 
     override val readSource: Source[ReadResult] = new Source {
       override def poll(k: Reader): Boolean = pollRead(k)
-      override def onComplete(k: Reader): Unit = Impl.this.synchronized:
-        if !pollRead(k) then cells.addReader(k)
-      override def dropListener(k: Reader): Unit = Impl.this.synchronized:
-        if !isClosed then cells.dropReader(k)
+      // NOTE(scala3#26697): `Impl.this.synchronized` as the *entire* body of an inner class method is
+      // miscompiled into an ACC_SYNCHRONIZED method, which locks this `Source` instead of the channel.
+      // Binding the channel to a local keeps the lock out of the whole-body position.
+      // TODO: fold `channel` back into `Impl.this.synchronized:` once the compiler fix is released.
+      override def onComplete(k: Reader): Unit =
+        val channel = Impl.this
+        channel.synchronized:
+          if !pollRead(k) then cells.addReader(k)
+      override def dropListener(k: Reader): Unit =
+        val channel = Impl.this
+        channel.synchronized:
+          if !isClosed then cells.dropReader(k)
     }
     override final def sendSource(x: T): Source[SendResult] = CanSend(x)
     override final def close(): Unit =
@@ -262,10 +270,15 @@ object Channel:
     // cancelling a send of a given item might in fact cancel that of an equal one.
     protected final class CanSend(val item: T) extends Source[SendResult] {
       override def poll(k: Listener[SendResult]): Boolean = pollSend(this, k)
-      override def onComplete(k: Listener[SendResult]): Unit = Impl.this.synchronized:
-        if !pollSend(this, k) then cells.addSender(this, k)
-      override def dropListener(k: Listener[SendResult]): Unit = Impl.this.synchronized:
-        if !isClosed then cells.dropSender(this, k)
+      // NOTE(scala3#26697): the local `channel` is needed here as well, see `readSource` above.
+      override def onComplete(k: Listener[SendResult]): Unit =
+        val channel = Impl.this
+        channel.synchronized:
+          if !pollSend(this, k) then cells.addSender(this, k)
+      override def dropListener(k: Listener[SendResult]): Unit =
+        val channel = Impl.this
+        channel.synchronized:
+          if !isClosed then cells.dropSender(this, k)
     }
 
     /** CellBuf is a queue of cells, which consists of a sleeping sender or reader. The queue always guarantees that
@@ -309,11 +322,23 @@ object Channel:
         if sender > 0 then if pending.removeFirst(_ == (src, s)).isDefined then sender -= 1
         this
 
+      /** Debugging aid: checks the invariant tying [[pending]] to the reader/sender counts. The calls in
+        * [[matchReader]] and [[matchSender]] are commented out, as they run on every match.
+        */
+      def assertValid() =
+        val (a, b, c) = (sender, reader, pending.size)
+        assert(
+          (a == 0 || b == 0) &&
+            (a + b == c),
+          s"${Impl.this}: Pending queue $c is not equal to counts ($a senders, $b readers)"
+        )
+
       /** Match a possible reader to a queue of senders: try to go through the queue with lock pairing, stopping when
         * finding a good pair.
         */
       def matchReader(r: Reader): Boolean =
         while hasSender do
+          // assertValid()
           val (src, s) = nextSender
           tryComplete(src, s)(r) match
             case ()                        => return true
@@ -326,6 +351,7 @@ object Channel:
         */
       def matchSender(src: CanSend, s: Sender): Boolean =
         while hasReader do
+          // assertValid()
           val r = nextReader
           tryComplete(src, s)(r) match
             case ()                        => return true

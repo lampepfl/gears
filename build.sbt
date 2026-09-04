@@ -31,7 +31,8 @@ lazy val root =
         name := "Gears",
         versionScheme := Some("early-semver"),
         libraryDependencies += "org.scalameta" %%% "munit" % "1.3.0" % Test,
-        testFrameworks += MUnitFramework
+        testFrameworks += MUnitFramework,
+        scalacOptions += "-experimental"
       )
     )
     .jvmSettings(

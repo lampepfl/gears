@@ -97,12 +97,13 @@ object Resource:
     * @return
     *   a new Resource exposing the allocatable object in a safe way
     */
-  inline def apply[T](inline alloc: Async^ ?=> T, inline close: T => Async^ ?=> Unit) =
-    new Resource[T]:
+  def apply[T](alloc: Async^ ?=> T, close: T => Async^ ?=> Unit): Resource[T]^{alloc, close} =
+    class NewResource[T](alloc: Async^ ?=> T, close: T => Async^ ?=> Unit) extends Resource[T]:
       def allocated(using Async^): Allocated[T]^{this} =
         val v = alloc
         new Allocated(v):
           def cleanup(using Async^) = close(item)
+    NewResource[T](alloc, close)
 
   /** Create a concurrent computation resource from an allocator function. It can use the given capability to spawn
     * [[Future]]s and return a handle to communicate with them. Allocation is only complete after that allocator
