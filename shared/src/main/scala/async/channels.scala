@@ -334,11 +334,23 @@ object Channel:
         if sender > 0 then if pending.removeFirst(_ == (src, s)).isDefined then sender -= 1
         this
 
+      /** Debugging aid: checks the invariant tying [[pending]] to the reader/sender counts. The calls in
+        * [[matchReader]] and [[matchSender]] are commented out, as they run on every match.
+        */
+      def assertValid() =
+        val (a, b, c) = (sender, reader, pending.size)
+        assert(
+          (a == 0 || b == 0) &&
+            (a + b == c),
+          s"${Impl.this}: Pending queue $c is not equal to counts ($a senders, $b readers)"
+        )
+
       /** Match a possible reader to a queue of senders: try to go through the queue with lock pairing, stopping when
         * finding a good pair.
         */
       def matchReader(r: Reader): Boolean =
         while hasSender do
+          // assertValid()
           val (src, s) = nextSender
           tryComplete(src, s)(r) match
             case ()                        => return true
@@ -351,6 +363,7 @@ object Channel:
         */
       def matchSender(src: CanSend, s: Sender): Boolean =
         while hasReader do
+          // assertValid()
           val r = nextReader
           tryComplete(src, s)(r) match
             case ()                        => return true

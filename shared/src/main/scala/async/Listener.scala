@@ -29,6 +29,8 @@ trait Listener[-T]:
     */
   def complete(data: T, source: Async.SourceId): Unit
 
+  final def complete(data: T, source: Async.Source[T]): Unit = this.complete(data, source.ident)
+
   /** Represents the exposed API for synchronization on listeners at receiving time. If the listener does not have any
     * form of synchronization, [[lock]] should be `null`.
     */
@@ -42,6 +44,8 @@ trait Listener[-T]:
       this.complete(data, source)
       true
     else false
+
+  final def completeNow(data: T, source: Async.Source[T]): Boolean = this.completeNow(data, source.ident)
 
   /** Release the listener's lock if it exists. */
   inline final def releaseLock(): Unit = if lock != null then lock.release()

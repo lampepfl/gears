@@ -169,7 +169,7 @@ object Async extends AsyncImpl:
     */
   trait Source[+T]:
     final val ident: SourceId = SourceId()
-  
+
     /** Checks whether data is available at present and pass it to `k` if so. Calls to `poll` are always synchronous and
       * non-blocking.
       *
@@ -386,7 +386,7 @@ object Async extends AsyncImpl:
             // Complete first so that k releases its listener lock before cleanup.
             // Otherwise cleanup can wait for a source whose thread is waiting for k.
             k.complete(map(item, src), selfSrc.ident)
-            sources.foreach(s => if s != src then s.dropListener(self))
+            sources.foreach(s => if s.ident != src then s.dropListener(self))
         } // end listener
 
         sources.foreach(_.onComplete(listener))
@@ -406,21 +406,21 @@ object Async extends AsyncImpl:
     * @see
     *   [[Async$.select Async.select]] where [[SelectCase]] is used.
     */
-  opaque type SelectCase[T] = (Source[?], Nothing => T)
+  type SelectCase[T, C^] = (Source[?]^{C}, Nothing ->{C} T)
   //                           ^ unsafe types, but we only construct SelectCase from `handle` which is safe
 
-  extension [T](src: Source[T])
+  extension [T](src: Source[T]^)
     /** Attach a handler to `src`, creating a [[SelectCase]].
       * @see
       *   [[Async$.select Async.select]] where [[SelectCase]] is used.
       */
-    inline def handle[U](f: T => U): SelectCase[U] = (src, f)
+    def handle[U](f: T => U): SelectCase[U, {src, f}] = (src, f)
 
     /** Alias for [[handle]]
       * @see
       *   [[Async$.select Async.select]] where [[SelectCase]] is used.
       */
-    inline def ~~>[U](f: T => U): SelectCase[U] = src.handle(f)
+    def ~~>[U](f: T => U): SelectCase[U, {src, f}] = src.handle(f)
 
   /** Race a list of sources with the corresponding handler functions, once an item has come back. Like [[race]],
     * [[select]] guarantees exactly one of the sources are polled. Unlike [[transformValuesWith]], the handler in
@@ -442,9 +442,9 @@ object Async extends AsyncImpl:
     * )
     *   }}}
     */
-  def select[T](cases: SelectCase[T]*)(using Async) =
+  def select[T, C^](cases: SelectCase[T, C]*)(using Async) =
     val (input, which) = raceWithOrigin(cases.map(_._1)*).awaitResult
-    val (_, handler) = cases.find(_._1 == which).get
+    val (_, handler) = cases.find(_._1.ident == which).get
     handler.asInstanceOf[input.type => T](input)
 
   /** Race two sources, wrapping them respectively in [[Left]] and [[Right]] cases.
@@ -454,6 +454,6 @@ object Async extends AsyncImpl:
     * @see
     *   [[race]] and [[select]] for racing more than two sources.
     */
-  def either[T1, T2](src1: Source[T1], src2: Source[T2]): Source[Either[T1, T2]] =
+  def either[T1, T2](src1: Source[T1]^, src2: Source[T2]^): Source[Either[T1, T2]]^{src1, src2} =
     race(src1.transformValuesWith(Left(_)), src2.transformValuesWith(Right(_)))
 end Async

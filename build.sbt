@@ -27,7 +27,8 @@ lazy val root =
         publish / skip := false,
         versionScheme := Some("early-semver"),
         libraryDependencies += "org.scalameta" %% "munit" % "1.3.6" % Test,
-        testFrameworks += MUnitFramework
+        testFrameworks += MUnitFramework,
+        scalacOptions += "-experimental"
       )
     )
     .jvmSettings(
