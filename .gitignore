@@ -25,6 +25,7 @@ local.sbt
 .bloop/
 .metals/
 metals.sbt
+*.sbt.semanticdb
 
 # IDEA
 .idea

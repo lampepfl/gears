@@ -57,7 +57,8 @@ jobs:
     - name: Install scala-native dependencies
       run: sudo apt-get install clang libstdc++-12-dev libgc-dev
     - name: Test
-      run: sbt rootNative/test
+      # Restart the server so the next invocation picks up GC_MAXIMUM_HEAP_SIZE.
+      run: sbt 'rootNative/test; shutdown'
     - name: Stress Test with Lower Memory
       run: env GC_MAXIMUM_HEAP_SIZE=140M sbt 'rootNative/testOnly StressTest'
   test-js:

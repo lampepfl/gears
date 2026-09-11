@@ -12,7 +12,7 @@ An Experimental Asynchronous Programming Library for Scala 3. It aims to be:
 - **Cross-platform**: Works on JVM >= 21, Scala Native and Scala.js with WAsm support.
 
 > [!WARNING]  
-> On V8 <14.2.75 (Node.js 24 and 25), there is a bug that causes stack overflows in nested async contexts, which are used extensively by Gears. Use Node.js 26+, or stay on Node.js 23, or use Deno / Bun / Firefox as the Wasm runtime target.
+> On V8 <14.2.75 (Node.js 24 and 25), there is a bug that causes stack overflows in nested async contexts, which are used extensively by Gears. Use Node.js 26+, or another runtime with Wasm 3.0 and JSPI support.
 > See #165 for more details.
 
 ## Getting Started
@@ -22,10 +22,12 @@ It provides a tutorial, as well as a guided walkthrough of all concepts availabl
 
 ### Adding `gears` to your dependencies
 
-With `sbt`:
+With `sbt` 2:
 ```scala
-  libraryDependencies += "ch.epfl.lamp" %%% "gears" % "<version>",
+libraryDependencies += "ch.epfl.lamp" %% "gears" % "<version>"
 ```
+
+For cross-platform dependencies with sbt 1, use `%%%`.
 
 With `mill`:
 ```scala
@@ -42,7 +44,7 @@ With `scala` (since 3.5.0) or `scala-cli`:
 
 ## Setting up on an unpublished version of Gears
 
-You will need JDK >= 21 and [Scala Native](https://scala-native.org) set up.
+The build uses sbt 2 and Scala 3.9.0. You will need JDK >= 21 and [Scala Native](https://scala-native.org) set up, plus Node.js 26+ to run the Scala.js tests.
 ```bash
 sbt publishLocal
 ```
