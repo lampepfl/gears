@@ -40,7 +40,7 @@ jobs:
       - name: Build docs
         run: |
           sbt "rootJVM/doc"
-          cp -rv jvm/target/scala-*/api docs
+          cp -rv target/out/jvm/scala-*/gears/api docs
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:

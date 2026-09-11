@@ -1,24 +1,19 @@
-import org.scalajs.jsenv.nodejs._
+import org.scalajs.jsenv.nodejs.*
 import org.scalajs.linker.interface.ESVersion
 import sbtcrossproject.CrossPlugin.autoImport.{CrossType, crossProject}
-import scalanative.build._
 
-ThisBuild / scalaVersion := "3.3.7"
+scalaVersion := "3.9.0"
 
-publish / skip := true
+LocalRootProject / publish / skip := true
 
 val MUnitFramework = new TestFramework("munit.Framework")
 
-inThisBuild(
-  Seq(
-    // publish settings
-    organization := "ch.epfl.lamp",
-    homepage := Some(url("https://lampepfl.github.io/gears")),
-    licenses := List(License.Apache2),
-    developers := List(
-      Developer("natsukagami", "Natsu Kagami", "nki@fastmail.com", url("https://github.com/natsukagami"))
-    )
-  )
+// Common publishing settings for all platforms.
+organization := "ch.epfl.lamp"
+homepage := Some(uri("https://lampepfl.github.io/gears"))
+licenses := List(License.Apache2)
+developers := List(
+  Developer("natsukagami", "Natsu Kagami", "nki@fastmail.com", uri("https://github.com/natsukagami"))
 )
 
 lazy val root =
@@ -28,14 +23,15 @@ lazy val root =
     .settings(
       Seq(
         name := "Gears",
+        publish / skip := false,
         versionScheme := Some("early-semver"),
-        libraryDependencies += "org.scalameta" %%% "munit" % "1.3.0" % Test,
+        libraryDependencies += "org.scalameta" %% "munit" % "1.3.6" % Test,
         testFrameworks += MUnitFramework
       )
     )
     .jvmSettings(
       Seq(
-        javaOptions += "--version 21"
+        scalacOptions += "-release:21"
       )
     )
     .nativeSettings(
@@ -47,24 +43,19 @@ lazy val root =
     )
     .jsSettings(
       Seq(
-        scalaVersion := "3.8.3",
         // Emit ES modules with the Wasm backend
         scalaJSLinkerConfig := {
           scalaJSLinkerConfig.value
-            .withESFeatures(
-              _.withESVersion(ESVersion.ES2022) // enable async/await
-                .withUseWebAssembly(true)
-            )
-            .withWasmFeatures(_.withUseJSPI(true))
+            .withESFeatures(_.withESVersion(ESVersion.ES2022).withUseWebAssembly(true))
+            .withWasmFeatures(_.withUseJSPI(true)) // enable js.async/js.await
             .withModuleKind(ModuleKind.ESModule) // required by the Wasm backend
         },
-        // Configure Node.js (at least v23) to support the required Wasm features
-        jsEnv := {
+        // Node.js 26+ supports Wasm and JSPI, including the nested async stack fix.
+        jsEnv := Def.uncached {
           val config = NodeJSEnv
             .Config()
             .withArgs(
               List(
-                "--experimental-wasm-exnref", // always required
                 "--stack-size=204800"
               )
             )
