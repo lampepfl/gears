@@ -10,7 +10,7 @@ import language.experimental.captureChecking
 import caps.*
 
 /** An opaque, compile-time token to signal that we are under a [[js.async]] scope. */
-class AsyncToken private () extends Control
+class AsyncToken private () extends capabilities.Suspension
 
 object AsyncToken:
   /** Assumes that we are under an `async` scope. */
@@ -24,6 +24,7 @@ private[async] inline def async[T](inline body: AsyncToken ?=> T): js.Promise[T]
   *   this assumes that the root context is **already** under `js.async`.
   */
 trait WasmJSPISuspend(using token: AsyncToken) extends AsyncSupport:
+  this: WasmJSPISuspend^{any.only[capabilities.Suspension]} =>
   /** The label stores a Promise that should be resolved every time the context is suspended or is completed. Since
     * Promises are one-time resolvables, every resumption will "reset" the label, giving it a new Promise (see
     * [[WasmLabel.reset]]).
@@ -116,7 +117,7 @@ final class WasmAsyncSupport(using token: AsyncToken) extends WasmJSPISuspend:
 /** A special root-level implementation of the [[Async]] context, that uses JSPI async/await on top-level to wait for
   * futures.
   */
-private[async] class JsAsync(val group: CompletionGroup)(using support: WasmAsyncSupport^{any.only[Control]}, sched: JsAsyncScheduler.type)
+private[async] class JsAsync(val group: CompletionGroup)(using support: WasmAsyncSupport^{any.only[capabilities.Suspension]}, sched: JsAsyncScheduler.type)
     extends Async(using support, sched):
   override def await[T](src: Async.Source[T]^) =
     src
