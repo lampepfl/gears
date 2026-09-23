@@ -101,7 +101,7 @@ object Async extends AsyncImpl:
 
   /** Execute asynchronous computation `body` using the given [[FromSync]] implementation.
     */
-  inline def fromSync[T](using fs: FromSync)(body: Async.Spawn ?=> T): fs.Output[T] =
+  def fromSync[T](using fs: FromSync)(body: Async.Spawn^ ?=> T): fs.Output[T] =
     fs(body)
 
   /** Execute asynchronous computation `body` from the context. Requires a [[FromSync.Blocking]] implementation. */
@@ -168,6 +168,7 @@ object Async extends AsyncImpl:
     *   An example of an ephemeral source is [[gears.async.Channel]].
     */
   trait Source[+T]:
+    self: Source[T]^ =>
     final val ident: SourceId = SourceId()
 
     /** Checks whether data is available at present and pass it to `k` if so. Calls to `poll` are always synchronous and
@@ -218,6 +219,15 @@ object Async extends AsyncImpl:
       * This is an utility method for direct waiting with `Async`, instead of going through listeners.
       */
     final def awaitResult(using ac: Async^) = ac.await(this)
+
+    /** Only open access to the listener interfaces. Notably this should not allow control capabilities to leak through. */
+    private[async] lazy val asListenerInterface: Source[T]^{this.except[Control]} =
+      unsafe.unsafeAssumePure:
+        new Source:
+          def poll(k: Listener[T]^) = self.poll(k)
+          def onComplete(k: Listener[T]^) = self.onComplete(k)
+          def dropListener(k: Listener[T]^) = self.dropListener(k)
+
   end Source
 
   extension [T](src: Source[scala.util.Try[T]])
@@ -240,6 +250,7 @@ object Async extends AsyncImpl:
     * the instance.
     */
   abstract class OriginalSource[+T] extends Source[T]:
+    // self: OriginalSource[T]^{any.except[Control]} =>
     /** Add `k` to the listener set of this source. */
     protected def addListener(k: Listener[T]^): Unit
 
@@ -439,7 +450,7 @@ object Async extends AsyncImpl:
     * )
     *   }}}
     */
-  def select[T, C^](cases: SelectCase[T, C]*)(using Async) =
+  def select[T, C^](cases: SelectCase[T, C]*)(using Async^) =
     val (input, which) = raceWithOrigin(cases.map(_._1)*).awaitResult
     val (_, handler) = cases.find(_._1.ident == which).get
     handler.asInstanceOf[input.type => T](input)

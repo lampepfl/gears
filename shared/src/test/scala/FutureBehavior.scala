@@ -12,6 +12,9 @@ import scala.concurrent.duration.*
 import scala.util.Random
 import scala.util.{Failure, Success, Try}
 
+import language.experimental.captureChecking
+import caps.*
+
 class FutureBehavior extends munit.FunSuite {
   given ExecutionContext = ExecutionContext.global
 
@@ -53,7 +56,7 @@ class FutureBehavior extends munit.FunSuite {
         }
         val res = a.or(b).await
         res
-      val _: Future[Int | Boolean] = z
+      val _ = z
       assertEquals(x.await, 33)
       assertEquals(y.await, (22, 11))
   }
@@ -333,7 +336,7 @@ class FutureBehavior extends munit.FunSuite {
 
   test("Future.withResolver cancel handler is not run after being completed") {
     val num = AtomicInteger(0)
-    val fut = Future.withResolver[Int]: r =>
+    val fut = Future.withResolver[Int, {}]: r =>
       r.onCancel { () => num.incrementAndGet() }
       r.resolve(1)
     fut.cancel()
@@ -342,7 +345,7 @@ class FutureBehavior extends munit.FunSuite {
 
   test("Future.withResolver is only completed after handler decides") {
     val prom = Future.Promise[Unit]()
-    val fut = Future.withResolver[Unit]: r =>
+    val fut = Future.withResolver[Unit, {}]: r =>
       r.onCancel(() => prom.onComplete(Listener { (_, _) => r.rejectAsCancelled() }))
 
     assert(fut.poll().isEmpty)

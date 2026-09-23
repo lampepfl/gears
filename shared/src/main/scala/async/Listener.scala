@@ -63,7 +63,7 @@ object Listener:
       def complete(data: T, source: SourceId) = consumer(data, source)
 
   /** Returns a simple [[Listener]] that always accepts the item and sends it to the consumer. */
-  inline def apply[T](consumer: (T, SourceId) => Unit): Listener[T] = acceptingListener(consumer)
+  inline def apply[T](consumer: (T, SourceId) => Unit): Listener[T]^{consumer} = acceptingListener(consumer)
 
   /** A special class of listener that forwards the inner listener through the given source. For purposes of
     * [[Async.Source.dropListener]] these listeners are compared for equality by the hash of the source and the inner
