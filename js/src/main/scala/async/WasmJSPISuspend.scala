@@ -91,7 +91,7 @@ end WasmJSPISuspend
 
 /** Overrides [[AsyncOperations]] with JavaScript-specific operations. */
 object JsAsyncOperations extends AsyncOperations:
-  override def `yield`()(using Async) =
+  override def `yield`()(using Async^) =
     sleep(1)
 
 /** An implementaion of [[Scheduler]] that assumes a single-threaded, event-loop driven JavaScript context.
