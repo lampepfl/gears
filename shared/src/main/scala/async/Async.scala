@@ -33,7 +33,7 @@ import caps.*
   * @see
   *   [[Async$.group Async.group]] and [[Future$.apply Future.apply]] for [[Async]]-subscoping operations.
   */
-trait Async private[async] (using val support: AsyncSupport^{any.only[Control]}, val scheduler: support.Scheduler):
+trait Async private[async] (using val support: AsyncSupport^{any.only[capabilities.Suspension]}, val scheduler: support.Scheduler):
   /** Waits for completion of source `src` and returns the result. Suspends the computation.
     *
     * @see
@@ -55,7 +55,7 @@ object Async extends AsyncImpl:
     *   Does not currently work on Scala.js, due to locks and condvars not being available.
     */
   private[async] class LockingAsync(val group: CompletionGroup)(using
-      support: AsyncSupport^{any.only[Control]},
+      support: AsyncSupport^{any.only[capabilities.Suspension]},
       scheduler: support.Scheduler
   ) extends Async(using support, scheduler):
     private val lock = ReentrantLock()
@@ -94,7 +94,7 @@ object Async extends AsyncImpl:
     type Blocking = FromSync { type Output[+T] = T }
 
     /** Implements [[FromSync]] by directly blocking the current thread. */
-    class BlockingWithLocks(using support: AsyncSupport^{any.only[Control]}, scheduler: support.Scheduler) extends FromSync:
+    class BlockingWithLocks(using support: AsyncSupport^{any.only[capabilities.Suspension]}, scheduler: support.Scheduler) extends FromSync:
       type Output[T] = T
       def apply[T](body: (Async.Spawn^) ?=> T): Output[T] =
         Async.group(body)(using Async.LockingAsync(CompletionGroup.Unlinked))

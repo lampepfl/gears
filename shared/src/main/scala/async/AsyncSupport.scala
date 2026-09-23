@@ -5,6 +5,13 @@ import scala.concurrent.duration._
 import language.experimental.captureChecking
 import caps.*
 
+object capabilities:
+  /** Suspension capability classifier.
+    * All `SuspendSupport` implementations must only capture capabilities under this classifier.
+    */
+  // TODO: move this to under ThreadLocal
+  trait Suspension extends Classifier, SharedCapability
+
 /** The delimited continuation suspension interface. Represents a suspended computation asking for a value of type `T`
   * to continue (and eventually returning a value of type `R`).
   */
@@ -13,7 +20,7 @@ trait Suspension[-T, +R]:
 
 /** Support for suspension capabilities through a delimited continuation interface. */
 trait SuspendSupport:
-  this: SuspendSupport^ =>
+  this: SuspendSupport^{any.only[capabilities.Suspension]} =>
   /** A marker for the "limit" of "delimited continuation". */
   type Label[R, B^]
 
@@ -28,6 +35,7 @@ trait SuspendSupport:
 
 /** Extends [[SuspendSupport]] with "asynchronous" boundary/resume functions, in the presence of a [[Scheduler]] */
 trait AsyncSupport extends SuspendSupport:
+  this: AsyncSupport^{any.only[capabilities.Suspension]} =>
   type Scheduler <: gears.async.Scheduler
 
   /** Resume a [[Suspension]] at some point in the future, scheduled by the scheduler. */
