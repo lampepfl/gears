@@ -12,6 +12,8 @@ import scala.util.{Failure, Success, Try}
 
 import AsyncOperations.sleep
 import Future.Promise
+import language.experimental.captureChecking
+import caps.*
 
 /** Timer exposes a steady [[Async.Source]] of ticks that happens every `tickDuration` milliseconds. Note that the timer
   * does not start ticking until `start` is called (which is a blocking operation, until the timer is cancelled).
@@ -34,16 +36,16 @@ class Timer(tickDuration: Duration) extends Cancellable {
         false
       )
     }
-    override def poll(k: Listener[TimerEvent]): Boolean =
+    override def poll(k: Listener[TimerEvent]^): Boolean =
       if isCancelled then k.completeNow(TimerEvent.Cancelled, this.ident)
       else false // subscribing to a timer always takes you to the next tick
-    override def dropListener(k: Listener[TimerEvent]): Unit = listeners -= k
-    override protected def addListener(k: Listener[TimerEvent]): Unit =
+    override def dropListener(k: Listener[TimerEvent]^): Unit = listeners -= unsafe.unsafeAssumePure(k)
+    override protected def addListener(k: Listener[TimerEvent]^): Unit =
       if isCancelled then k.completeNow(TimerEvent.Cancelled, this.ident)
       else
         Timer.this.synchronized:
           if isCancelled then k.completeNow(TimerEvent.Cancelled, this.ident)
-          else listeners += k
+          else listeners += unsafe.unsafeAssumePure(k)
   }
 
   /** Ticks of the timer are delivered through this source. Note that ticks are ephemeral. */

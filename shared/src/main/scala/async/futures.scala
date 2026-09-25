@@ -13,6 +13,8 @@ import scala.util.{Failure, Success, Try}
 import language.experimental.captureChecking
 import caps.*
 import scala.collection.immutable.Range.Partial
+import scala.annotation.compileTimeOnly
+import scala.annotation.constructorOnly
 
 /** Futures are [[Async.Source Source]]s that has the following properties:
   *   - They represent a single value: Once resolved, [[Async.await await]]-ing on a [[Future]] should always return the
@@ -85,7 +87,7 @@ object Future:
     def cancel(): Unit =
       setCancelled()
 
-    override def link(group: CompletionGroup): this.type =
+    override def link(group: CompletionGroup^): this.type =
       // though hasCompleted is accessible without "synchronized",
       // we want it not to be run while the future was trying to complete.
       synchronized:
@@ -119,8 +121,11 @@ object Future:
 
   /** A future that is completed by evaluating `body` as a separate asynchronous operation in the given `scheduler`
     */
-  private class RunnableFuture[+T](body: Async.Spawn^ ?->{any.except[Control]} T)(using ac: Async^) extends CoreFuture[T]:
+  private class RunnableFuture[+T](body: Async.Spawn^ ?->{any.except[Control]} T)(@constructorOnly ac: Async^) extends CoreFuture[T]:
     // self: RunnableFuture[T]^{any.except[Control]} =>
+
+    private val sup: (AsyncSupport^{ac.only[capabilities.Suspension]}) = ac.support
+    private val scheduler: sup.Scheduler = ac.scheduler.asInstanceOf[sup.Scheduler]
 
     /** RunnableFuture maintains its own inner [[CompletionGroup]], that is separated from the provided Async
       * instance's. When the future is cancelled, we only cancel this CompletionGroup. This effectively means any
@@ -132,8 +137,12 @@ object Future:
     private def checkCancellation(): Unit =
       if cancelRequest.get() then throw new CancellationException()
 
-    private class FutureAsync(val group: CompletionGroup)(using label: ac.support.Label[Unit, caps.CapSet]^)
-        extends Async(using ac.support, ac.scheduler):
+    private class FutureAsync(group_ : CompletionGroup^{any.only[capabilities.Scoping]})
+      (using support: AsyncSupport^{any.only[capabilities.Suspension]}, scheduler: support.Scheduler)
+      (using label: support.Label[Unit, {}]^{any.only[Control]})
+        extends Async(using support, scheduler): // not sure why sup and support here are not the same thing, but ok, we need to deal with
+
+      override val group = group_
 
       private class AwaitListener[T](src: Async.Source[T]^)
           extends Listener[T],
@@ -144,11 +153,11 @@ object Future:
         var state: State = stateUnused
 
         // guarded by lock; null = before apply or after resume
-        private var sus: ac.support.Suspension[T | Null, Unit] | Null = null
+        private var sus: support.Suspension[T | Null, Unit] | Null = null
         @volatile private var cancelRequest = false // if cancellation request received, checked after releasing lock
 
         // == Function, to be passed to suspend. Call this only once and before any other usage of this class.
-        def apply(sus: ac.support.Suspension[T | Null, Unit]^): Unit =
+        def apply(sus: support.Suspension[T | Null, Unit]^): Unit =
           this.sus = unsafe.unsafeAssumePure(sus) // SAFETY: internal field, capture set already inside Future
           this.link(group) // may resume + remove listener immediately
           if !cancelled then src.onComplete(this)
@@ -165,7 +174,7 @@ object Future:
             try
               if sus != null then
                 state = stateCancelled // this will let the resuming code know, it was cancelled
-                ac.support.resumeAsync(sus.asInstanceOf[ac.support.Suspension[T | Null, Unit]])(null)
+                support.resumeAsync[T | Null, Unit](sus.nn)(null)
                 sus = null // update lock-guarded state to not resume again
                 true
               else false // if sus is null, then was already completed before -> cancellation is ignored
@@ -198,7 +207,7 @@ object Future:
         val lock: Listener.ListenerLock^{this} = this
         def complete(data: T, source: Async.SourceId): Unit =
           // might have missed the cancelled -> but we ignore it -> still cancelled = false
-          ac.support.resumeAsync(sus.asInstanceOf[ac.support.Suspension[T | Null, Unit]])(data)
+          support.resumeAsync(sus.nn)(data)
           sus = null
           state = stateDone
           numberedLock.unlock()
@@ -220,34 +229,32 @@ object Future:
         src
           .poll()
           .getOrElse:
-            val listener: AwaitListener[U]^{src.except[Control]} =
-              // SAFETY: ac.support is only used for `resumeAsync`
-              val listener: AwaitListener[U]^{src.except[Control], ac.support} = AwaitListener(src.asListenerInterface)
-              unsafe.unsafeAssumePure(listener)
-            val res = ac.support.suspend(s => listener(s)) // linking and src.onComplete happen in listener
+            val listener: AwaitListener[U]^{src.except[Control], support, group} = AwaitListener(src.asListenerInterface)
+            val res = support.suspend(s => listener(s)) // linking and src.onComplete happen in listener
             listener.unlink()
             if listener.cancelled then throw CancellationException()
             else
               res.asInstanceOf[U] // not cancelled -> result from Source -> type U (not U | Null, still could be null)
 
-      override def withGroup(group: CompletionGroup) = FutureAsync(group)
+      override def withGroup(group: CompletionGroup^{any.only[capabilities.Scoping]}): Async^{this, group} = FutureAsync(group)
+    end FutureAsync
 
     override def cancel(): Unit = if setCancelled() then this.innerGroup.cancel()
 
-    private def run(using label: ac.support.Label[Unit, {}]^): Unit =
+    private def run(using label: sup.Label[Unit, {}]^{any.only[Control]}): Unit =
       val result = Async.withNewCompletionGroup(innerGroup)(Try({
         val r = body
         checkCancellation()
         r
       }).recoverWith({
         case _: InterruptedException | _: CancellationException => Failure(new CancellationException())
-      } : PartialFunction[Throwable, Try[T]]))(using FutureAsync(CompletionGroup.Unlinked))
+      } : PartialFunction[Throwable, Try[T]]))(using FutureAsync(CompletionGroup.Unlinked)(using sup, scheduler))
       complete:
         unsafe.unsafeAssumePure: // SAFETY: label is already part of the captured future
           result
 
-    link()
-    ac.support.scheduleBoundary(unsafe.unsafeDiscardUses(run))
+    link(ac.group)
+    sup.scheduleBoundary(unsafe.unsafeDiscardUses(run))(using scheduler)
 
   end RunnableFuture
 
@@ -255,8 +262,8 @@ object Future:
     * future is linked to the given [[Async.Spawn]] scope by default, i.e. it is cancelled when this scope ends.
     */
   def apply[T](body: Async.Spawn^ ?->{any.except[Control]} T)(using async: Async^, spawnable: Async.Spawn^)(using async.type =:= spawnable.type): Future[T]^{body, async.except[Control]} =
-    unsafe.unsafeAssumePure: // SAFETY: we don't use the Control part of the async context
-      RunnableFuture(body)
+    // unsafe.unsafeAssumePure: // SAFETY: we don't use the Control part of the async context
+      RunnableFuture(body)(async)
 
   /** A future that is immediately completed with the given result. */
   def now[T](result: Try[T]): Future[T] =

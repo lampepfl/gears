@@ -120,7 +120,7 @@ object VThreadSupport extends AsyncSupport:
     suspension.l.clearResult()
     suspension.setInput(arg)
 
-  override def scheduleBoundary(body: (Label[Unit, {}]^) ?-> Unit)(using Scheduler): Unit =
+  override def scheduleBoundary(body: (Label[Unit, {}]^{any.only[Control]}) ?-> Unit)(using Scheduler): Unit =
     VThreadScheduler.execute: () =>
       val label = VThreadLabel[Unit]()
       body(using label)

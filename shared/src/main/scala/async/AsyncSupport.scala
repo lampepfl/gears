@@ -5,13 +5,6 @@ import scala.concurrent.duration._
 import language.experimental.captureChecking
 import caps.*
 
-object capabilities:
-  /** Suspension capability classifier.
-    * All `SuspendSupport` implementations must only capture capabilities under this classifier.
-    */
-  // TODO: move this to under ThreadLocal
-  trait Suspension extends Classifier, SharedCapability
-
 /** The delimited continuation suspension interface. Represents a suspended computation asking for a value of type `T`
   * to continue (and eventually returning a value of type `R`).
   */
@@ -43,7 +36,7 @@ trait AsyncSupport extends SuspendSupport:
     s.execute(() => suspension.resume(arg))
 
   /** Schedule a computation with the suspension boundary already created. */
-  private[async] def scheduleBoundary(body: (Label[Unit, {}]^) ?-> Unit)(using s: Scheduler): Unit =
+  private[async] def scheduleBoundary(body: (Label[Unit, {}]^{any.only[Control]}) ?-> Unit)(using s: Scheduler): Unit =
     // TODO: actually investigate this
     s.execute(() => unsafe.unsafeDiscardUses(boundary(body)))
 
