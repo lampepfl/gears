@@ -43,10 +43,10 @@ trait Async private[async] (using val support: AsyncSupport^{any.only[capabiliti
   def await[T](src: Async.Source[T]^): T
 
   /** Returns the cancellation group for this [[Async]] context. */
-  def group: CompletionGroup
+  def group: CompletionGroup^{this.only[capabilities.Scoping]}
 
   /** Returns an [[Async]] context of the same kind as this one, with a new cancellation group. */
-  def withGroup(group: CompletionGroup): Async^{this}
+  def withGroup(group: CompletionGroup^{any.only[capabilities.Scoping]}): Async^{this, group}
 
 object Async extends AsyncImpl:
   /** The [[Async]] implementation based on blocking locks.
@@ -54,12 +54,14 @@ object Async extends AsyncImpl:
     * @note
     *   Does not currently work on Scala.js, due to locks and condvars not being available.
     */
-  private[async] class LockingAsync(val group: CompletionGroup)(using
+  private[async] class LockingAsync(group_ : CompletionGroup^{any.only[capabilities.Scoping]})(using
       support: AsyncSupport^{any.only[capabilities.Suspension]},
       scheduler: support.Scheduler
   ) extends Async(using support, scheduler):
     private val lock = ReentrantLock()
     private val condVar = lock.newCondition()
+
+    val group = group_
 
     /** Wait for completion of async source `src` and return the result */
     override def await[T](src: Async.Source[T]^): T =
@@ -82,7 +84,7 @@ object Async extends AsyncImpl:
           finally lock.unlock()
 
     /** An Async of the same kind as this one, with a new cancellation group */
-    override def withGroup(group: CompletionGroup): Async^{this} = Async.LockingAsync(group)(using support, scheduler)
+    override def withGroup(group: CompletionGroup^{any.only[capabilities.Scoping]}): Async^{this, group} = Async.LockingAsync(group)(using support, scheduler)
 
   /** A way to introduce asynchronicity into a synchronous environment. */
   trait FromSync private[async] ():

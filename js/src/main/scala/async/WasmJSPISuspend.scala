@@ -83,7 +83,7 @@ trait WasmJSPISuspend(using token: AsyncToken) extends AsyncSupport:
     label.resolve(body(suspend))
     js.await(suspPromise)
 
-  override private[async] def scheduleBoundary(body: (Label[Unit, {}]^) ?-> Unit)(using s: Scheduler): Unit =
+  override private[async] def scheduleBoundary(body: (Label[Unit, {}]^{any.only[Control]}) ?-> Unit)(using s: Scheduler): Unit =
     val label = WasmLabel[Unit]()
     s.execute: () =>
       body(using label)
@@ -117,8 +117,10 @@ final class WasmAsyncSupport(using token: AsyncToken) extends WasmJSPISuspend:
 /** A special root-level implementation of the [[Async]] context, that uses JSPI async/await on top-level to wait for
   * futures.
   */
-private[async] class JsAsync(val group: CompletionGroup)(using support: WasmAsyncSupport^{any.only[capabilities.Suspension]}, sched: JsAsyncScheduler.type)
+private[async] class JsAsync(group_ : CompletionGroup^{any.only[capabilities.Scoping]})(using support: WasmAsyncSupport^{any.only[capabilities.Suspension]}, sched: JsAsyncScheduler.type)
     extends Async(using support, sched):
+
+  override val group = group_
   override def await[T](src: Async.Source[T]^) =
     src
       .poll()
@@ -128,7 +130,7 @@ private[async] class JsAsync(val group: CompletionGroup)(using support: WasmAsyn
             src.onComplete:
               Listener: (item, _) =>
                 resolve(item)
-  def withGroup(group: CompletionGroup) = unsafe.unsafeAssumePure(JsAsync(group))
+  def withGroup(group: CompletionGroup^{any.only[capabilities.Scoping]}) = JsAsync(group)
 
 /** An implementation of [[Async.FromSync]] that returns a [[scala.concurrent.Future]] for a top-level
   * [[Async.blocking]] computation.
