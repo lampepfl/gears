@@ -3,6 +3,8 @@ import gears.async.Async.Source
 import gears.async.Listener.acceptingListener
 import gears.async.listeners.lockBoth
 
+import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.locks.ReentrantLock
 import scala.collection.mutable
 import scala.util.control.Breaks.{break, breakable}
 import scala.util.{Failure, Success, Try}
@@ -138,11 +140,11 @@ object SyncChannel:
   def apply[T](): SyncChannel[T] = Impl()
 
   private class Impl[T] extends Channel.Impl[T] with SyncChannel[T]:
-    override def pollRead(r: Reader): Boolean = synchronized:
+    override def pollRead(r: Reader): Boolean = locked:
       // match reader with buffer of senders
       checkClosed(readSource, r) || cells.matchReader(r)
 
-    override def pollSend(src: CanSend, s: Sender): Boolean = synchronized:
+    override def pollSend(src: CanSend, s: Sender): Boolean = locked:
       // match reader with buffer of senders
       checkClosed(src, s) || cells.matchSender(src, s)
   end Impl
@@ -157,12 +159,12 @@ object BufferedChannel:
     val buf = new mutable.Queue[T](size)
 
     // Match a reader -> check space in buf -> fail
-    override def pollSend(src: CanSend, s: Sender): Boolean = synchronized:
+    override def pollSend(src: CanSend, s: Sender): Boolean = locked:
       checkClosed(src, s) || cells.matchSender(src, s) || senderToBuf(src, s)
 
     // Check space in buf -> fail
     // If we can pop from buf -> try to feed a sender
-    override def pollRead(r: Reader): Boolean = synchronized:
+    override def pollRead(r: Reader): Boolean = locked:
       if checkClosed(readSource, r) then true
       else if !buf.isEmpty then
         if r.completeNow(Right(buf.head), readSource) then
@@ -195,7 +197,7 @@ object UnboundedChannel:
       pollSend(CanSend(x), acceptingListener((r, _) => result = r))
       if result.isLeft then throw ChannelClosedException()
 
-    override def pollRead(r: Reader): Boolean = synchronized:
+    override def pollRead(r: Reader): Boolean = locked:
       if checkClosed(readSource, r) then true
       else if !buf.isEmpty then
         if r.completeNow(Right(buf.head), readSource) then
@@ -204,7 +206,7 @@ object UnboundedChannel:
         true
       else false
 
-    override def pollSend(src: CanSend, s: Sender): Boolean = synchronized:
+    override def pollSend(src: CanSend, s: Sender): Boolean = locked:
       if checkClosed(src, s) || cells.matchSender(src, s) then true
       else if s.completeNow(Right(()), src) then
         buf += src.item
@@ -227,6 +229,56 @@ object Channel:
 
     var isClosed = false
     val cells = CellBuf()
+
+    // The channel's lock, which its sources hold to match senders with readers, and to queue and drop them.
+    private val lock = ReentrantLock()
+    // Readers and senders to drop, left by `dropReader` and `dropSender` when they found the lock held by another thread,
+    // for that thread to drop as it lets go.
+    private val readersToDrop = ConcurrentLinkedQueue[Reader]()
+    private val sendersToDrop = ConcurrentLinkedQueue[(CanSend, Sender)]()
+
+    /** Runs `body` holding the channel's lock, which is reentrant. */
+    protected final inline def locked[A](inline body: A): A =
+      lock.lock()
+      try body
+      finally unlock()
+
+    /** Lets go of the lock, dropping first, if this is the outermost hold, the readers and senders left to drop. */
+    private def unlock(): Unit =
+      if lock.getHoldCount() == 1 then dropLeft()
+      lock.unlock()
+      // Left by a thread that found the lock held after the last look.
+      while (!readersToDrop.isEmpty || !sendersToDrop.isEmpty) && lock.tryLock() do
+        try dropLeft()
+        finally lock.unlock()
+
+    private def dropLeft(): Unit =
+      var r = readersToDrop.poll()
+      while r != null do
+        if !isClosed then cells.dropReader(r)
+        r = readersToDrop.poll()
+      var s = sendersToDrop.poll()
+      while s != null do
+        if !isClosed then cells.dropSender(s._1, s._2)
+        s = sendersToDrop.poll()
+
+    /** Drops a waiting reader, never waiting for the lock: if another thread holds it, the reader is left for that
+      * thread to drop as it lets go. A listener drops itself from a source while it may hold the locks of others, as a
+      * race completed through one source does from the rest, so waiting for this channel's lock there could deadlock
+      * with a thread that holds it and waits for one of those.
+      */
+    private def dropReader(r: Reader): Unit =
+      if lock.tryLock() then
+        try { if !isClosed then cells.dropReader(r) }
+        finally unlock()
+      else readersToDrop.add(r)
+
+    /** Drops a waiting sender, never waiting for the lock, as `dropReader` does a reader. */
+    private def dropSender(src: CanSend, s: Sender): Unit =
+      if lock.tryLock() then
+        try { if !isClosed then cells.dropSender(src, s) }
+        finally unlock()
+      else sendersToDrop.add((src, s))
     // Poll a reader, returning false if it should be put into queue
     def pollRead(r: Reader): Boolean
     // Poll a reader, returning false if it should be put into queue
@@ -240,14 +292,13 @@ object Channel:
 
     override val readSource: Source[ReadResult] = new Source {
       override def poll(k: Reader): Boolean = pollRead(k)
-      override def onComplete(k: Reader): Unit = Impl.this.synchronized:
+      override def onComplete(k: Reader): Unit = locked:
         if !pollRead(k) then cells.addReader(k)
-      override def dropListener(k: Reader): Unit = Impl.this.synchronized:
-        if !isClosed then cells.dropReader(k)
+      override def dropListener(k: Reader): Unit = dropReader(k)
     }
     override final def sendSource(x: T): Source[SendResult] = CanSend(x)
     override final def close(): Unit =
-      synchronized:
+      locked:
         if !isClosed then
           isClosed = true
           cells.cancel()
@@ -262,14 +313,13 @@ object Channel:
     // cancelling a send of a given item might in fact cancel that of an equal one.
     protected final class CanSend(val item: T) extends Source[SendResult] {
       override def poll(k: Listener[SendResult]): Boolean = pollSend(this, k)
-      override def onComplete(k: Listener[SendResult]): Unit = Impl.this.synchronized:
+      override def onComplete(k: Listener[SendResult]): Unit = locked:
         if !pollSend(this, k) then cells.addSender(this, k)
-      override def dropListener(k: Listener[SendResult]): Unit = Impl.this.synchronized:
-        if !isClosed then cells.dropSender(this, k)
+      override def dropListener(k: Listener[SendResult]): Unit = dropSender(this, k)
     }
 
     /** CellBuf is a queue of cells, which consists of a sleeping sender or reader. The queue always guarantees that
-      * there are *only* all readers or all senders. It must be externally synchronized.
+      * there are *only* all readers or all senders. It must be used holding the channel's lock.
       */
     private[async] class CellBuf():
       type Cell = Reader | (CanSend, Sender)

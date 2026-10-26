@@ -381,5 +381,20 @@ class ChannelBehavior extends munit.FunSuite {
         .awaitAll
   }
 
+  test("select over two channels does not deadlock with their senders completing it from either") {
+    // A select in a future, whose wait has a lock of its own, dropped its listener from its other sources while still
+    // holding that lock: a sender pairing with it on one channel then waited for the other channel, whose own sender
+    // held that channel while waiting for the listener's lock.
+    Async.fromSync:
+      val rounds = 2000
+      val a = SyncChannel[Int]()
+      val b = SyncChannel[Int]()
+      val senders = Seq(a, b).map(c => Future { for i <- 1 to rounds do c.send(i) })
+      val reader = Future {
+        for _ <- 1 to 2 * rounds do Async.select(a.readSource.handle(_ => ()), b.readSource.handle(_ => ()))
+      }
+      (reader +: senders).awaitAll
+  }
+
   def getChannels = List(SyncChannel[Int](), BufferedChannel[Int](1024), UnboundedChannel[Int]())
 }

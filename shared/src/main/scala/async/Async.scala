@@ -374,8 +374,11 @@ object Async extends AsyncImpl:
           def complete(item: U, src: Async.Source[U]) =
             found = true
             if lockIsOurs then lock.release()
-            sources.foreach(s => if s != src then s.dropListener(self))
             k.complete(map(item, src), selfSrc)
+            // Dropped once `k`'s completion has released its lock, never while holding it: a source may take a
+            // listener's lock while holding its own (a channel does, to pair a sender with a reader), so dropping,
+            // which takes each source's own, while holding `k`'s would deadlock with it.
+            sources.foreach(s => if s != src then s.dropListener(self))
         } // end listener
 
         sources.foreach(_.onComplete(listener))
