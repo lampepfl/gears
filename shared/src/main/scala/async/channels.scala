@@ -242,8 +242,10 @@ object Channel:
       override def poll(k: Reader): Boolean = pollRead(k)
       override def onComplete(k: Reader): Unit = Impl.this.synchronized:
         if !pollRead(k) then cells.addReader(k)
-      override def dropListener(k: Reader): Unit = Impl.this.synchronized:
-        if !isClosed then cells.dropReader(k)
+      override def dropListener(k: Reader): Unit =
+        ()
+        // Impl.this.synchronized:
+        //   if !isClosed then cells.dropReader(k)
     }
     override final def sendSource(x: T): Source[SendResult] = CanSend(x)
     override final def close(): Unit =
@@ -254,8 +256,8 @@ object Channel:
 
     /** Complete a pair of locked sender and reader. */
     protected final def complete(src: CanSend, reader: Listener[ReadResult], sender: Listener[SendResult]) =
-      reader.complete(Right(src.item), readSource)
       sender.complete(Right(()), src)
+      reader.complete(Right(src.item), readSource)
 
     // Not a case class because equality should be referential, as otherwise
     // dependent on a (possibly odd) equality of T. Users do not expect that
@@ -264,8 +266,10 @@ object Channel:
       override def poll(k: Listener[SendResult]): Boolean = pollSend(this, k)
       override def onComplete(k: Listener[SendResult]): Unit = Impl.this.synchronized:
         if !pollSend(this, k) then cells.addSender(this, k)
-      override def dropListener(k: Listener[SendResult]): Unit = Impl.this.synchronized:
-        if !isClosed then cells.dropSender(this, k)
+      override def dropListener(k: Listener[SendResult]): Unit =
+        ()
+        // Impl.this.synchronized:
+        //   if !isClosed then cells.dropSender(this, k)
     }
 
     /** CellBuf is a queue of cells, which consists of a sleeping sender or reader. The queue always guarantees that
