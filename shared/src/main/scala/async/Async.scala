@@ -374,8 +374,8 @@ object Async extends AsyncImpl:
           def complete(item: U, src: Async.Source[U]) =
             found = true
             if lockIsOurs then lock.release()
-            sources.foreach(s => if s != src then s.dropListener(self))
             k.complete(map(item, src), selfSrc)
+            sources.foreach(s => if s != src then s.dropListener(self))
         } // end listener
 
         sources.foreach(_.onComplete(listener))
