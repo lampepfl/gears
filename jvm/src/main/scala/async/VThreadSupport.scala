@@ -41,27 +41,36 @@ object VThreadSupport extends AsyncSupport:
 
   type Scheduler = VThreadScheduler.type
 
+  /** Where a boundary's body leaves its result each time it suspends or finishes. Results are counted, so a `resume`
+    * waits for a result newer than the one it saw before resuming, rather than for one not yet cleared: with
+    * clear-then-wait, a `resumeAsync` clearing the result before a waiting `resume` had looked left that `resume`
+    * waiting on, woken by every later suspension of the body for nothing.
+    */
   private final class VThreadLabel[R]():
     private var result: Option[R] = None
+    private var results = 0L // how many times a result has been set
     private val lock = ReentrantLock()
     private val cond = lock.newCondition()
 
-    private[VThreadSupport] def clearResult() =
+    /** How many results have been set so far, to wait for a newer one with `waitResult`. */
+    private[VThreadSupport] def seen(): Long =
       lock.lock()
-      result = None
-      lock.unlock()
+      try results
+      finally lock.unlock()
 
     private[VThreadSupport] def setResult(data: R) =
       lock.lock()
       try
         result = Some(data)
+        results += 1
         cond.signalAll()
       finally lock.unlock()
 
-    private[VThreadSupport] def waitResult(): R =
+    /** The first result set after `after` results. */
+    private[VThreadSupport] def waitResult(after: Long): R =
       lock.lock()
       try
-        while result.isEmpty do cond.await()
+        while results <= after do cond.await()
         result.get
       finally lock.unlock()
 
@@ -92,9 +101,9 @@ object VThreadSupport extends AsyncSupport:
 
     // normal resume only tells other thread to run again -> resumeAsync may redirect here
     override def resume(arg: T): R =
-      l.clearResult()
+      val after = l.seen()
       setInput(arg)
-      l.waitResult()
+      l.waitResult(after)
 
   override opaque type Suspension[-T, +R] <: gears.async.Suspension[T, R] = VThreadSuspension[T, R]
 
@@ -104,16 +113,16 @@ object VThreadSupport extends AsyncSupport:
       val result = body(using label)
       label.setResult(result)
 
-    label.waitResult()
+    label.waitResult(after = 0)
 
   override private[async] def resumeAsync[T, R](suspension: Suspension[T, R])(arg: T)(using Scheduler): Unit =
-    suspension.l.clearResult()
     suspension.setInput(arg)
 
   override def scheduleBoundary(body: (Label[Unit]) ?=> Unit)(using Scheduler): Unit =
     VThreadScheduler.execute: () =>
       val label = VThreadLabel[Unit]()
       body(using label)
+      label.setResult(()) // releases a `resume` waiting for the body's next result, which there is none of
 
   override def suspend[T, R](body: Suspension[T, R] => R)(using l: Label[R]): T =
     val sus = new VThreadSuspension[T, R]()

@@ -127,12 +127,15 @@ class ListenerBehavior extends munit.FunSuite:
       val f1 = Future(source1.completeNowWith(1))
       listener.sleeping.await
       listener.continue()
+      // The listener's lock lets every caller in (`NumberedTestListener`), and a race relies on its upstream's lock to
+      // keep two completions apart, so the second starts once the first is done: started at once, it could find the
+      // race not yet won, be let in too, and complete it a second time.
+      assert(f1.await)
       val f2 = Future:
         val completed = l2.completeNow(1, source2)
         if completed then source2.dropListener(l2) // usually the source will do it by default
         completed
-      assert(f1.await || f2.await)
-      assert(!f1.await || !f2.await)
+      assert(!f2.await)
 
       assert(source1.listener.isEmpty)
       assert(source2.listener.isEmpty)
