@@ -193,7 +193,8 @@ object Async extends AsyncImpl:
       * from `onComplete` queues.
       *
       * This permits original, (i.e. non-derived) sources like futures or channels to drop the listener from their
-      * waiting sets.
+      * waiting sets. Removal is best effort: a source may leave the listener queued, so the listener must reject
+      * completion even if it is not removed.
       */
     def dropListener(k: Listener[T]): Unit
 
@@ -374,10 +375,9 @@ object Async extends AsyncImpl:
           def complete(item: U, src: Async.Source[U]) =
             found = true
             if lockIsOurs then lock.release()
+            // Complete first so that k releases its listener lock before cleanup.
+            // Otherwise cleanup can wait for a source whose thread is waiting for k.
             k.complete(map(item, src), selfSrc)
-            // Dropped once `k`'s completion has released its lock, never while holding it: a source may take a
-            // listener's lock while holding its own (a channel does, to pair a sender with a reader), so dropping,
-            // which takes each source's own, while holding `k`'s would deadlock with it.
             sources.foreach(s => if s != src then s.dropListener(self))
         } // end listener
 

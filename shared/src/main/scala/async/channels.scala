@@ -3,7 +3,6 @@ import gears.async.Async.Source
 import gears.async.Listener.acceptingListener
 import gears.async.listeners.lockBoth
 
-import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.locks.ReentrantLock
 import scala.collection.mutable
 import scala.util.control.Breaks.{break, breakable}
@@ -169,7 +168,8 @@ object BufferedChannel:
       else if !buf.isEmpty then
         if r.completeNow(Right(buf.head), readSource) then
           buf.dequeue()
-          if cells.hasSender then
+          // A cancelled sender may still be queued when its drop request could not acquire the channel lock.
+          while cells.hasSender && buf.size < size do
             val (src, s) = cells.nextSender
             cells.dequeue() // buf always has space available after dequeue
             senderToBuf(src, s)
@@ -232,53 +232,28 @@ object Channel:
 
     // The channel's lock, which its sources hold to match senders with readers, and to queue and drop them.
     private val lock = ReentrantLock()
-    // Readers and senders to drop, left by `dropReader` and `dropSender` when they found the lock held by another thread,
-    // for that thread to drop as it lets go.
-    private val readersToDrop = ConcurrentLinkedQueue[Reader]()
-    private val sendersToDrop = ConcurrentLinkedQueue[(CanSend, Sender)]()
 
     /** Runs `body` holding the channel's lock, which is reentrant. */
     protected final inline def locked[A](inline body: A): A =
       lock.lock()
       try body
-      finally unlock()
+      finally lock.unlock()
 
-    /** Lets go of the lock, dropping first, if this is the outermost hold, the readers and senders left to drop. */
-    private def unlock(): Unit =
-      if lock.getHoldCount() == 1 then dropLeft()
-      lock.unlock()
-      // Left by a thread that found the lock held after the last look.
-      while (!readersToDrop.isEmpty || !sendersToDrop.isEmpty) && lock.tryLock() do
-        try dropLeft()
+    /** Listener removal is optional: dead listeners reject completion and are skipped when matching or refilling. Never
+      * wait for this lock during cleanup, since the caller may hold another source's or listener's lock. Also skip
+      * reentrant cleanup: a listener's acquire or complete can call back here while cells is being traversed.
+      */
+    private inline def tryDrop(inline body: Unit): Unit =
+      if !lock.isHeldByCurrentThread && lock.tryLock() then
+        try { if !isClosed then body }
         finally lock.unlock()
 
-    private def dropLeft(): Unit =
-      var r = readersToDrop.poll()
-      while r != null do
-        if !isClosed then cells.dropReader(r)
-        r = readersToDrop.poll()
-      var s = sendersToDrop.poll()
-      while s != null do
-        if !isClosed then cells.dropSender(s._1, s._2)
-        s = sendersToDrop.poll()
-
-    /** Drops a waiting reader, never waiting for the lock: if another thread holds it, the reader is left for that
-      * thread to drop as it lets go. A listener drops itself from a source while it may hold the locks of others, as a
-      * race completed through one source does from the rest, so waiting for this channel's lock there could deadlock
-      * with a thread that holds it and waits for one of those.
-      */
     private def dropReader(r: Reader): Unit =
-      if lock.tryLock() then
-        try { if !isClosed then cells.dropReader(r) }
-        finally unlock()
-      else readersToDrop.add(r)
+      tryDrop { cells.dropReader(r) }
 
-    /** Drops a waiting sender, never waiting for the lock, as `dropReader` does a reader. */
     private def dropSender(src: CanSend, s: Sender): Unit =
-      if lock.tryLock() then
-        try { if !isClosed then cells.dropSender(src, s) }
-        finally unlock()
-      else sendersToDrop.add((src, s))
+      tryDrop { cells.dropSender(src, s) }
+
     // Poll a reader, returning false if it should be put into queue
     def pollRead(r: Reader): Boolean
     // Poll a reader, returning false if it should be put into queue
