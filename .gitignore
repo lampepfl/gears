@@ -17,6 +17,8 @@ local.sbt
 
 # Bloop
 .bsp
+# Scala CLI's build of the bench scripts
+.scala-build/
 
 # VS Code
 .vscode/
@@ -31,3 +33,8 @@ metals.sbt
 .idea
 .idea_modules
 /.worksheet/
+*.local.json
+
+# Benchmark results and provenance records (see bench/compare.sc and build.sc)
+bench/results/
+bench/*.json
