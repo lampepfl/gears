@@ -32,3 +32,14 @@ With sbt 2, separate multiple commands with semicolons inside one quoted argumen
 ```bash
 sbt 'scalafmtCheckAll; test'
 ```
+
+## Formatting
+
+Format before every commit: CI's first job runs `scalafmtCheckAll`, and fails on any file that is not formatted.
+
+```bash
+sbt 'scalafmtAll; scalafmtSbt'
+```
+
+`scalafmtAll` formats every project's main and test sources, and `scalafmtSbt` the build definition. Keep formatting in
+the commit of the change it belongs to; a commit that only reformats existing code should do nothing else.
