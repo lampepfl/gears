@@ -9,8 +9,8 @@ import munit.FunSuite
 class WorkerFailureSuite extends FunSuite {
 
   /** A reactor whose turns throw while `throwing` says so of the turn's number, counting from 1. */
-  private final class FailingReactor(throwing: Int => Boolean) extends Reactor {
-    type Op = AnyRef
+  private final class FailingReactor(throwing: Int => Boolean, onTurn: Int => Unit = _ => ()) extends Reactor {
+    type Op = gears.async.io.internal.ReactorOperation
     type Handle = AnyRef
     @volatile var turns = 0
     def ops: Ops[Op, Handle] = throw new UnsupportedOperationException
@@ -21,6 +21,7 @@ class WorkerFailureSuite extends FunSuite {
     def attach(op: Op, value: AnyRef | Null): Unit = ()
     def runOnce(block: Boolean): Unit = {
       turns += 1
+      onTurn(turns)
       if throwing(turns) then throw new IllegalStateException(s"turn $turns failed")
     }
     def wakeup(): Unit = ()
@@ -30,7 +31,7 @@ class WorkerFailureSuite extends FunSuite {
   }
 
   private def backendOf(reactor: FailingReactor): ReactorBackend = new ReactorBackend {
-    type Op = AnyRef
+    type Op = gears.async.io.internal.ReactorOperation
     type Handle = AnyRef
     type Readable = AnyRef
     type Writable = AnyRef
@@ -44,6 +45,27 @@ class WorkerFailureSuite extends FunSuite {
     def attach(op: Op, value: AnyRef | Null): Unit = ()
     def open(): Reactor.Of[Op, Handle] = reactor
     def pool(bufferSize: Int, buffers: Int): BufferPool = throw new UnsupportedOperationException
+  }
+
+  test("a large batch of poller completions is drained between polls") {
+    val tasks = ReactorWorker.ResumesPerDrain * 4
+    var ran = 0
+    var pollsDuringBatch = 0
+    var running: ReactorPool | Null = null
+    val reactor = new FailingReactor(
+      _ => false,
+      turn => {
+        if turn == 1 then for _ <- 0 until tasks do running.nn.execute(() => ran += 1)
+        else if ran < tasks then pollsDuringBatch += 1
+        else running.nn.stop()
+      }
+    )
+    ReactorPool.run(backendOf(reactor), 1, TakePolicy.Affine) { pool =>
+      running = pool
+      pool.runFirstWorker()
+    }
+    assertEquals(ran, tasks)
+    assert(pollsDuringBatch >= 3, s"only $pollsDuringBatch polls while draining $tasks resumes")
   }
 
   test("a turn that throws is reported, and the worker goes on running its tasks and turns") {

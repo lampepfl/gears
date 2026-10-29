@@ -262,8 +262,11 @@ object Future:
         val r = body
         checkCancellation()
         r
-      }).recoverWith { case _: InterruptedException | _: CancellationException =>
-        Failure(new CancellationException())
+      }).recoverWith {
+        // Keep the producer's acknowledgement (and any useful message), rather than capturing a second stack for
+        // every cancelled operation. I/O acknowledgements deliberately use a stackless CancellationException.
+        case cancelled: CancellationException => Failure(cancelled)
+        case _: InterruptedException          => Failure(new CancellationException())
       })(using FutureAsync(CompletionGroup.Unlinked))
       complete(result)
 

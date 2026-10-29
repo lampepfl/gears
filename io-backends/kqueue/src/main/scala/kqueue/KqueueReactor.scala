@@ -169,15 +169,8 @@ final class KqueueReactor private (
     * `slot` records what that taught about the descriptor's readiness.
     */
   private def performedAtOnce(command: Command, slot: Slot | Null, queue: Boolean): Boolean = {
-    val done =
-      try command.perform()
-      catch {
-        case t: Throwable =>
-          command.atOnceFailure = t
-          true
-      }
+    val done = attemptNow(command, queue)(command.perform())
     if slot != null then settleAfterRead(command, slot, done, command.atOnceFailure != null, slot.readAvailable)
-    if done && queue then ready.add(command)
     done
   }
 

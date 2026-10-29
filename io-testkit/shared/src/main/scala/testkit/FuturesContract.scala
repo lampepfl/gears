@@ -39,6 +39,90 @@ import munit.FunSuite
   */
 trait FuturesContract extends ProgramSuite {
 
+  test("continuously ready reads let sibling tasks and timers progress") {
+    running { io ?=>
+      val (in, out) = pipe(io)
+      io.perform(io.backend.ops.close(out)) // EOF stays immediately ready on every read.
+      val progressed = new java.util.concurrent.atomic.AtomicBoolean
+      try {
+        val busy = Future {
+          val buffer = arena.allocate(1)
+          val read = io.backend.ops.read(in, buffer)
+          var iterations = 0
+          var observed = false
+          while iterations < 10000 do {
+            buffer.clear()
+            io.perform(read)
+            observed ||= progressed.get()
+            iterations += 1
+          }
+          observed
+        }
+        val sibling = Future {
+          io.perform(io.backend.ops.timer(0))
+          progressed.set(true)
+        }
+        // MUnit's by-name assert holds a monitor: never suspend inside it, since a native continuation may migrate.
+        val observedProgress = busy.await
+        assert(observedProgress, "immediate readiness starved a sibling's timer")
+        sibling.await
+      } finally io.perform(io.backend.ops.close(in))
+    }
+  }
+
+  test("a read unlinks from a scope with a child after its buffer changes") {
+    running { io ?=>
+      val (in, out) = pipe(io)
+      try {
+        // The child and its parent's pending read are distinct group members.
+        val writer = Future {
+          io.perform(io.backend.ops.timer(10))
+          io.perform(io.backend.ops.write(out, arena.of(Array[Byte](42))))
+        }
+        val buffer = arena.allocate(8)
+        io.perform(io.backend.ops.read(in, buffer))
+        writer.await
+        assertEquals(buffer.position(), 1)
+      } finally {
+        io.perform(io.backend.ops.close(in))
+        io.perform(io.backend.ops.close(out))
+      }
+    } // Joining the scope must finish even when the read operation's structural hash changed.
+  }
+
+  test("cancelling a blocking op waits for its acknowledgement before returning borrowed resources") {
+    running { io ?=>
+      io.backend match {
+        case b: (gears.async.io.Blocking & io.backend.type) =>
+          val entered = new java.util.concurrent.atomic.AtomicBoolean
+          val stopped = new java.util.concurrent.atomic.AtomicBoolean
+          val release = new java.util.concurrent.CountDownLatch(1)
+          val waiting = Future {
+            io.perform(b.ops.blocking { () =>
+              entered.set(true)
+              var released = false
+              while !released do
+                try {
+                  release.await()
+                  released = true
+                } catch case _: InterruptedException => () // cleanup cannot finish until the test releases it
+              stopped.set(true)
+            })
+          }
+          try {
+            while !entered.get() do sleep(1)
+            waiting.cancel()
+            sleep(10)
+            assert(waiting.poll().isEmpty, "cancellation returned before the blocker released its resources")
+          } finally release.countDown()
+          val failure = waiting.awaitResult.failed.get
+          assert(failure.isInstanceOf[CancellationException])
+          assert(stopped.get())
+        case _ => ()
+      }
+    }
+  }
+
   test("a program waits on a timer, and run returns what the program returns") {
     val waited = running { io ?=>
       val started = System.nanoTime()

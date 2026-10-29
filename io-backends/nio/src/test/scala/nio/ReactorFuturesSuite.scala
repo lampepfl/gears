@@ -105,6 +105,17 @@ abstract class ReactorFuturesSuite(workers: Int) extends FuturesContract {
 }
 
 class ReactorCarriersSuite extends ReactorFuturesSuite(workers = 1) {
+  test("perform reuses the operation's completion state without replacing its attachment") {
+    running { io ?=>
+      val op = NioOps.timer(0)
+      val attachment = new Object
+      op.attachment = attachment
+      io.perform(op)
+      io.perform(op)
+      assert(op.attachment eq attachment)
+    }
+  }
+
   test("a program's Io is an OnPool over the backend: its ops go to the reactor of the worker running the caller") {
     var onWorker = false
     running { io ?=>

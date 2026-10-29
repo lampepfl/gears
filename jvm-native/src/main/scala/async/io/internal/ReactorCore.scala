@@ -55,6 +55,21 @@ abstract class ReactorCore[O <: LoopOp[O]] extends Reactor with TimerWaiter with
   protected final def complete(op: O): Unit = deliverComplete(take(op), op)
   protected final def fail(op: O, failure: Throwable): Unit = deliverFailure(take(op), op, failure)
 
+  /** Common immediate-readiness path. Inlined so a system-call attempt needs no closure or result wrapper. Even a
+    * completed attempt is queued when the worker's cooperative budget requires a scheduling boundary.
+    */
+  protected inline def attemptNow(op: O, queue: Boolean)(inline perform: Boolean): Boolean = {
+    val done =
+      try perform
+      catch {
+        case failure: Throwable =>
+          op.atOnceFailure = failure
+          true
+      }
+    if done && queue then ready.add(op)
+    done
+  }
+
   /** Runs the completion of `op`, which finished: `onFailure` with the failure it kept (`atOnceFailure`), if any, else
     * `onComplete`.
     */
@@ -108,7 +123,7 @@ abstract class ReactorCore[O <: LoopOp[O]] extends Reactor with TimerWaiter with
     case t: LoopTimer[?] =>
       val own = t.asInstanceOf[O & LoopTimer[O]] // only this reactor's timers name it their waiter
       if Thread.currentThread() eq loopThread then refile(own)
-      else {
+      else if own.queueMove(this) then {
         movedQueue.add(own)
         wakeup()
       }
@@ -117,7 +132,8 @@ abstract class ReactorCore[O <: LoopOp[O]] extends Reactor with TimerWaiter with
 
   /** Files `timer` again under its key, if it is still pending here. Loop thread only. */
   private def refile(timer: O & LoopTimer[O]): Unit =
-    if timer.heapIndex >= 0 && timer.completion != null then {
+    // A move queued before cancellation may arrive after reuse on another poller. Its heap index then belongs there.
+    if (timer.waiter eq this) && timer.heapIndex >= 0 && timer.completion != null then {
       timers.remove(timer)
       file(timer)
     }
@@ -126,6 +142,7 @@ abstract class ReactorCore[O <: LoopOp[O]] extends Reactor with TimerWaiter with
   protected final def deliverMoved(): Unit = {
     var timer = movedQueue.poll()
     while timer != null do {
+      timer.takeMove(this)
       refile(timer)
       timer = movedQueue.poll()
     }

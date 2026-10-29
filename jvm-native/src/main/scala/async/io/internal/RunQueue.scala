@@ -43,6 +43,18 @@ private[io] final class RunQueue {
     }
   }
 
+  /** Moves up to `limit` tasks from an owner-local backlog. A full destination leaves the next task in the backlog;
+    * removing first would silently lose a continuation. Both queues must be owned by the caller.
+    */
+  def moveFrom(backlog: java.util.ArrayDeque[Runnable], limit: Int): Int = {
+    var moved = 0
+    while moved < limit && !backlog.isEmpty && push(backlog.peek()) do {
+      backlog.poll()
+      moved += 1
+    }
+    moved
+  }
+
   /** Takes the task at the head, or returns null if there is none. On the owning thread only. */
   def pop(): Runnable | Null = {
     var h = head.get()

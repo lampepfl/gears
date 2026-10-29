@@ -25,14 +25,30 @@ trait AsyncOperations:
       .await
 
   /** Yields the current [[Async]] context, possibly allowing other computations to run. */
-  def `yield`()(using async: Async) =
-    Future
-      .withResolver[Unit]: resolver =>
-        async.scheduler.execute(() => resolver.resolve(()))
-      .link()
-      .await
+  def `yield`()(using async: Async): Unit =
+    val source = async match
+      case _: Async.LockingAsync => new AsyncOperations.ScheduledYield(async.scheduler)
+      case _                     => AsyncOperations.Yield
+    async.withGroup(CompletionGroup.Unlinked).await(source)
+    if async.group.isCancelled then throw new java.util.concurrent.CancellationException()
 
 object AsyncOperations:
+  // Poll must refuse the fast path. Registering the listener schedules the continuation at the back of the
+  // scheduler queue, with no intermediate future, resolver, or extra cancellation-group membership.
+  private object Yield extends Async.Source[Unit]:
+    override def poll(): Option[Unit] = None
+    def poll(listener: Listener[Unit]): Boolean = false
+    def onComplete(listener: Listener[Unit]): Unit = listener.completeNow((), this)
+    def dropListener(listener: Listener[Unit]): Unit = ()
+
+  // A blocking boundary has no continuation to enqueue when a listener completes synchronously. Schedule its
+  // notification explicitly, so yielding there also gives the scheduler a turn.
+  private class ScheduledYield(scheduler: Scheduler) extends Async.Source[Unit]:
+    override def poll(): Option[Unit] = None
+    def poll(listener: Listener[Unit]): Boolean = false
+    def onComplete(listener: Listener[Unit]): Unit = scheduler.execute(() => listener.completeNow((), this))
+    def dropListener(listener: Listener[Unit]): Unit = ()
+
   /** Suspends the current [[Async]] context for at least `millis` milliseconds.
     * @param millis
     *   The duration to suspend, in milliseconds. Must be a positive integer.

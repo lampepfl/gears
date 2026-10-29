@@ -14,7 +14,8 @@ import scala.concurrent.duration.FiniteDuration
   *
   * Its reactor is one of `backend`'s, opened on the worker's own thread, so it runs any op the backend builds.
   */
-private[io] final class ReactorWorker(val pool: ReactorPool, val index: Int, val reactor: Reactor) {
+private[io] final class ReactorWorker(val pool: ReactorPool, val index: Int, val reactor: Reactor)
+    extends ReactorOperation.Executor {
 
   /** The thread it runs on, which created it. */
   private[io] val owner = Thread.currentThread()
@@ -100,22 +101,18 @@ private[io] final class ReactorWorker(val pool: ReactorPool, val index: Int, val
   private var failedTurns = 0
 
   /** Runs `body` on this worker's thread: now if called there, or queued and the worker woken otherwise. */
-  def sync(body: => Unit): Unit =
-    if isCurrent then body
-    else {
-      inbox.add(() => body)
-      reactor.wakeup()
-    }
+  def sync(body: => Unit): Unit = dispatch(body)
 
-  /** Ops that `perform` may still finish without suspending in this round while no other task is queued, reset by each
-    * `drain`. Spent, `perform` suspends even for an op that could finish at once, so the reactor's poll gets to run.
-    */
-  private[io] var fastPathsLeft = ReactorWorker.FastPathBudget
+  def execute(task: Runnable): Unit = {
+    inbox.add(task)
+    reactor.wakeup()
+  }
 
-  /** Ops that `perform` may still finish without suspending in the running task's turn, even with other tasks queued,
-    * reset before each task. Spent, `perform` suspends, so a future whose ops rarely wait still gives up its turn.
-    */
-  private[io] var turnFastPathsLeft = 0
+  private[io] val budget = new CooperativeBudget(
+    ReactorWorker.FastPathBudget,
+    ReactorWorker.TurnFastPathBudget,
+    ReactorWorker.IdleFastPathBudget
+  )
 
   /** For measurement, on this worker's thread only: tasks taken from other workers, and the times it blocked. */
   private[io] var taken = 0L
@@ -144,7 +141,7 @@ private[io] final class ReactorWorker(val pool: ReactorPool, val index: Int, val
     * polled.
     */
   private[io] def drain(): Unit = {
-    fastPathsLeft = ReactorWorker.FastPathBudget
+    budget.startDrain()
     // Tasks for this worker in particular run first, here: in `local`, another worker could take one and call this
     // worker's reactor from its own thread. They run as though from the reactor's turn, so that a task they resume,
     // such as one whose op a cancel finished, stays here under the affine and hybrid policies. Those queued meanwhile
@@ -172,12 +169,11 @@ private[io] final class ReactorWorker(val pool: ReactorPool, val index: Int, val
     }
     // Under the hybrid policy, a backlog of resumes here is shared: half of it goes where idle workers may take it.
     if pool.policy == TakePolicy.Hybrid && home.size > ReactorWorker.HybridBacklog then {
-      var shared = home.size / 2
-      while shared > 0 && local.push(home.poll()) do shared -= 1
+      local.moveFrom(home, home.size / 2)
       pool.offerWork(index)
     }
     // Resumes from this worker's reactor first, then the rest.
-    var resumes = home.size
+    var resumes = math.min(home.size, ReactorWorker.ResumesPerDrain)
     while resumes > 0 do {
       runTask(home.poll())
       resumes -= 1
@@ -195,7 +191,7 @@ private[io] final class ReactorWorker(val pool: ReactorPool, val index: Int, val
   }
 
   private def runTask(task: Runnable): Unit = {
-    turnFastPathsLeft = ReactorWorker.TurnFastPathBudget
+    budget.startTask()
     try task.run()
     catch case t: Throwable => t.printStackTrace()
   }
@@ -258,14 +254,22 @@ private[io] final class ReactorWorker(val pool: ReactorPool, val index: Int, val
 
 private[io] object ReactorWorker {
 
-  /** How many ops `perform` may finish without suspending in one round of a worker. */
-  inline val FastPathBudget = 32
+  /** Bounds immediate completions per drain, with room for a burst of ready connections. Each task still gets only one
+    * immediate completion while peers are queued.
+    */
+  inline val FastPathBudget = 128
+
+  /** Extra immediate completions for a lone task before returning to the poller. */
+  inline val IdleFastPathBudget = 32
 
   /** How many ops `perform` may finish without suspending in one task's turn while other tasks are queued. */
   inline val TurnFastPathBudget = 1
 
   /** How many tasks queued for a worker in particular it runs in each round, at most. */
   inline val InboxPerDrain = 256
+
+  /** Bound completion bursts so a large ready batch cannot defer the next poll for an unbounded drain. */
+  inline val ResumesPerDrain = 256
 
   /** How many turns of its reactor in a row may throw before a worker takes it as broken and fails the pool. */
   inline val BrokenTurns = 16

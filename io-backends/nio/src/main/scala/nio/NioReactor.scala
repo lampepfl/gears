@@ -98,7 +98,7 @@ final class NioReactor private (selector: Selector) extends gears.async.io.inter
             if read then require(waiting.read == null, s"A read command is already pending on handle ${command.handle}")
             else require(waiting.write == null, s"A write command is already pending on handle ${command.handle}")
             command.completion = pending
-            if performedAtOnce(command, queue = !finishNow) then finished = finishNow
+            if attemptNow(command, queue = !finishNow)(command.perform()) then finished = finishNow
             else {
               val ops = command.selectOps(s.channel)
               if read then {
@@ -113,7 +113,7 @@ final class NioReactor private (selector: Selector) extends gears.async.io.inter
             }
           case (_: RegularFile, _) =>
             command.completion = pending
-            if performedAtOnce(command, queue = !finishNow) then finished = finishNow // always ready
+            if attemptNow(command, queue = !finishNow)(command.perform()) then finished = finishNow // always ready
             else {
               again.add(command)
               waits = true
@@ -165,21 +165,6 @@ final class NioReactor private (selector: Selector) extends gears.async.io.inter
         try if key.interestOps() != wanted then key.interestOps(wanted): Unit
         catch case _: CancelledKeyException => () // its channel was closed meanwhile
     }
-
-  /** Performs `command` before waiting for readiness. If it finishes, or fails, this returns true, its completion not
-    * run here but, with `queue`, queued for the next turn; if it would block, this returns false.
-    */
-  private def performedAtOnce(command: Command, queue: Boolean): Boolean = {
-    val done =
-      try command.perform()
-      catch {
-        case t: Throwable =>
-          command.atOnceFailure = t
-          true
-      }
-    if done && queue then ready.add(command)
-    done
-  }
 
   /** Performs a command whose handle is ready, and hands its completion the result; returns whether it is done. */
   private def performReady(command: Command): Boolean = {

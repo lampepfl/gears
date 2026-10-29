@@ -2,8 +2,8 @@
 
 An interface for asynchronous I/O that gears programs write once and run on any backend, and two backends: kqueue on
 Scala Native (macOS, and the parts of it Linux shares) and NIO on the JVM (any platform). A third, over Apple's
-Network.framework, is built on kqueue's reactors and comes separately ([`nwframework.md`](https://github.com/bishabosha/gears/blob/async-io-full-2026-10-28/docs/io/nwframework.md)). A program performs ops, built by its backend, with the `Io` the runner gives it, and gears is gears around
-them: futures, groups, cancellation, `sleep` and `withTimeout` all work, on the backend's own timers.
+Network.framework, is built on kqueue's reactors and comes separately ([`nwframework.md`](https://github.com/bishabosha/gears/blob/async-io-full-2026-10-28/docs/io/nwframework.md)). A program performs ops, built by its backend, with the `Io` the runner gives it, and reactor ops directly carry their Gears completion and cancellation state. Futures, groups, `sleep` and
+`withTimeout` use the same runtime, on the backend's own timers.
 
 ## Where to start reading
 
@@ -24,8 +24,8 @@ them: futures, groups, cancellation, `sleep` and `withTimeout` all work, on the 
 | where | holds | depends on |
 | --- | --- | --- |
 | `gears.async.io` (core, `shared/`) | the interface: `Io` and `Io.run`, `Backend` and its capabilities, `Ops`, `Slot`, addresses, socket options, `Deadline`, `BufferPool` | the rest of gears |
-| `gears.async.io.internal` (core, `shared/`) | what runs a backend's ops, which the runtime and the backends share and programs do not use: `Submitter`, `Reactor`, `Completion`, a backend's kinds (`ReactorBackend`, `CallerBackend`), `Io`'s kinds (`OnPool`, `OnCaller`), `Turns`, the checks every backend makes (`Checks`) | the interface |
-| `gears.async.io.internal` (core, `jvm-native/`, `jvm/`, `native/`, `js/`) | the runtime (`Runner`, `ReactorPool`, `ReactorWorker`, `RunQueue`, `ReactorScheduler`, `Pools`, `VirtualCarriers`), the runner's knobs (`ReactorRuns`, `TakePolicy`) and what the backends share (`Blockers`, `TimerHeap`; on Native, `NativePool`, `NativeBuffer` and the Posix sockets, files and resolver) | the interface |
+| `gears.async.io.internal` (core, `shared/`) | what runs a backend's ops, which the runtime and the backends share and programs do not use: `AsyncOperation`, `SerialExecutor`, `CooperativeBudget`, `ReactorOperation`, `Submitter`, `Reactor`, `Completion`, a backend's kinds (`ReactorBackend`, `CallerBackend`), `Io`'s kinds (`OnPool`, `OnCaller`), `Turns`, the checks every backend makes (`Checks`) | the interface |
+| `gears.async.io.internal` (core, `jvm-native/`, `jvm/`, `native/`, `js/`) | the runtime (`RunQueue`, `Runner`, `ReactorPool`, `ReactorWorker`, `ReactorScheduler`, `Pools`, `VirtualCarriers`), the runner's knobs (`ReactorRuns`, `TakePolicy`) and what the backends share (`Blockers`, `TimerHeap`; on Native, `NativePool`, `NativeBuffer` and the Posix sockets, files and resolver) | the interface |
 | `ioKqueue`, `ioNio` (`io-backends/`) | the backends, in `gears.async.io.kqueue` and `.nio` | core |
 | `ioTestkit` (`io-testkit/`) | the contract suites every backend runs, `BufferArena`, `higherlevel` (`gears.io.higherlevel`) with `HigherLevelChecks`, and the gears demos (`gears.io.demos`) with their command line, `DemoCommands`, each demo taking the `Io` and `Async` it runs with | core, munit, mainargs |
 | `ioKqueueDemos`, `ioNioDemos` (`io-backends/*/demos/`) | each backend's demo application: the backends it offers the demos (`DemoBackends`) and what starts their runs (`DemoRunner`, with `Io.run`); kqueue's also has the plain kqueue demos | a backend, the testkit |

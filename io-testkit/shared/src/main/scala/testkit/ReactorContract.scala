@@ -236,6 +236,65 @@ trait ReactorContract extends FunSuite {
     }
   }
 
+  test("coalesced earlier moves observe the latest deadline and can notify again after a poll") {
+    withReactor { r =>
+      val start = System.nanoTime()
+      val timer = backend.ops.deadlineTimer(start + 60_000_000_000L)
+      val outcome = Outcome()
+      r.submit(timer, outcome)
+      def moveBatch(finalDeadline: Long): Unit = {
+        val mover = new Thread(() => {
+          for i <- 1 to 1000 do timer.moveTo(start + 60_000_000_000L - i)
+          timer.moveTo(finalDeadline)
+        })
+        mover.start()
+        mover.join(5000)
+        assert(!mover.isAlive)
+      }
+      moveBatch(start + 30_000_000_000L)
+      r.runOnce(block = false)
+      assert(!outcome.finished)
+      moveBatch(System.nanoTime() - 1)
+      turnUntil(r)(outcome.finished)
+      assertEquals(outcome.completed, 1)
+    }
+  }
+
+  for oldHeapOccupied <- List(false, true) do
+    test(s"a queued deadline move cannot touch reuse on another poller (old heap occupied: $oldHeapOccupied)") {
+      withReactor { first =>
+        withReactor { second =>
+          val timer = backend.ops.deadlineTimer(System.nanoTime() + 60_000_000_000L)
+          val previous = Outcome()
+          first.submit(timer, previous)
+          val mover = new Thread(() => timer.moveTo(System.nanoTime() + 30_000_000_000L))
+          mover.start()
+          mover.join(5000)
+          assert(!mover.isAlive)
+          assert(first.cancel(timer))
+          assertEquals(previous.cancelled, 1)
+
+          val sibling = backend.ops.timer(60000)
+          val siblingOutcome = Outcome()
+          if oldHeapOccupied then first.submit(sibling, siblingOutcome)
+          val current = Outcome()
+          second.submit(timer, current)
+          first.runOnce(block = false) // Processes the stale move, whose heap index now names the second heap.
+          assert(!current.finished)
+          assert(!siblingOutcome.finished)
+          if oldHeapOccupied then {
+            assert(first.cancel(sibling))
+            assertEquals(siblingOutcome.cancelled, 1)
+          }
+          timer.moveTo(System.nanoTime() - 1)
+          turnUntil(second)(current.finished)
+          assertEquals(current.completed, 1)
+          assertEquals(current.cancelled, 0)
+          assertEquals(previous.cancelled, 1)
+        }
+      }
+    }
+
   test("a deadline timer completes at once for a deadline passed, and performed again at its deadline as it stands") {
     withReactor { r =>
       val timer = backend.ops.deadlineTimer(System.nanoTime() - 1_000_000L)

@@ -25,6 +25,22 @@ private[io] trait TimerState extends TimerHeap.Entry {
     */
   @volatile private[io] var waiter: TimerWaiter | Null = null
 
+  // Coalesce cross-thread notifications. The queue entry retains its reactor; a stale reactor must never clear a
+  // newer owner's notification. Clear before reading the deadline so a concurrent move either gets observed or queues.
+  @volatile private var queuedMove: TimerWaiter | Null = null
+
+  private[io] def queueMove(target: TimerWaiter): Boolean =
+    if queuedMove eq target then false
+    else
+      synchronized {
+        if queuedMove eq target then false
+        else { queuedMove = target; true }
+      }
+
+  private[io] def takeMove(target: TimerWaiter): Unit = synchronized {
+    if queuedMove eq target then queuedMove = null
+  }
+
   /** Readies a submission at `now`, with a time limit of `timeoutMillis` unless negative. */
   private[io] def start(now: Long, timeoutMillis: Int): Unit = {
     if nanos >= 0 then at = now + nanos

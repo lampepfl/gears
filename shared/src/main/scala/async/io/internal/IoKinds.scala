@@ -11,15 +11,9 @@ import _root_.gears.async.Cancellable
   * running the caller, which suspends until the reactor finishes with it. Cancelling the caller asks the reactor to
   * cancel the op, and waits until it has. Ops in flight together are futures performing them
   * (`Future(io.perform(op))`), each cancelled with its future. The pool itself is the runtime's, which implements this:
-  * it says only what a program may do on the pool; `yield` is its alone.
+  * it says only what a program may do on the pool. Yield uses Gears' shared scheduler primitive.
   */
-trait OnPool[+B <: ReactorBackend] extends Io[B] {
-
-  /** Gives up the caller's turn the pool's way: its resume queued behind the tasks already queued on its worker, so the
-    * futures sharing the worker run first, as a long computation should between slices.
-    */
-  override def `yield`()(using Async): Unit
-}
+trait OnPool[+B <: ReactorBackend] extends Io[B]
 
 /** An `Io` on the calling thread, which may block: a caller backend's ops performed by the caller, so it may be made by
   * the runner, or anyone, and used from any thread.

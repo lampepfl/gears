@@ -11,7 +11,7 @@ class ReactorSuite extends FunSuite {
 
   /** A reactor that only records whether it was closed. */
   private final class ClosingReactor extends Reactor {
-    type Op = AnyRef
+    type Op = gears.async.io.internal.ReactorOperation
     type Handle = AnyRef
     var closed = false
     def ops: Ops[Op, Handle] = throw new UnsupportedOperationException
@@ -68,7 +68,7 @@ class ReactorSuite extends FunSuite {
   test("a backend is a factory for its reactors") {
     val reactor = new ClosingReactor
     given ReactorBackend = new ReactorBackend {
-      type Op = AnyRef
+      type Op = gears.async.io.internal.ReactorOperation
       type Handle = AnyRef
       type Readable = AnyRef
       type Writable = AnyRef

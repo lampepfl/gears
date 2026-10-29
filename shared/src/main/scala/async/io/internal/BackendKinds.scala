@@ -21,6 +21,9 @@ trait CallerBackend extends Backend {
   */
 trait ReactorBackend extends Backend with Reactor.Factory[Reactor] {
 
+  /** Reactor ops carry their Gears completion and cancellation state directly. */
+  type Op <: ReactorOperation
+
   /** Opens a reactor that runs this backend's ops. Close it when done. */
   def open(): Reactor.Of[Op, Handle]
 }

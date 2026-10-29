@@ -10,7 +10,7 @@ import java.util.concurrent.atomic.AtomicReference
   * which extends this, so that an op is its own record while pending and submitting it allocates nothing. An op is in
   * its reactor's timer heap while it is a pending timer, or a pending op with a time limit (`TimerHeap.Entry`).
   */
-trait LoopOp[O <: LoopOp[O]] extends TimerHeap.Entry { this: O =>
+trait LoopOp[O <: LoopOp[O]] extends TimerHeap.Entry with ReactorOperation { this: O =>
 
   // Whether this op has been submitted before, so a one-shot op is run once though submitted on two threads at once.
   private val submissions = new AtomicBoolean()

@@ -10,6 +10,112 @@ designs tried around them and reverted. NIO's use of the pool is in [`jvm.md`](j
 numbers are microseconds per operation, the median of 5 runs of release-fast Scala Native builds on an M1 Pro running
 macOS 27, with client and server each a pool of the size given (see [`bench.md`](bench.md)).
 
+## Internal concurrency primitives
+
+An operation submitted through `Io.perform` is now its own Gears source and cancellation-group member. Both NIO and
+kqueue's `LoopOp` extend `ReactorOperation`, a thin specialization of `gears.async.io.internal.AsyncOperation[Unit]`. There is no
+attached `OpWaiter`, per-operation callback adapter, or general-purpose promise on this path. The attachment remains
+available to low-level callers. `ReactorBackend.Op` requires this contract at compile time.
+
+`AsyncOperation` is a reusable, single-consumer source. The consumer claims a generation before submission, preventing
+overlapping uses, and releases it after completion. Cancellation dispatches to a `gears.async.io.internal.SerialExecutor`, whose
+tasks cannot be stolen. The worker implements that executor with its existing inbox. Cancellation only requests a
+stop: the producer completes the source after it has released borrowed buffers, and the consumer waits outside its
+cancellation group until that acknowledgement. A queued cancel checks the generation before touching the poller, so
+it cannot cancel a later use on another worker. Completion and listener registration use one atomic slot, with no
+listener collection. A reusable source is deliberately not a Future, whose result must remain stable forever.
+
+Groups also capture the operation's generation and owner while holding their membership lock, before unlink can
+release that use. This closes the earlier race where a group saved the operation itself, then called `cancel` after
+it had been reused elsewhere. The internal `CancellationSnapshot` contract adds no allocation to submission or
+successful completion: a request is allocated only when cancellation starts, and doubles as the owner's inbox task.
+It captures fields only, with no callbacks or member locks held under the group lock.
+
+Cross-thread earlier-deadline updates coalesce while a notification is queued for that timer and poller. Repeated
+updates only publish the latest deadline and read a volatile marker; they allocate no queue nodes and make no wakeup
+calls. The poller clears its marker before reading the deadline. A concurrent move is therefore observed by that
+refile or queues another notification. An old poller cannot clear a newer owner's marker.
+A queued deadline update checks that the timer still belongs to its poller before reading its heap index. An update
+queued before cancellation must not remove an entry from the old heap after the timer has moved to another poller.
+Regression tests cover group snapshots delayed across reuse on the same and another worker, cancellation by the new
+group, joining an already-cancelled group, and stale timer updates with both empty and occupied old heaps. The timer
+tests are in the shared reactor contract, and pass on both NIO and kqueue.
+
+`gears.async.io.internal.CooperativeBudget` shares the immediate-completion policy. Every drain has 128 credits, and a task can use
+one while peers are queued; lone tasks share a separate 32-credit burst allowance per drain. Every immediate completion, including a failed
+attempt, consumes a drain credit. Starting another task does not replenish those credits. Once exhausted, submission
+still tries the system call, but queues completion so the caller suspends and the worker gets another poll turn.
+Poller-resumed tasks are also capped at 256 per drain, so a large completion burst still permits intervening polls.
+NIO and kqueue share this attempt/queue/error path in `ReactorCore.attemptNow`; kqueue retains its edge-readiness and
+available-byte tracking. The budget check is inlined, so its lazy peer check does not allocate a closure.
+
+The scheduler still has one poller per worker. Ordinary Gears futures and their continuations run on those workers;
+under the default affine policy, poller completions and cancellation acknowledgements resume on their owning worker.
+`gears.async.io.internal.RunQueue` keeps the existing stealing algorithm inside the I/O runtime. Its owner-local backlog transfer
+only removes a task after successfully enqueueing it, including when a hybrid-policy queue fills mid-transfer.
+
+Gears' default `AsyncOperations.yield` now uses the same singleton source as the reactor runtime did: it forces a
+scheduling boundary without creating a passive Future and resolver. `NioOnCaller` retains its platform-specific
+virtual-thread yield, which also gives JDK I/O wakeups a turn.
+
+`RuntimeCostSuite` provides a reproducible JVM diagnostic for immediate EOF reads, suspended timers and group
+cancellation. It prints medians after warmup and has no machine-dependent timing assertions. Functional contracts
+additionally exercise continuous immediate readiness alongside a sibling timer and cancellation of a blocker whose
+cleanup finishes later. Local benchmark output belongs under the ignored `bench/results/` directory.
+
+### Native verification through Metals MCP
+
+Metals' MCP runner delegates non-JVM suites to BSP `buildTarget/test`, so sbt links and executes the Native test
+binary with its own adapter. Native compiler-plugin options identify the platform even when sbt's target metadata
+incorrectly advertises JVM. No project-level JVM bridge or Native test-adapter dependency is required.
+
+Select the Native module explicitly for shared sources. For example, invoke MCP `test` with:
+
+```json
+{
+  "testClass": "gears.async.io.internal.AsyncOperationReuseSuite",
+  "testFile": "/Users/jamie/workspace/gears/jvm-native/src/test/scala/async/io/internal/AsyncOperationReuseSuite.scala",
+  "module": "rootNative-test",
+  "verbose": true
+}
+```
+
+Use `ioKqueue-test` for the kqueue contract and future suites. Sbt's BSP test endpoint supports suite selection;
+individual `testName` selection is explicitly rejected for non-JVM suites. JVM test selection uses the existing
+runner, with an exact-suite BSP fallback if presentation-compiler discovery is unavailable. Test summaries are collected from BSP reports, or sbt's standard summary when no report is emitted.
+
+The updated Metals runtime was verified against all 14 selected Native suites directly through MCP: 67 core tests
+and 200 kqueue tests passed, with one existing ignore. The focused JVM run passed 219 tests. These cover cancellation
+snapshots across operation reuse, stale deadline notifications, bounded immediate readiness, and group identity.
+Native execution also exposed test-only deadlocks: MUnit's by-name `assert` holds a shared clue monitor. Awaited
+continuations and latch waits now return into local values before assertions, so they cannot hold that monitor while
+waiting for another test thread. The temporary `NativeRegressionSuites` bridge and its
+build dependency were removed after direct execution was verified. Older Metals releases with the JVM-only MCP test
+launcher need the updated runner before using these requests.
+
+Native release benchmarking also exposed a group-membership bug: `ReadIntoBuffer` is a case class whose hash changes
+with its mutable buffer. A read placed in the group's spill set could complete but fail to unlink, leaving scope
+shutdown waiting forever. Group membership now uses identity in both the single slot and the lazy spill map.
+`CompletionGroupIdentitySuite` covers mutable hashes, equal distinct members and duplicate registration; the shared
+future contract also exercises a pending buffer read alongside a child future and checks that its scope completes.
+Three identity tests failed before the fix; the five current identity and vacancy checks pass.
+
+### Bounded fairness and deadline notifications
+
+The fairness policy bounds every drain to 128 immediate completions in total, gives each task one immediate
+completion with peers queued, and limits lone-task bursts to 32 additional completions per drain. This retains
+frequent poll opportunities without timing-dependent policy decisions. The notification marker coalesces repeated
+earlier-deadline updates while preserving cancellation and cross-poller reuse checks.
+
+`ReactorOperation` does not require readiness, a descriptor, or a syscall attempt. A completion-only backend may
+always return false from `trySubmit`, then deliver completion on its poller. The synthetic `CompletionBackendSuite`
+checks external completion, same-worker resumption, and delayed cancellation acknowledgement without a selector.
+No io_uring implementation is included.
+
+Single-member `CompletionGroup`s avoid allocating the identity map until a second distinct member is added. The
+cancellation flag is volatile for the fast-path check from other workers. A cancelled Future retains the producer's
+`CancellationException`, including a stackless operation acknowledgement, instead of capturing a replacement stack.
+
 ## The pool
 
 `ReactorPool` is the gears scheduler that futures see; `ReactorPool.run` starts it, and the thread that calls it is
@@ -35,7 +141,7 @@ polling: before that bound, the `mixed` scenario never finished.
 
 ### `RunQueue`
 
-`RunQueue` follows Tokio's local queue: a fixed ring of 256 tasks, first in first out for its owner, from which another
+`gears.async.io.internal.RunQueue` follows Tokio's local queue: a fixed ring of 256 tasks, first in first out for its owner, from which another
 thread claims about half with one compare-and-swap on the head, which packs two indices so that the owner can go on
 taking tasks while the other thread copies. A task that finds it full goes to the shared queue. `RunQueueCheck`
 (`RunQueueSuite`, JVM and Native) has an owner pushing and taking while three other threads take from it, every task run
@@ -48,7 +154,7 @@ would save most of it, but keep other workers from them for the whole drain.
 ### The inbox
 
 Some tasks must run on one worker's thread because they call its reactor: cancelling an op pending there
-(`OpWaiter.cancel`), or arming or cancelling a timer there. `ReactorWorker.sync` queues them in that worker's inbox,
+(`AsyncOperation.cancel`), or arming or cancelling a timer there. `ReactorWorker.sync` queues them in that worker's inbox,
 from another thread. They used to join `local`, behind the tasks already there, from whose head other workers take, so
 one could be taken and run on the wrong thread: `InboxCheck` reproduces it every time (two workers; another thread
 queues a task for the busy worker, which then yields and spawns futures behind it while the other is idle), and before
@@ -146,7 +252,14 @@ as many threads ([`bench/results/pool-policies-spare.json`](https://github.com/b
 
 An op that finishes at once lets `perform` return without suspending: no await, no continuation switch, no round trip
 through the scheduler (`Reactor.trySubmit`, which finishes such an op inside the call without calling its completion).
-Two budgets keep it fair, both in `ReactorWorker`:
+`CooperativeBudget`, owned by `ReactorWorker`, enforces a 128-completion limit across each drain and a
+one-completion limit per task when peers are queued. Lone tasks share 32 extra credits per drain. All immediate
+attempts consume drain credits, including failures and the per-task allowance, so a sequence of tasks cannot reset
+its way around the next poll. The shared limit bounds the time until the next poll, while the per-task allowance
+keeps queued peers moving. Home-queue resumes have a separate 256-task cap.
+
+The measurements below describe the earlier policy that motivated these two limits; its 32-credit counter applied
+only while idle, unlike the current shared drain counter:
 
 - **While the worker has nothing else queued** (`isIdle`), at most `FastPathBudget` (32) times per round, so the reactor
   still polls for futures waiting on events. `pipelined` 2.23 → 0.67 (−70%), ping-pong −2 to −3%
