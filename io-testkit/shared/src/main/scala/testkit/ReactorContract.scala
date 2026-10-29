@@ -967,6 +967,33 @@ trait ReactorContract extends FunSuite {
     finally pool.close()
   }
 
+  test("pooled reads preserve full buffers and the trailing partial buffer across reuse") {
+    val pool = backend.pool(bufferSize = 8, buffers = 1)
+    try
+      withReactor { r =>
+        val (in, out) = pipe(r)
+        val into = Slot[Received]()
+        val read = backend.ops.read(in, pool, into)
+        try {
+          r.submit(backend.ops.write(out, bytes("abcdefghijklmnopqrs")), Outcome())
+          for expected <- List("abcdefgh", "ijklmnop", "qrs") do {
+            val outcome = Outcome()
+            r.submit(read, outcome)
+            turnUntil(r)(outcome.finished)
+            assertEquals(outcome.completed, 1, String.valueOf(outcome.failure))
+            val received = into.clear()
+            try assertEquals(textOf(received), expected)
+            finally received.release()
+          }
+          assertEquals(pool.available, 1)
+        } finally {
+          close(r, in)
+          close(r, out)
+        }
+      }
+    finally pool.close()
+  }
+
   test("a pooled read at the end of the stream completes with an empty buffer") {
     val pool = backend.pool(bufferSize = 16, buffers = 1)
     try

@@ -320,26 +320,9 @@ final class Read(val handle: Handle, buf: ByteBuffer) extends Command {
 final class PooledRead(val handle: Handle, pool: DirectPool, into: Slot[Received]) extends Command {
   override private[io] def slotRefusal: Throwable | Null = gears.async.io.internal.Checks.notEmpty(into)
   def interest: Interest = Interest.Read
-  def perform(): Boolean = {
-    val slot = pool.take()
-    if slot == null then throw new IOException("The pool has no buffer free")
-    val buffer = slot.nn.buffer
-    val read =
-      try entry.nn.read(buffer)
-      catch {
-        case failure: Throwable =>
-          slot.nn.release() // a failed read holds nothing
-          throw failure
-      }
-    if read == 0 then {
-      slot.nn.release()
-      false
-    } else {
-      buffer.flip()
-      into.set(slot.nn)
-      true
-    }
-  }
+  def perform(): Boolean =
+    gears.async.io.internal.PooledBufferRead.attempt(pool, into)(buffer => entry.nn.read(buffer)) != 0
+
 }
 
 /** Drains `buf` between position and limit. Done once at least one byte has been written, or at once, with no system

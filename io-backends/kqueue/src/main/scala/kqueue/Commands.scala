@@ -71,30 +71,12 @@ final case class PooledRead(fd: Int, pool: NativePool, into: Slot[Received]) ext
   override private[io] def slotRefusal: Throwable | Null = gears.async.io.internal.Checks.notEmpty(into)
   def interest: Interest = Interest.Read
   private var read = 0
-  private var filled = false
   def perform(): Boolean = {
-    val slot = pool.take()
-    if slot == null then throw new java.io.IOException("The pool has no buffer free")
-    val buffer = slot.nn.buffer
-    read =
-      try NonBlocking.read(fd, buffer) // -1 at EOF, which leaves the buffer as it was
-      catch {
-        case failure: Throwable =>
-          slot.nn.release() // a failed read holds nothing
-          throw failure
-      }
-    if read == 0 then {
-      slot.nn.release()
-      false
-    } else {
-      filled = !buffer.hasRemaining()
-      buffer.flip()
-      into.set(slot.nn)
-      true
-    }
+    read = gears.async.io.internal.PooledBufferRead.attempt(pool, into)(buffer => NonBlocking.read(fd, buffer))
+    read != 0
   }
   override def transferred: Int = read
-  override def mayStillBeReady: Boolean = read < 0 || filled
+  override def mayStillBeReady: Boolean = read < 0 || read == pool.bufferSize
   override def edgeTriggered: Boolean = true
 }
 
