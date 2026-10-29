@@ -89,16 +89,7 @@ abstract class ReactorCore[O <: LoopOp[O]] extends Reactor with TimerWaiter with
     * that submits a command which finishes at once is left for the next turn, so one busy handle cannot keep the loop
     * from polling. Returns whether there were any.
     */
-  protected final def deliverReady(): Boolean = {
-    var count = ready.size
-    val any = count > 0
-    while count > 0 do {
-      val op = ready.poll().nn
-      count -= 1
-      finish(op)
-    }
-    any
-  }
+  protected final def deliverReady(): Boolean = BoundedDrain.snapshot(ready)(op => finish(op.nn))
 
   // Close ops that finished (`LoopOp.closes`), at once, from another thread or notified, whose completions run at the
   // end of the turn after the one they were queued in: by then that reactor has delivered the failures of the ops they
@@ -106,14 +97,7 @@ abstract class ReactorCore[O <: LoopOp[O]] extends Reactor with TimerWaiter with
   protected final val closing = new java.util.ArrayDeque[O]()
 
   /** Runs the completions of the first `due` close ops queued, those queued before this turn began. */
-  protected final def deliverClosing(due: Int): Unit = {
-    var n = due
-    while n > 0 do {
-      val op = closing.poll().nn
-      n -= 1
-      finish(op)
-    }
-  }
+  protected final def deliverClosing(due: Int): Unit = BoundedDrain.prefix(closing, due)(op => finish(op.nn))
 
   // Timers whose deadline moved earlier, told from another thread, for the loop to file again (`moved`).
   private val movedQueue = new java.util.concurrent.ConcurrentLinkedQueue[O & LoopTimer[O]]()

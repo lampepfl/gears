@@ -75,6 +75,16 @@ consumer. Its `finally` also returns a buffer if publication fails. It knows not
 edge readiness, timers, or scheduling. NIO and kqueue use the same ownership algorithm, and kqueue derives its
 readiness hint from the returned byte count rather than retaining a separate filled-buffer flag.
 
+`BoundedDrain` expresses a fixed prefix of a thread-confined queue. Ready completions and regular-file retries
+capture the batch at entry; close completions use the prefix captured earlier in the turn. Work enqueued by a
+completion waits for a later batch. The inline loops use the existing queues and leave operation bookkeeping and
+polling policy unchanged. Concurrent promise queues retain their own draining algorithm.
+
+`ResourcePublication` transfers an acquired resource through a caller-supplied publication policy, discarding it
+when publication is declined or throws. File opens in NIO and kqueue supply `BlockingRun.unlessCancelled`, preserving
+its existing cancellation lock and commit point. Resource cleanup happens before the blocking task reports that it
+has ended. Both primitives inline without allocating callbacks or adding lifecycle records.
+
 ### Native verification through Metals MCP
 
 Metals' MCP runner delegates non-JVM suites to BSP `buildTarget/test`, so sbt links and executes the Native test
@@ -96,8 +106,8 @@ Use `ioKqueue-test` for the kqueue contract and future suites. Sbt's BSP test en
 individual `testName` selection is explicitly rejected for non-JVM suites. JVM test selection uses the existing
 runner, with an exact-suite BSP fallback if presentation-compiler discovery is unavailable. Test summaries are collected from BSP reports, or sbt's standard summary when no report is emitted.
 
-The updated Metals runtime was verified against all 15 selected Native suites directly through MCP: 73 core tests
-and 201 kqueue tests passed, with one existing ignore. The focused JVM run passed 260 tests. These cover cancellation
+The updated Metals runtime was verified against all 18 selected Native suites directly through MCP: 83 core tests
+and 202 kqueue tests passed, with one existing ignore. The focused JVM run passed 271 tests. These cover cancellation
 snapshots across operation reuse, stale deadline notifications, bounded immediate readiness, and group identity.
 Native execution also exposed test-only deadlocks: MUnit's by-name `assert` holds a shared clue monitor. Awaited
 continuations and latch waits now return into local values before assertions, so they cannot hold that monitor while

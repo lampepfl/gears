@@ -20,7 +20,9 @@ final class OpenFile(path: String, write: Boolean, into: Slot[NioKinds.File]) ex
   override private[io] def slotRefusal: Throwable | Null = gears.async.io.internal.Checks.notEmpty(into)
   def block(): Unit = {
     val handle = NioHandles.openFile(path, write)
-    if !unlessCancelled(into.set(handle)) then NioHandles.close(handle)
+    gears.async.io.internal.ResourcePublication(handle)(opened => unlessCancelled(into.set(opened)))(opened =>
+      NioHandles.close(opened)
+    )
   }
 }
 

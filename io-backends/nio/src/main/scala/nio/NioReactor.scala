@@ -182,15 +182,8 @@ final class NioReactor private (selector: Selector) extends gears.async.io.inter
   }
 
   /** Performs again the commands on regular files that were not done, as many as were waiting when it started. */
-  private def deliverAgain(): Boolean = {
-    var count = again.size
-    val any = count > 0
-    while count > 0 do {
-      val command = again.poll()
-      count -= 1
-      if !performReady(command) then again.add(command)
-    }
-    any
+  private def deliverAgain(): Boolean = gears.async.io.internal.BoundedDrain.snapshot(again) { command =>
+    if !performReady(command) then again.add(command)
   }
 
   /** Called from any thread when a handle this reactor registered is closed: the commands pending on it fail, from the

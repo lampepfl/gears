@@ -501,6 +501,29 @@ trait ReactorContract extends FunSuite {
     }
   }
 
+  test("an immediate completion that resubmits itself leaves the next batch and a sibling timer their turns") {
+    withReactor { r =>
+      val (in, out) = pipe(r)
+      close(r, out)
+      try {
+        val read = backend.ops.read(in, allocate(1)) // EOF is immediately ready on every submission.
+        var completed = 0
+        lazy val again: Completion[backend.Op] = _ => {
+          completed += 1
+          if completed < 16 then r.submit(read, again)
+        }
+        val sibling = Outcome()
+        r.submit(read, again)
+        r.submit(backend.ops.timer(0), sibling)
+        for turn <- 1 to 16 do {
+          r.runOnce(block = false)
+          assertEquals(completed, turn)
+          assertEquals(sibling.completed, 1)
+        }
+      } finally close(r, in)
+    }
+  }
+
   test("writes fill a pipe, wait while it is full, and go on as it drains") {
     withReactor { r =>
       val (in, out) = pipe(r)

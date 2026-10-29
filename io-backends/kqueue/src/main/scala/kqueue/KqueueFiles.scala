@@ -27,7 +27,9 @@ final class OpenFile(path: String, write: Boolean, into: Slot[KqueueKinds.File])
   override private[io] def slotRefusal: Throwable | Null = gears.async.io.internal.Checks.notEmpty(into)
   def block(): Unit = {
     val handle = KqueueHandles.openFile(path, write)
-    if !unlessCancelled(into.set(handle)) then KqueueHandles.close(handle)
+    gears.async.io.internal.ResourcePublication(handle)(opened => unlessCancelled(into.set(opened)))(opened =>
+      KqueueHandles.close(opened)
+    )
   }
 }
 
