@@ -3,6 +3,7 @@ import gears.async.Async.Source
 import gears.async.Listener.acceptingListener
 import gears.async.listeners.lockBoth
 
+import java.util.concurrent.locks.ReentrantLock
 import scala.collection.mutable
 import scala.util.control.Breaks.{break, breakable}
 import scala.util.{Failure, Success, Try}
@@ -138,11 +139,11 @@ object SyncChannel:
   def apply[T](): SyncChannel[T] = Impl()
 
   private class Impl[T] extends Channel.Impl[T] with SyncChannel[T]:
-    override def pollRead(r: Reader): Boolean = synchronized:
+    override def pollRead(r: Reader): Boolean = locked:
       // match reader with buffer of senders
       checkClosed(readSource, r) || cells.matchReader(r)
 
-    override def pollSend(src: CanSend, s: Sender): Boolean = synchronized:
+    override def pollSend(src: CanSend, s: Sender): Boolean = locked:
       // match reader with buffer of senders
       checkClosed(src, s) || cells.matchSender(src, s)
   end Impl
@@ -157,17 +158,18 @@ object BufferedChannel:
     val buf = new mutable.Queue[T](size)
 
     // Match a reader -> check space in buf -> fail
-    override def pollSend(src: CanSend, s: Sender): Boolean = synchronized:
+    override def pollSend(src: CanSend, s: Sender): Boolean = locked:
       checkClosed(src, s) || cells.matchSender(src, s) || senderToBuf(src, s)
 
     // Check space in buf -> fail
     // If we can pop from buf -> try to feed a sender
-    override def pollRead(r: Reader): Boolean = synchronized:
+    override def pollRead(r: Reader): Boolean = locked:
       if checkClosed(readSource, r) then true
       else if !buf.isEmpty then
         if r.completeNow(Right(buf.head), readSource) then
           buf.dequeue()
-          if cells.hasSender then
+          // A cancelled sender may still be queued when its drop request could not acquire the channel lock.
+          while cells.hasSender && buf.size < size do
             val (src, s) = cells.nextSender
             cells.dequeue() // buf always has space available after dequeue
             senderToBuf(src, s)
@@ -195,7 +197,7 @@ object UnboundedChannel:
       pollSend(CanSend(x), acceptingListener((r, _) => result = r))
       if result.isLeft then throw ChannelClosedException()
 
-    override def pollRead(r: Reader): Boolean = synchronized:
+    override def pollRead(r: Reader): Boolean = locked:
       if checkClosed(readSource, r) then true
       else if !buf.isEmpty then
         if r.completeNow(Right(buf.head), readSource) then
@@ -204,7 +206,7 @@ object UnboundedChannel:
         true
       else false
 
-    override def pollSend(src: CanSend, s: Sender): Boolean = synchronized:
+    override def pollSend(src: CanSend, s: Sender): Boolean = locked:
       if checkClosed(src, s) || cells.matchSender(src, s) then true
       else if s.completeNow(Right(()), src) then
         buf += src.item
@@ -227,6 +229,31 @@ object Channel:
 
     var isClosed = false
     val cells = CellBuf()
+
+    // The channel's lock, which its sources hold to match senders with readers, and to queue and drop them.
+    private val lock = ReentrantLock()
+
+    /** Runs `body` holding the channel's lock, which is reentrant. */
+    protected final inline def locked[A](inline body: A): A =
+      lock.lock()
+      try body
+      finally lock.unlock()
+
+    /** Listener removal is optional: dead listeners reject completion and are skipped when matching or refilling. Never
+      * wait for this lock during cleanup, since the caller may hold another source's or listener's lock. Also skip
+      * reentrant cleanup: a listener's acquire or complete can call back here while cells is being traversed.
+      */
+    private inline def tryDrop(inline body: Unit): Unit =
+      if !lock.isHeldByCurrentThread && lock.tryLock() then
+        try { if !isClosed then body }
+        finally lock.unlock()
+
+    private def dropReader(r: Reader): Unit =
+      tryDrop { cells.dropReader(r) }
+
+    private def dropSender(src: CanSend, s: Sender): Unit =
+      tryDrop { cells.dropSender(src, s) }
+
     // Poll a reader, returning false if it should be put into queue
     def pollRead(r: Reader): Boolean
     // Poll a reader, returning false if it should be put into queue
@@ -240,14 +267,13 @@ object Channel:
 
     override val readSource: Source[ReadResult] = new Source {
       override def poll(k: Reader): Boolean = pollRead(k)
-      override def onComplete(k: Reader): Unit = Impl.this.synchronized:
+      override def onComplete(k: Reader): Unit = locked:
         if !pollRead(k) then cells.addReader(k)
-      override def dropListener(k: Reader): Unit = Impl.this.synchronized:
-        if !isClosed then cells.dropReader(k)
+      override def dropListener(k: Reader): Unit = dropReader(k)
     }
     override final def sendSource(x: T): Source[SendResult] = CanSend(x)
     override final def close(): Unit =
-      synchronized:
+      locked:
         if !isClosed then
           isClosed = true
           cells.cancel()
@@ -262,14 +288,13 @@ object Channel:
     // cancelling a send of a given item might in fact cancel that of an equal one.
     protected final class CanSend(val item: T) extends Source[SendResult] {
       override def poll(k: Listener[SendResult]): Boolean = pollSend(this, k)
-      override def onComplete(k: Listener[SendResult]): Unit = Impl.this.synchronized:
+      override def onComplete(k: Listener[SendResult]): Unit = locked:
         if !pollSend(this, k) then cells.addSender(this, k)
-      override def dropListener(k: Listener[SendResult]): Unit = Impl.this.synchronized:
-        if !isClosed then cells.dropSender(this, k)
+      override def dropListener(k: Listener[SendResult]): Unit = dropSender(this, k)
     }
 
     /** CellBuf is a queue of cells, which consists of a sleeping sender or reader. The queue always guarantees that
-      * there are *only* all readers or all senders. It must be externally synchronized.
+      * there are *only* all readers or all senders. It must be used holding the channel's lock.
       */
     private[async] class CellBuf():
       type Cell = Reader | (CanSend, Sender)

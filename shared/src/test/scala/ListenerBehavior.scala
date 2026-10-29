@@ -244,6 +244,32 @@ class ListenerBehavior extends munit.FunSuite:
     assert(source2.listener.isEmpty)
     assert(source3.listener.isEmpty)
 
+  test("race completes its downstream listener before cleaning up other sources"):
+    var held = false
+    var completed = false
+    val winner = TSource()
+    val loser = new TSource:
+      override def dropListener(k: Listener[Int]): Unit =
+        assert(completed)
+        assert(!held, "cleanup must not hold the downstream listener's lock")
+        super.dropListener(k)
+    val downstream = new Listener[Int]:
+      val lock = new ListenerLock with Listener.NumberedLock:
+        val selfNumber = number
+        def acquire(): Boolean =
+          held = true
+          true
+        def release(): Unit = held = false
+      def complete(value: Int, source: Source[Int]): Unit =
+        assertEquals(value, 7)
+        assert(held)
+        completed = true
+        lock.release()
+
+    Async.race(winner, loser).onComplete(downstream)
+    assert(winner.completeNowWith(7))
+    assert(loser.listener.isEmpty)
+
 private class TestListener(expected: Int)(using asst: munit.Assertions) extends Listener[Int]:
   val lock = null
 
