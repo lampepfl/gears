@@ -12,6 +12,8 @@ import scala.util.{Failure, Success, Try}
 
 import AsyncOperations.sleep
 import Future.Promise
+import language.experimental.captureChecking
+import caps.*
 
 /** Timer exposes a steady [[Async.Source]] of ticks that happens every `tickDuration` milliseconds. Note that the timer
   * does not start ticking until `start` is called (which is a blocking operation, until the timer is cancelled).
@@ -30,20 +32,20 @@ class Timer(tickDuration: Duration) extends Cancellable {
     val listeners = mutable.Set[Listener[TimerEvent]]()
     def tick() = synchronized {
       listeners.filterInPlace(l =>
-        l.completeNow(TimerEvent.Tick, this)
+        l.completeNow(TimerEvent.Tick, this.ident)
         false
       )
     }
-    override def poll(k: Listener[TimerEvent]): Boolean =
-      if isCancelled then k.completeNow(TimerEvent.Cancelled, this)
+    override def poll(k: Listener[TimerEvent]^): Boolean =
+      if isCancelled then k.completeNow(TimerEvent.Cancelled, this.ident)
       else false // subscribing to a timer always takes you to the next tick
-    override def dropListener(k: Listener[TimerEvent]): Unit = listeners -= k
-    override protected def addListener(k: Listener[TimerEvent]): Unit =
-      if isCancelled then k.completeNow(TimerEvent.Cancelled, this)
+    override def dropListener(k: Listener[TimerEvent]^): Unit = listeners -= unsafe.unsafeAssumePure(k)
+    override protected def addListener(k: Listener[TimerEvent]^): Unit =
+      if isCancelled then k.completeNow(TimerEvent.Cancelled, this.ident)
       else
         Timer.this.synchronized:
-          if isCancelled then k.completeNow(TimerEvent.Cancelled, this)
-          else listeners += k
+          if isCancelled then k.completeNow(TimerEvent.Cancelled, this.ident)
+          else listeners += unsafe.unsafeAssumePure(k)
   }
 
   /** Ticks of the timer are delivered through this source. Note that ticks are ephemeral. */
@@ -65,7 +67,7 @@ class Timer(tickDuration: Duration) extends Cancellable {
   override def cancel(): Unit =
     synchronized { isCancelled = true }
     src.synchronized {
-      Source.listeners.foreach(_.completeNow(TimerEvent.Cancelled, src))
+      Source.listeners.foreach(_.completeNow(TimerEvent.Cancelled, src.ident))
       Source.listeners.clear()
     }
 }

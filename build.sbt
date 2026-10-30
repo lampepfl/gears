@@ -2,7 +2,8 @@ import org.scalajs.jsenv.nodejs.*
 import org.scalajs.linker.interface.ESVersion
 import sbtcrossproject.CrossPlugin.autoImport.{CrossType, crossProject}
 
-scalaVersion := "3.9.0"
+scalaVersion := "3.10.0-RC1-bin-20260813-afdb1e2-NIGHTLY"
+resolvers += Resolver.scalaNightlyRepository
 
 LocalRootProject / publish / skip := true
 
@@ -17,7 +18,7 @@ developers := List(
 )
 
 lazy val root =
-  crossProject(JSPlatform, JVMPlatform, NativePlatform)
+  crossProject(JSPlatform, JVMPlatform /*, NativePlatform */ )
     .crossType(CrossType.Full)
     .in(file("."))
     .settings(
@@ -26,7 +27,8 @@ lazy val root =
         publish / skip := false,
         versionScheme := Some("early-semver"),
         libraryDependencies += "org.scalameta" %% "munit" % "1.3.6" % Test,
-        testFrameworks += MUnitFramework
+        testFrameworks += MUnitFramework,
+        scalacOptions += "-experimental"
       )
     )
     .jvmSettings(
@@ -34,13 +36,13 @@ lazy val root =
         scalacOptions += "-release:21"
       )
     )
-    .nativeSettings(
-      Seq(
-        nativeConfig ~= { c =>
-          c.withMultithreading(true)
-        }
-      )
-    )
+    // .nativeSettings(
+    //   Seq(
+    //     nativeConfig ~= { c =>
+    //       c.withMultithreading(true)
+    //     }
+    //   )
+    // )
     .jsSettings(
       Seq(
         // Emit ES modules with the Wasm backend

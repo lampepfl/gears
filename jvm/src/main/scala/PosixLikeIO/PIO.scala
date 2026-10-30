@@ -14,10 +14,12 @@ import scala.Tuple.Union
 import scala.concurrent.ExecutionContext
 import scala.util.{Failure, Success, Try}
 
+import language.experimental.captureChecking
+import caps.*
 import Future.Promise
 
 object File:
-  extension (resolver: Future.Resolver[Int])
+  extension (resolver: Future.Resolver[Int, {}])
     private[File] def toCompletionHandler = new CompletionHandler[Integer, ByteBuffer] {
       override def completed(result: Integer, attachment: ByteBuffer): Unit = resolver.resolve(result)
       override def failed(e: Throwable, attachment: ByteBuffer): Unit = resolver.reject(e)
@@ -44,7 +46,7 @@ class File(val path: String) {
   def read(buffer: ByteBuffer): Future[Int] =
     assert(channel.isDefined)
 
-    Future.withResolver[Int]: resolver =>
+    Future.withResolver[Int, {}]: resolver =>
       channel.get.read(
         buffer,
         0,
@@ -57,7 +59,7 @@ class File(val path: String) {
     assert(size >= 0)
 
     val buffer = ByteBuffer.allocate(size)
-    Future.withResolver[String]: resolver =>
+    Future.withResolver[String, {}]: resolver =>
       channel.get.read(
         buffer,
         0,
@@ -72,7 +74,7 @@ class File(val path: String) {
   def write(buffer: ByteBuffer): Future[Int] =
     assert(channel.isDefined)
 
-    Future.withResolver[Int]: resolver =>
+    Future.withResolver[Int, {}]: resolver =>
       channel.get.write(
         buffer,
         0,
@@ -138,8 +140,8 @@ class SocketUDP() {
 }
 
 object SocketUDP:
-  extension [T](resolver: Future.Resolver[T])
-    private[SocketUDP] inline def spawn(body: => T)(using s: Scheduler) =
+  extension [T](resolver: Future.Resolver[T, {}])
+    private[SocketUDP] def spawn(body: -> T)(using s: Scheduler) =
       s.execute(() =>
         resolver.complete(Try(body).recover { case _: InterruptedException =>
           throw CancellationException()
