@@ -33,15 +33,17 @@ class CompletionGroup extends Cancellable.Tracking:
     unlink()
 
   /** Add given member to the members set. If the group has already been cancelled, cancels that member immediately. */
-  def add(member: Cancellable): Unit =
+  def add(member: Cancellable^): Unit =
     val alreadyCancelled = synchronized:
-      members += member // Add this member no matter what since we'll wait for it still
+      // SAFETY: we only call cancel on these cancellables
+      members += unsafe.unsafeAssumePure(member) // Add this member no matter what since we'll wait for it still
       canceled
     if alreadyCancelled then member.cancel()
 
   /** Remove given member from the members set if it is an element */
-  def drop(member: Cancellable): Unit = synchronized:
-    members -= member
+  def drop(member: Cancellable^): Unit = synchronized:
+    // SAFETY: we only call cancel on these cancellables
+    members -= unsafe.unsafeAssumePure(member)
     if members.isEmpty && cancelWait.isDefined then cancelWait.get.complete(Success(()))
 
   def isCancelled = canceled
@@ -53,8 +55,8 @@ object CompletionGroup:
   object Unlinked extends CompletionGroup:
     override def cancel(): Unit = ()
     override def waitCompletion()(using Async^): Unit = ()
-    override def add(member: Cancellable): Unit = ()
-    override def drop(member: Cancellable): Unit = ()
+    override def add(member: Cancellable^): Unit = ()
+    override def drop(member: Cancellable^): Unit = ()
   end Unlinked
 
 end CompletionGroup
