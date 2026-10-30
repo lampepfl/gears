@@ -39,6 +39,25 @@ jobs:
     - uses: sbt/setup-sbt@v1
     - name: Test
       run: sbt rootJVM/test
+  # The I/O interface's contracts over the reference backend, the only backend so far, on the JVM; the testkit, which a
+  # backend on any platform runs, compiled for the other two.
+  test-io:
+    strategy:
+      fail-fast: false
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+        fetch-depth: 0
+    - uses: coursier/cache-action@v6
+    - uses: actions/setup-java@v3
+      with:
+        distribution: temurin
+        java-version: 21
+    - uses: sbt/setup-sbt@v1
+    - name: Test
+      run: sbt 'ioReference/test; ioTestkitJVM/test; ioReferenceDemos/compile; ioTestkitNative/compile; ioTestkitJS/compile'
   test-native:
     strategy:
       fail-fast: false
