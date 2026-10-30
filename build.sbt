@@ -41,25 +41,57 @@ lazy val root =
         }
       )
     )
-    .jsSettings(
-      Seq(
-        // Emit ES modules with the Wasm backend
-        scalaJSLinkerConfig := {
-          scalaJSLinkerConfig.value
-            .withESFeatures(_.withESVersion(ESVersion.ES2022).withUseWebAssembly(true))
-            .withWasmFeatures(_.withUseJSPI(true)) // enable js.async/js.await
-            .withModuleKind(ModuleKind.ESModule) // required by the Wasm backend
-        },
-        // Node.js 26+ supports Wasm and JSPI, including the nested async stack fix.
-        jsEnv := Def.uncached {
-          val config = NodeJSEnv
-            .Config()
-            .withArgs(
-              List(
-                "--stack-size=204800"
-              )
-            )
-          new NodeJSEnv(config)
-        }
+    .jsSettings(jsWasmSettings)
+
+// Emit ES modules with the Wasm backend, run on Node.js 26+, which supports Wasm and JSPI, including the nested async
+// stack fix.
+lazy val jsWasmSettings = Seq(
+  scalaJSLinkerConfig := {
+    scalaJSLinkerConfig.value
+      .withESFeatures(_.withESVersion(ESVersion.ES2022).withUseWebAssembly(true))
+      .withWasmFeatures(_.withUseJSPI(true)) // enable js.async/js.await
+      .withModuleKind(ModuleKind.ESModule) // required by the Wasm backend
+  },
+  jsEnv := Def.uncached {
+    val config = NodeJSEnv
+      .Config()
+      .withArgs(
+        List(
+          "--stack-size=204800"
+        )
       )
+    new NodeJSEnv(config)
+  }
+)
+
+// gears' I/O interface lives in the core project, in `gears.async.io` (shared, so every platform has it), with what a
+// backend shares in `gears.async.io.internal` and the runner, `Io.run`, per platform. Backends live in projects of
+// their own, each in a subpackage of `gears.async.io`, which is what lets them reach what the interface keeps
+// `private[io]`.
+
+val munit = "org.scalameta" %% "munit" % "1.3.6"
+
+val mainargs = "com.lihaoyi" %% "mainargs" % "0.7.8"
+
+// What every backend is checked against, published beside the core so that a backend written elsewhere can check
+// itself against the same contracts: the contract suites (`gears.async.io.testkit`), `BufferArena`, buffers each
+// platform allocates, the gears demos (`gears.io.demos`) and the higher level the interface is for
+// (`gears.io.higherlevel`, with `HigherLevelChecks`). The demos and the higher level are written against
+// `gears.async.io` alone, in packages outside `gears.async`, so that they see only what a program sees: each takes the
+// `Io` and `Async` it runs with, and a backend's demo application is what starts their runs. Built for every platform
+// the core is, though only the JVM has a backend to run them on yet.
+lazy val ioTestkit =
+  crossProject(JSPlatform, JVMPlatform, NativePlatform)
+    .crossType(CrossType.Full)
+    .in(file("io-testkit"))
+    .settings(
+      name := "gears-io-testkit",
+      publish / skip := false,
+      versionScheme := Some("early-semver"),
+      libraryDependencies ++= Seq(munit, mainargs),
+      testFrameworks += MUnitFramework
     )
+    .jvmSettings(scalacOptions += "-release:21")
+    .nativeSettings(nativeConfig ~= { _.withMultithreading(true) })
+    .jsSettings(jsWasmSettings)
+    .dependsOn(root)
