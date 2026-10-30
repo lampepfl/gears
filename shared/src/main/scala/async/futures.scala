@@ -87,7 +87,7 @@ object Future:
     def cancel(): Unit =
       setCancelled()
 
-    override def link(group: CompletionGroup^): this.type =
+    override def link(group: CompletionGroup^{this}): this.type =
       // though hasCompleted is accessible without "synchronized",
       // we want it not to be run while the future was trying to complete.
       synchronized:
@@ -127,6 +127,7 @@ object Future:
     private val sup: (AsyncSupport^{ac.only[capabilities.Suspension]}) = ac.support
     private val scheduler: sup.Scheduler = ac.scheduler.asInstanceOf[sup.Scheduler]
 
+    private val outerGroup = ac.group
     /** RunnableFuture maintains its own inner [[CompletionGroup]], that is separated from the provided Async
       * instance's. When the future is cancelled, we only cancel this CompletionGroup. This effectively means any
       * `.await` operations within the future is cancelled *only if they link into this group*. The future body run with
@@ -148,9 +149,11 @@ object Future:
           extends Listener[T],
             Listener.ListenerLock,
             Listener.NumberedLock,
-            Cancellable:
+            Cancellable uses FutureAsync.this.group, FutureAsync.this.support:
         import AwaitListener.*
         var state: State = stateUnused
+
+        val group = FutureAsync.this.group
 
         // guarded by lock; null = before apply or after resume
         private var sus: support.Suspension[T | Null, Unit] | Null = null
@@ -253,7 +256,7 @@ object Future:
         unsafe.unsafeAssumePure: // SAFETY: label is already part of the captured future
           result
 
-    link(ac.group)
+    link(outerGroup)
     sup.scheduleBoundary(unsafe.unsafeDiscardUses(run))(using scheduler)
 
   end RunnableFuture

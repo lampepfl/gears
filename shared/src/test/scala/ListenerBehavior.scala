@@ -1,6 +1,6 @@
 import gears.async.Async
-import gears.async.Async.Source
 import gears.async.Async.race
+import gears.async.Async.{Source, SourceId}
 import gears.async.Future
 import gears.async.Future.Promise
 import gears.async.Listener
@@ -260,7 +260,7 @@ class ListenerBehavior extends munit.FunSuite:
           held = true
           true
         def release(): Unit = held = false
-      def complete(value: Int, source: Source[Int]): Unit =
+      def complete(value: Int, source: SourceId): Unit =
         assertEquals(value, 7)
         assert(held)
         completed = true

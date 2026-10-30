@@ -27,7 +27,7 @@ class TimerBehavior extends munit.FunSuite {
 
   def `cancel future after timeout`[T](d: Duration, f: Future[T])(using Async, AsyncOperations): Try[T] =
     Async.group:
-      f.link()
+      f.link(Async.current.group)
       val t = Future { sleep(d.toMillis) }
       Try:
         Async.select(

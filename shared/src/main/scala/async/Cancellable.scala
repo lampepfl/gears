@@ -6,7 +6,7 @@ import caps.*
 /** A trait for cancellable entities that can be grouped. */
 trait Cancellable:
 
-  private var group: CompletionGroup = scala.compiletime.uninitialized
+  private var group: CompletionGroup^{this} = scala.compiletime.uninitialized
 
   /** Issue a cancel request. */
   def cancel(): Unit
@@ -15,9 +15,9 @@ trait Cancellable:
     *
     * **CC safety note**: at the moment, linking and unlinking to different [[CompletionGroup CompletionGroups]] will bypass
     * static scope safety checks. Thus, these operations are considered capture-unsafe, and must be used with caution.
-    * Specifically, `unsafe` must be used to cast the [[CompletionGroup]] to a non-capturing one before calling.
+    * Specifically, `unsafe` must be used to cast the [[CompletionGroup]] to a non-capturing one before calling, if it wasn't already captured by the instance.
     */
-  def link(group: CompletionGroup): this.type =
+  def link(group: CompletionGroup^{this}): this.type =
     synchronized:
       if this.group != null then
         this.group.drop(this)
