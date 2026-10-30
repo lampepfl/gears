@@ -95,3 +95,27 @@ lazy val ioTestkit =
     .nativeSettings(nativeConfig ~= { _.withMultithreading(true) })
     .jsSettings(jsWasmSettings)
     .dependsOn(root)
+
+// The reference backend: the semantics of the interface on the JDK's channels, over a plain selector poll, with no
+// regard for speed. It is what the contracts are checked against, not a backend to deploy.
+lazy val ioReference =
+  (project in file("io-reference"))
+    .settings(
+      publish / skip := true,
+      scalacOptions += "-release:21",
+      libraryDependencies += munit % Test,
+      testFrameworks += MUnitFramework,
+      Test / fork := true
+    )
+    .dependsOn(root.jvm, ioTestkit.jvm % Test)
+
+// The reference backend's demo application: the testkit's gears demos over it, as `ioReferenceDemos/run <command>`.
+lazy val ioReferenceDemos =
+  (project in file("io-reference/demos"))
+    .settings(
+      publish / skip := true,
+      scalacOptions += "-release:21",
+      Compile / mainClass := Some("referencedemos.ReferenceDemos"),
+      run / fork := true
+    )
+    .dependsOn(ioReference, ioTestkit.jvm)
