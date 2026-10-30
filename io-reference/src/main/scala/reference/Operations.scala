@@ -359,13 +359,15 @@ final class ReceiveOp(h: DatagramHandle, buf: ByteBuffer, from: Slot[IpAddress] 
   protected def body(ctx: Ctx)(using Async): Unit = {
     h.receives.take(ctx, h, this)
     try {
-      buf.clear()
-      var sender = h.datagrams.receive(buf)
+      // Through a heap buffer of the same capacity, as JDK 21's datagram channels refuse a buffer of a shared arena.
+      val packet = ByteBuffer.allocate(buf.capacity())
+      var sender = h.datagrams.receive(packet)
       while sender == null do {
         ctx.ready(this, h, h.datagrams, OP_READ)
-        buf.clear()
-        sender = h.datagrams.receive(buf)
+        sender = h.datagrams.receive(packet)
       }
+      buf.clear()
+      buf.put(packet.flip())
       buf.flip()
       if from != null then from.set(Addresses.ip(sender))
     } finally h.receives.release(ctx.waiter)
@@ -382,19 +384,16 @@ final class SendOp(h: DatagramHandle, bufs: Array[ByteBuffer], to: IpAddress | N
   protected def body(ctx: Ctx)(using Async): Unit = {
     h.sends.take(ctx, h, this)
     try {
-      val packet =
-        if bufs.length == 1 then bufs(0)
-        else {
-          val whole = ByteBuffer.allocate(bufs.foldLeft(0)(_ + _.remaining()))
-          bufs.foreach(b => whole.put(b.duplicate()))
-          whole.flip()
-        }
+      // Copied whole into a heap buffer, as JDK 21's datagram channels refuse a buffer of a shared arena.
+      val packet = ByteBuffer.allocate(bufs.foldLeft(0)(_ + _.remaining()))
+      bufs.foreach(b => packet.put(b.duplicate()))
+      packet.flip()
       val size = packet.remaining()
       val target = if to == null then null else Addresses.jdk(to)
       def attempt(): Int = if target == null then h.datagrams.write(packet) else h.datagrams.send(packet, target)
       // An empty packet sent and one with no room both count 0: an empty one is taken as sent.
       while attempt() == 0 && size > 0 do ctx.ready(this, h, h.datagrams, OP_WRITE)
-      if bufs.length > 1 then bufs.foreach(b => b.position(b.limit()))
+      bufs.foreach(b => b.position(b.limit()))
     } finally h.sends.release(ctx.waiter)
   }
 }
