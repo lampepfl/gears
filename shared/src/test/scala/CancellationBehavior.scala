@@ -116,7 +116,7 @@ class CancellationBehavior extends munit.FunSuite:
         x2 = 1
       Async.group:
         Async.current.group.cancel() // cancel now
-        f.link()
+        f.link(Async.current.group)
         assertEquals(x1, 0)
       assert(f.poll().isDefined) // future finished
       assertEquals(x1, 1)

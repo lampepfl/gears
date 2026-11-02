@@ -9,6 +9,9 @@ import java.util.concurrent.locks.ReentrantLock
 import scala.collection.mutable
 import scala.util.boundary
 
+import language.experimental.captureChecking
+import caps.*
+
 /** The async context: provides the capability to asynchronously [[Async.await await]] for [[Async.Source Source]]s, and
   * defines a scope for structured concurrency through a [[CompletionGroup]].
   *
@@ -30,20 +33,20 @@ import scala.util.boundary
   * @see
   *   [[Async$.group Async.group]] and [[Future$.apply Future.apply]] for [[Async]]-subscoping operations.
   */
-trait Async private[async] (using val support: AsyncSupport, val scheduler: support.Scheduler):
+trait Async private[async] (using val support: AsyncSupport^{any.only[capabilities.Suspension]}, val scheduler: support.Scheduler):
   /** Waits for completion of source `src` and returns the result. Suspends the computation.
     *
     * @see
     *   [[Async.Source.awaitResult]] and [[Async$.await]] for extension methods calling [[Async!.await]] from the source
     *   itself.
     */
-  def await[T](src: Async.Source[T]): T
+  def await[T](src: Async.Source[T]^): T
 
   /** Returns the cancellation group for this [[Async]] context. */
-  def group: CompletionGroup
+  def group: CompletionGroup^{this.only[capabilities.Scoping]}
 
   /** Returns an [[Async]] context of the same kind as this one, with a new cancellation group. */
-  def withGroup(group: CompletionGroup): Async
+  def withGroup(group: CompletionGroup^{any.only[capabilities.Scoping]}): Async^{this, group}
 
 object Async extends AsyncImpl:
   /** The [[Async]] implementation based on blocking locks.
@@ -51,15 +54,17 @@ object Async extends AsyncImpl:
     * @note
     *   Does not currently work on Scala.js, due to locks and condvars not being available.
     */
-  private[async] class LockingAsync(val group: CompletionGroup)(using
-      support: AsyncSupport,
+  private[async] class LockingAsync(group_ : CompletionGroup^{any.only[capabilities.Scoping]})(using
+      support: AsyncSupport^{any.only[capabilities.Suspension]},
       scheduler: support.Scheduler
   ) extends Async(using support, scheduler):
     private val lock = ReentrantLock()
     private val condVar = lock.newCondition()
 
+    val group = group_
+
     /** Wait for completion of async source `src` and return the result */
-    override def await[T](src: Async.Source[T]): T =
+    override def await[T](src: Async.Source[T]^): T =
       src
         .poll()
         .getOrElse:
@@ -79,26 +84,26 @@ object Async extends AsyncImpl:
           finally lock.unlock()
 
     /** An Async of the same kind as this one, with a new cancellation group */
-    override def withGroup(group: CompletionGroup): Async = Async.LockingAsync(group)
+    override def withGroup(group: CompletionGroup^{any.only[capabilities.Scoping]}): Async^{this, group} = Async.LockingAsync(group)(using support, scheduler)
 
   /** A way to introduce asynchronicity into a synchronous environment. */
   trait FromSync private[async] ():
-    private[async] type Output[+T]
-    private[async] def apply[T](body: Async ?=> T): Output[T]
+    type Output[+T]
+    def apply[T](body: Async^ ?=> T): this.Output[T]
 
   object FromSync:
     /** A [[FromSync]] implementation that blocks the current runtime. */
     type Blocking = FromSync { type Output[+T] = T }
 
     /** Implements [[FromSync]] by directly blocking the current thread. */
-    class BlockingWithLocks(using support: AsyncSupport, scheduler: support.Scheduler) extends FromSync:
+    class BlockingWithLocks(using support: AsyncSupport^{any.only[capabilities.Suspension]}, scheduler: support.Scheduler) extends FromSync:
       type Output[T] = T
-      private[async] def apply[T](body: Async.Spawn ?=> T): Output[T] =
+      def apply[T](body: (Async.Spawn^) ?=> T): Output[T] =
         Async.group(body)(using Async.LockingAsync(CompletionGroup.Unlinked))
 
   /** Execute asynchronous computation `body` using the given [[FromSync]] implementation.
     */
-  inline def fromSync[T](using fs: FromSync)(body: Async.Spawn ?=> T): fs.Output[T] =
+  def fromSync[T](using fs: FromSync)(body: Async.Spawn^ ?=> T): fs.Output[T] =
     fs(body)
 
   /** Execute asynchronous computation `body` from the context. Requires a [[FromSync.Blocking]] implementation. */
@@ -122,10 +127,10 @@ object Async extends AsyncImpl:
   /** Runs `body` inside a spawnable context where it is allowed to spawn concurrently runnable [[Future]]s. When the
     * body returns, all spawned futures are cancelled and waited for.
     */
-  def group[T](body: Async.Spawn ?=> T)(using Async): T =
+  def group[T](body: Async.Spawn^ ?=> T)(using Async^): T =
     withNewCompletionGroup(CompletionGroup().link())(body)
 
-  private def cancelAndWaitGroup(group: CompletionGroup)(using async: Async) =
+  private def cancelAndWaitGroup(group: CompletionGroup)(using async: Async^) =
     val completionAsync =
       if CompletionGroup.Unlinked == async.group
       then async
@@ -136,22 +141,25 @@ object Async extends AsyncImpl:
   /** Runs a body within another completion group. When the body returns, the group is cancelled and its completion
     * awaited with the `Unlinked` group.
     */
-  private[async] def withNewCompletionGroup[T](group: CompletionGroup)(body: Async.Spawn ?=> T)(using
-      async: Async
+  private[async] def withNewCompletionGroup[T](group: CompletionGroup)(body: Async.Spawn^ ?=> T)(using
+      async: Async^
   ): T =
     try body(using async.withGroup(group))
     finally cancelAndWaitGroup(group)(using async)
+
+  /** Every source has an identity. */
+  final class SourceId
 
   /** A Resource that grants access to the [[Spawn]] capability. On cleanup, every spawned [[Future]] is cancelled and
     * awaited, similar to [[Async.group]].
     *
     * Note that the [[Spawn]] from the resource must not be used for awaiting after allocation.
     */
-  val spawning = new Resource[Spawn]:
-    override def use[V](body: Spawn => V)(using Async): V = group(spawn ?=> body(spawn))
-    override def allocated(using allocAsync: Async): (Spawn, (Async) ?=> Unit) =
-      val group = CompletionGroup() // not linked to allocAsync's group because it would not unlink itself
-      (allocAsync.withGroup(group), closeAsync ?=> cancelAndWaitGroup(group)(using closeAsync))
+  // val spawning = new Resource[Spawn]:
+  //   override def use[V](body: Spawn^ => V)(using Async^): V = group(spawn ?=> body(spawn))
+  //   override def allocated(using allocAsync: Async^): (Spawn, () => (Async^) ?=> Unit) =
+  //     val group = CompletionGroup() // not linked to allocAsync's group because it would not unlink itself
+  //     (allocAsync.withGroup(group), () => closeAsync ?=> cancelAndWaitGroup(group)(using closeAsync))
 
   /** An asynchronous data source. Sources can be persistent or ephemeral. A persistent source will always pass same
     * data to calls of [[Source!.poll]] and [[Source!.onComplete]]. An ephemeral source can pass new data in every call.
@@ -162,6 +170,9 @@ object Async extends AsyncImpl:
     *   An example of an ephemeral source is [[gears.async.Channel]].
     */
   trait Source[+T]:
+    self: Source[T]^ =>
+    final val ident: SourceId = SourceId()
+
     /** Checks whether data is available at present and pass it to `k` if so. Calls to `poll` are always synchronous and
       * non-blocking.
       *
@@ -180,14 +191,14 @@ object Async extends AsyncImpl:
       *   Whether poll was able to pass data to `k`. Note that this is regardless of `k` being available to receive the
       *   data. In most cases, one should pass `k` into [[Source!.onComplete]] if `poll` returns `false`.
       */
-    def poll(k: Listener[T]): Boolean
+    def poll(k: Listener[T]^): Boolean
 
     /** Once data is available, pass it to the listener `k`. `onComplete` is always non-blocking.
       *
       * Note that `k`'s methods will be executed on the same thread as the [[Source]], usually in sequence. It is hence
       * important that the listener itself does not perform expensive operations.
       */
-    def onComplete(k: Listener[T]): Unit
+    def onComplete(k: Listener[T]^): Unit
 
     /** Signal that listener `k` is dead (i.e. will always fail to acquire locks from now on), and should be removed
       * from `onComplete` queues.
@@ -196,7 +207,7 @@ object Async extends AsyncImpl:
       * waiting sets. Removal is best effort: a source may leave the listener queued, so the listener must reject
       * completion even if it is not removed.
       */
-    def dropListener(k: Listener[T]): Unit
+    def dropListener(k: Listener[T]^): Unit
 
     /** Similar to [[Async.Source!.poll(k:Listener[T])* poll]], but instead of passing in a listener, directly return
       * the value `T` if it is available.
@@ -210,7 +221,16 @@ object Async extends AsyncImpl:
       *
       * This is an utility method for direct waiting with `Async`, instead of going through listeners.
       */
-    final def awaitResult(using ac: Async) = ac.await(this)
+    final def awaitResult(using ac: Async^) = ac.await(this)
+
+    /** Only open access to the listener interfaces. Notably this should not allow control capabilities to leak through. */
+    private[async] lazy val asListenerInterface: Source[T]^{this.except[Control]} =
+      unsafe.unsafeAssumePure:
+        new Source:
+          def poll(k: Listener[T]^) = self.poll(k)
+          def onComplete(k: Listener[T]^) = self.onComplete(k)
+          def dropListener(k: Listener[T]^) = self.dropListener(k)
+
   end Source
 
   extension [T](src: Source[scala.util.Try[T]])
@@ -233,10 +253,11 @@ object Async extends AsyncImpl:
     * the instance.
     */
   abstract class OriginalSource[+T] extends Source[T]:
+    // self: OriginalSource[T]^{any.except[Control]} =>
     /** Add `k` to the listener set of this source. */
-    protected def addListener(k: Listener[T]): Unit
+    protected def addListener(k: Listener[T]^): Unit
 
-    def onComplete(k: Listener[T]): Unit = synchronized:
+    def onComplete(k: Listener[T]^): Unit = synchronized:
       if !poll(k) then addListener(k)
 
   end OriginalSource
@@ -253,7 +274,7 @@ object Async extends AsyncImpl:
       val q = java.util.concurrent.ConcurrentLinkedQueue[T]()
       q.addAll(values.asJavaCollection)
       new Source[T]:
-        override def poll(k: Listener[T]): Boolean =
+        override def poll(k: Listener[T]^): Boolean =
           if q.isEmpty() then false
           else if !k.acquireLock() then true
           else
@@ -262,14 +283,14 @@ object Async extends AsyncImpl:
               k.releaseLock()
               false
             else
-              k.complete(item, this)
+              k.complete(item, this.ident)
               true
 
-        override def onComplete(k: Listener[T]): Unit = poll(k)
-        override def dropListener(k: Listener[T]): Unit = ()
+        override def onComplete(k: Listener[T]^): Unit = poll(k)
+        override def dropListener(k: Listener[T]^): Unit = ()
     end values
 
-  extension [T](src: Source[T])
+  extension [T](src: Source[T]^)
     /** Create a new source that requires the original source to run the given transformation function on every value
       * received.
       *
@@ -280,20 +301,20 @@ object Async extends AsyncImpl:
       *   the transformation function to be run on every value. `f` is run *before* the item is passed to the
       *   [[Listener]].
       */
-    def transformValuesWith[U](f: T => U) =
+    def transformValuesWith[U](f: T => U): Source[U]^{src, f} =
       new Source[U]:
         selfSrc =>
-        def transform(k: Listener[U]) =
+        def transform(k: Listener[U]^) =
           new Listener.ForwardingListener[T](selfSrc, k):
             val lock = k.lock
-            def complete(data: T, source: Async.Source[T]) =
-              k.complete(f(data), selfSrc)
+            def complete(data: T, source: Async.SourceId) =
+              k.complete(f(data), selfSrc.ident)
 
-        def poll(k: Listener[U]): Boolean =
+        def poll(k: Listener[U]^): Boolean =
           src.poll(transform(k))
-        def onComplete(k: Listener[U]): Unit =
+        def onComplete(k: Listener[U]^): Unit =
           src.onComplete(transform(k))
-        def dropListener(k: Listener[U]): Unit =
+        def dropListener(k: Listener[U]^): Unit =
           src.dropListener(transform(k))
 
   /** Creates a source that "races" a list of sources.
@@ -307,32 +328,32 @@ object Async extends AsyncImpl:
     * @see
     *   [[Async$.select Async.select]] for a convenient syntax to race sources and awaiting them with [[Async]].
     */
-  def race[T](sources: Source[T]*): Source[T] = raceImpl[T, T]((v, _) => v)(sources*)
+  def race[T, C^](sources: (Source[T]^{C})*): Source[T]^{C} = raceImpl[T, T, C]((v, _) => v)(sources*)
 
   /** Like [[race]], but the returned value includes a reference to the upstream source that the item came from.
     * @see
     *   [[Async$.select Async.select]] for a convenient syntax to race sources and awaiting them with [[Async]].
     */
-  def raceWithOrigin[T](sources: Source[T]*): Source[(T, Source[T])] =
-    raceImpl[(T, Source[T]), T]((v, src) => (v, src))(sources*)
+  def raceWithOrigin[T, C^](sources: (Source[T]^{C})*): Source[(T, SourceId)]^{C} =
+    raceImpl[(T, SourceId), T, C]((v, src) => (v, src))(sources*)
 
   /** Pass first result from any of `sources` to the continuation */
-  private def raceImpl[T, U](map: (U, Source[U]) => T)(sources: Source[U]*): Source[T] =
+  private def raceImpl[T, U, C^](map: (U, SourceId) => T)(sources: (Source[U]^{C})*): Source[T]^{C, map} =
     new Source[T] { selfSrc =>
-      def poll(k: Listener[T]): Boolean =
+      def poll(k: Listener[T]^): Boolean =
         val it = sources.iterator
         var found = false
 
         val listener = new Listener.ForwardingListener[U](this, k):
           val lock = k.lock
-          def complete(data: U, source: Async.Source[U]) =
-            k.complete(map(data, source), selfSrc)
+          def complete(data: U, source: Async.SourceId) =
+            k.complete(map(data, source), selfSrc.ident)
         end listener
 
-        while it.hasNext && !found do found = it.next.poll(listener)
+        while it.hasNext && !found do found = it.next().poll(listener)
         found
 
-      def onComplete(k: Listener[T]): Unit =
+      def onComplete(k: Listener[T]^): Unit =
         val listener = new Listener.ForwardingListener[U](this, k) { self =>
           inline def lockIsOurs = k.lock == null
           val lock =
@@ -372,18 +393,18 @@ object Async extends AsyncImpl:
 
           var found = false
 
-          def complete(item: U, src: Async.Source[U]) =
+          def complete(item: U, src: Async.SourceId) =
             found = true
             if lockIsOurs then lock.release()
             // Complete first so that k releases its listener lock before cleanup.
             // Otherwise cleanup can wait for a source whose thread is waiting for k.
-            k.complete(map(item, src), selfSrc)
-            sources.foreach(s => if s != src then s.dropListener(self))
+            k.complete(map(item, src), selfSrc.ident)
+            sources.foreach(s => if s.ident != src then s.dropListener(self))
         } // end listener
 
         sources.foreach(_.onComplete(listener))
 
-      def dropListener(k: Listener[T]): Unit =
+      def dropListener(k: Listener[T]^): Unit =
         val listener = Listener.ForwardingListener.empty[U](this, k)
         sources.foreach(_.dropListener(listener))
 
@@ -398,21 +419,21 @@ object Async extends AsyncImpl:
     * @see
     *   [[Async$.select Async.select]] where [[SelectCase]] is used.
     */
-  opaque type SelectCase[T] = (Source[?], Nothing => T)
+  type SelectCase[T, C^] = (Source[?]^{C}, Nothing ->{C} T)
   //                           ^ unsafe types, but we only construct SelectCase from `handle` which is safe
 
-  extension [T](src: Source[T])
+  extension [T](src: Source[T]^)
     /** Attach a handler to `src`, creating a [[SelectCase]].
       * @see
       *   [[Async$.select Async.select]] where [[SelectCase]] is used.
       */
-    inline def handle[U](f: T => U): SelectCase[U] = (src, f)
+    def handle[U](f: T => U): SelectCase[U, {src, f}] = (src, f)
 
     /** Alias for [[handle]]
       * @see
       *   [[Async$.select Async.select]] where [[SelectCase]] is used.
       */
-    inline def ~~>[U](f: T => U): SelectCase[U] = src.handle(f)
+    def ~~>[U](f: T => U): SelectCase[U, {src, f}] = src.handle(f)
 
   /** Race a list of sources with the corresponding handler functions, once an item has come back. Like [[race]],
     * [[select]] guarantees exactly one of the sources are polled. Unlike [[transformValuesWith]], the handler in
@@ -434,9 +455,9 @@ object Async extends AsyncImpl:
     * )
     *   }}}
     */
-  def select[T](cases: SelectCase[T]*)(using Async) =
+  def select[T, C^](cases: SelectCase[T, C]*)(using Async^) =
     val (input, which) = raceWithOrigin(cases.map(_._1)*).awaitResult
-    val (_, handler) = cases.find(_._1 == which).get
+    val (_, handler) = cases.find(_._1.ident == which).get
     handler.asInstanceOf[input.type => T](input)
 
   /** Race two sources, wrapping them respectively in [[Left]] and [[Right]] cases.
@@ -446,6 +467,6 @@ object Async extends AsyncImpl:
     * @see
     *   [[race]] and [[select]] for racing more than two sources.
     */
-  def either[T1, T2](src1: Source[T1], src2: Source[T2]): Source[Either[T1, T2]] =
+  def either[T1, T2](src1: Source[T1]^, src2: Source[T2]^): Source[Either[T1, T2]]^{src1, src2} =
     race(src1.transformValuesWith(Left(_)), src2.transformValuesWith(Right(_)))
 end Async

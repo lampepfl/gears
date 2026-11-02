@@ -10,6 +10,8 @@ import scala.util.boundary
 import scala.util.control.NonFatal
 import scala.util.{Failure, Success, Try}
 
+import language.experimental.captureChecking
+
 /** Utility class to perform asynchronous actions with retrying policies on exceptions.
   *
   * See [[Retry]] companion object for common policies as a starting point.
