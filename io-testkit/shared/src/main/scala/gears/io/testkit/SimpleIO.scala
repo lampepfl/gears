@@ -1,4 +1,4 @@
-package gears.io.higherlevel
+package gears.io.testkit
 
 import gears.async.Async
 import gears.async.BufferedChannel
@@ -26,14 +26,13 @@ import java.nio.ByteBuffer
 import java.util.concurrent.CancellationException
 import java.util.concurrent.TimeoutException
 
-/** The higher level the interface is meant to be wrapped by, written over `Io` alone: result-returning methods that own
-  * the op and the slot the caller would otherwise reuse, and a stream of chunks over a repeatable pooled read, consumed
-  * as a gears channel. Nothing here touches a backend, a kind or the runtime, and being outside the `gears.async.io`
-  * package it sees the interface's public contract only. It runs as it is on every backend (`HigherLevelChecks` runs on
-  * each, in the demos' tests), which is what the lowest level is for; the demos use it where a result or a stream reads
-  * better than the op. Every method takes the `Io` as a context parameter, `io`.
+/** A simple API written over `Io` alone: result-returning methods that own the op and the slot the caller would
+  * otherwise reuse, and a stream of chunks over a repeatable pooled read, consumed as a gears channel. Its package is
+  * outside `gears.async`, so it sees only the interface's public contract. It runs on every backend (`SimpleIOChecks`
+  * runs on each, in the demos' tests); the demos use it where a result or a stream reads better than the op. Every
+  * method takes the `Io` as a context parameter, `io`.
   */
-object HigherLevel {
+object SimpleIO {
 
   /** How long a graceful close waits for the peer's end, by default. */
   val Linger: scala.concurrent.duration.FiniteDuration = scala.concurrent.duration.FiniteDuration(2, "s")
@@ -165,7 +164,7 @@ object HigherLevel {
     * read ahead and not yet taken, so the pool may be closed afterwards. The channel is never closed, since a closed
     * gears channel drops what it still holds: the end of the stream is a `None` sent after the last chunk.
     */
-  final class Chunks private[HigherLevel] (channel: Channel[Option[Received]], reader: Future[Unit]) {
+  final class Chunks private[SimpleIO] (channel: Channel[Option[Received]], reader: Future[Unit]) {
 
     def read()(using Async): Option[Received] = channel.read() match {
       case Right(Some(chunk)) => Some(chunk)

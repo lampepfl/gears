@@ -75,10 +75,9 @@ val mainargs = "com.lihaoyi" %% "mainargs" % "0.7.8"
 
 // What every backend is checked against, published beside the core so that a backend written elsewhere can check
 // itself against the same contracts: the contract suites (`gears.async.io.testkit`), `BufferArena`, buffers each
-// platform allocates, the gears demos (`gears.io.demos`) and the higher level the interface is for
-// (`gears.io.higherlevel`, with `HigherLevelChecks`). The demos and the higher level are written against
-// `gears.async.io` alone, in packages outside `gears.async`, so that they see only what a program sees: each takes the
-// `Io` and `Async` it runs with, and a backend's demo application is what starts their runs. Built for every platform
+// platform allocates, the gears demos (`gears.io.demos`) and `SimpleIO`, with `SimpleIOChecks`, in `gears.io.testkit`.
+// The demos and `SimpleIO` live outside `gears.async`, so they see only the public `gears.async.io` interface. Each
+// takes the `Io` and `Async` it runs with, and a backend's demo application is what starts their runs. Built for every platform
 // the core is, though only the JVM has a backend to run them on yet.
 lazy val ioTestkit =
   crossProject(JSPlatform, JVMPlatform, NativePlatform)

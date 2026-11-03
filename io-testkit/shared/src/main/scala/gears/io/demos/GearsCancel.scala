@@ -8,7 +8,7 @@ import gears.async.io.Io
 import gears.async.io.Pipes
 import gears.async.io.Slot
 import gears.async.io.testkit.BufferArena
-import gears.io.higherlevel.HigherLevel
+import gears.io.testkit.SimpleIO
 
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.CancellationException
@@ -77,7 +77,7 @@ object GearsCancel {
     val leftover = new Leftover
     BufferArena.scoped { arena =>
       val buf = arena.allocate(64)
-      val (readFd, writeFd) = HigherLevel.pipe()
+      val (readFd, writeFd) = SimpleIO.pipe()
       try {
         val sleeperInterrupted = new AtomicBoolean()
         // A read with nothing written: cancelled before bytes come, it has taken none of them.
@@ -127,7 +127,7 @@ object GearsCancel {
 
         // Closing a handle fails the ops pending on it (`Ops.close`), so a future waiting on one is rejected by that
         // failure, with nothing left for a cancel to do.
-        val (orphanRead, orphanWrite) = HigherLevel.pipe()
+        val (orphanRead, orphanWrite) = SimpleIO.pipe()
         val reading = Promise[Unit]()
         val orphan = Future {
           reading.complete(scala.util.Success(()))

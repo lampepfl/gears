@@ -8,7 +8,7 @@ import gears.async.io.IpAddress
 import gears.async.io.IpDatagrams
 import gears.async.io.Slot
 import gears.async.io.testkit.BufferArena
-import gears.io.higherlevel.HigherLevel
+import gears.io.testkit.SimpleIO
 
 import java.nio.ByteBuffer
 import scala.collection.mutable
@@ -74,7 +74,7 @@ object GearsQuicTimers {
       io: Io[IpDatagrams],
       async: Async.Spawn
   ): Unit = {
-    val socket = HigherLevel.bindDatagram(IpAddress.IPv4("127.0.0.1", 0))
+    val socket = SimpleIO.bindDatagram(IpAddress.IPv4("127.0.0.1", 0))
     val address = io.backend.ops.localAddress(socket)
     val counts = new Counts
     val closed = UnboundedChannel[Long]()
@@ -222,7 +222,7 @@ object GearsQuicTimers {
       interval: FiniteDuration,
       buffer: Int => ByteBuffer
   )(using Async.Spawn): Unit = {
-    val socket = HigherLevel.connectDatagram(null, server)(using io, summon[Async])
+    val socket = SimpleIO.connectDatagram(null, server)(using io, summon[Async])
     val silence = 1.second.toNanos
     val limit = io.backend.ops.deadlineTimer(System.nanoTime() + silence)
     try {

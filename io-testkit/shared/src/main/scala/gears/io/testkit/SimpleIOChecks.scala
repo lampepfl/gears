@@ -1,4 +1,4 @@
-package gears.io.higherlevel
+package gears.io.testkit
 
 import gears.async.Async
 import gears.async.Future
@@ -8,22 +8,22 @@ import gears.async.io.testkit.ProgramSuite
 import java.io.IOException
 import java.nio.charset.StandardCharsets
 
-/** Checks of the higher level, run over every backend by the demos' suites: what the lowest level is for. */
-trait HigherLevelChecks extends ProgramSuite {
+/** Checks of `SimpleIO`, run over every backend by the demos' suites. */
+trait SimpleIOChecks extends ProgramSuite {
 
-  test("a higher level over perform: result-returning reads, accept and resolve") {
+  test("SimpleIO over perform: result-returning reads, accept and resolve") {
     val outcome = running { io ?=>
       val (in, out) = pipe(io)
       try {
         val buf = arena.allocate(16)
         val writer = Future {
-          HigherLevel.writeAll(out, arena.of("wrapped".getBytes(StandardCharsets.UTF_8)))
+          SimpleIO.writeAll(out, arena.of("wrapped".getBytes(StandardCharsets.UTF_8)))
           io.perform(io.backend.ops.close(out))
         }
-        val got = HigherLevel.read(in, buf)
+        val got = SimpleIO.read(in, buf)
         writer.await
-        val atEnd = HigherLevel.read(in, buf)
-        val resolved = HigherLevel.resolve("localhost").nonEmpty
+        val atEnd = SimpleIO.read(in, buf)
+        val resolved = SimpleIO.resolve("localhost").nonEmpty
         s"$got ${text(buf)} $atEnd $resolved"
       } finally io.perform(io.backend.ops.close(in))
     }
@@ -35,26 +35,26 @@ trait HigherLevelChecks extends ProgramSuite {
     val replySize = 256 * 1024
     val received = running { io ?=>
       val address = IpAddress.IPv4("127.0.0.1", port)
-      val listener = HigherLevel.listen(address)
+      val listener = SimpleIO.listen(address)
       try {
         val server = Future {
-          val client = HigherLevel.accept(listener)
+          val client = SimpleIO.accept(listener)
           val scratch = arena.allocate(4096)
           scratch.limit(4)
-          HigherLevel.read(client, scratch) // a little of the request: the rest is still unread when it replies
-          HigherLevel.writeAll(client, arena.allocate(replySize))
-          HigherLevel.closeGracefully(client, scratch) // closing outright would reset, and could cut the reply short
+          SimpleIO.read(client, scratch) // a little of the request: the rest is still unread when it replies
+          SimpleIO.writeAll(client, arena.allocate(replySize))
+          SimpleIO.closeGracefully(client, scratch) // closing outright would reset, and could cut the reply short
         }
-        val socket = HigherLevel.connect(address)
+        val socket = SimpleIO.connect(address)
         try {
-          HigherLevel.writeAll(socket, arena.of(("x" * 65536).getBytes(StandardCharsets.UTF_8)))
-          HigherLevel.shutdownOutput(socket)
+          SimpleIO.writeAll(socket, arena.of(("x" * 65536).getBytes(StandardCharsets.UTF_8)))
+          SimpleIO.shutdownOutput(socket)
           val buf = arena.allocate(65536)
           var total = 0L
           var got = 1
           while got > 0 do {
             buf.clear()
-            got = HigherLevel.read(socket, buf)
+            got = SimpleIO.read(socket, buf)
             total += got
           }
           server.await
@@ -65,7 +65,7 @@ trait HigherLevelChecks extends ProgramSuite {
     assertEquals(received, replySize.toLong)
   }
 
-  test("a higher level over perform: a stream of chunks consumed as a gears channel, with back-pressure") {
+  test("SimpleIO over perform: a stream of chunks consumed as a gears channel, with back-pressure") {
     val total = 1 << 20
     val received = running { io ?=>
       val pool = io.backend.pool(bufferSize = 4096, buffers = 4) // a backlog of two, one being sent, one being read
@@ -76,12 +76,12 @@ trait HigherLevelChecks extends ProgramSuite {
           var sent = 0
           while sent < total do {
             buf.clear().limit(math.min(8192, total - sent))
-            HigherLevel.writeAll(out, buf)
+            SimpleIO.writeAll(out, buf)
             sent += buf.limit()
           }
           io.perform(io.backend.ops.close(out))
         }
-        val received = HigherLevel.drain(HigherLevel.chunks(in, pool, backlog = 2))
+        val received = SimpleIO.drain(SimpleIO.chunks(in, pool, backlog = 2))
         writer.await
         received
       } finally {
@@ -92,13 +92,13 @@ trait HigherLevelChecks extends ProgramSuite {
     assertEquals(received, total.toLong)
   }
 
-  test("a higher level over perform: a stream closed early releases its chunks, and one that fails rethrows") {
+  test("SimpleIO over perform: a stream closed early releases its chunks, and one that fails rethrows") {
     val outcome = running { io ?=>
       val pool = io.backend.pool(bufferSize = 1024, buffers = 4)
       val (in, out) = pipe(io)
       try {
-        HigherLevel.writeAll(out, arena.of(("x" * 3000).getBytes(StandardCharsets.UTF_8)))
-        val stream = HigherLevel.chunks(in, pool, backlog = 2)
+        SimpleIO.writeAll(out, arena.of(("x" * 3000).getBytes(StandardCharsets.UTF_8)))
+        val stream = SimpleIO.chunks(in, pool, backlog = 2)
         val first = stream.read().map { chunk =>
           val n = chunk.buffer.remaining()
           chunk.release()
@@ -110,7 +110,7 @@ trait HigherLevelChecks extends ProgramSuite {
         io.perform(io.backend.ops.close(in)) // the next stream's read fails on the closed handle
         val failed =
           try {
-            HigherLevel.drain(HigherLevel.chunks(in, pool, backlog = 2))
+            SimpleIO.drain(SimpleIO.chunks(in, pool, backlog = 2))
             false
           } catch case _: IOException => true
         s"${first.exists(_ > 0)} $freed $failed ${pool.available == pool.buffers}"

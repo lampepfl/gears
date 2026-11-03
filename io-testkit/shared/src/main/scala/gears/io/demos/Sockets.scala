@@ -8,7 +8,7 @@ import gears.async.io.IpStreams
 import gears.async.io.StreamSockets
 import gears.async.io.UnixAddress
 import gears.async.io.UnixStreams
-import gears.io.higherlevel.HigherLevel
+import gears.io.testkit.SimpleIO
 
 import java.nio.file.Files
 import java.nio.file.Paths
@@ -22,15 +22,15 @@ object Sockets {
   /** A stream socket connected to `address`, of either family, on a backend with both. */
   def connect(address: StreamAddress)(using io: Io[IpStreams & UnixStreams], async: Async): io.backend.Connection =
     address match {
-      case unix: UnixAddress => HigherLevel.connect(unix)
-      case ip: IpAddress     => HigherLevel.connect(ip)
+      case unix: UnixAddress => SimpleIO.connect(unix)
+      case ip: IpAddress     => SimpleIO.connect(ip)
     }
 
   /** A listener on `address`, of either family, listening, on a backend with both. */
   def listen(address: StreamAddress)(using io: Io[IpStreams & UnixStreams], async: Async): io.backend.Listener =
     address match {
-      case unix: UnixAddress => HigherLevel.listen(unix)
-      case ip: IpAddress     => HigherLevel.listen(ip)
+      case unix: UnixAddress => SimpleIO.listen(unix)
+      case ip: IpAddress     => SimpleIO.listen(ip)
     }
 
   /** Accepts connections on `listener` until the program ends, handing each to `serve` in a future of its own. A failed
@@ -87,12 +87,12 @@ sealed trait Endpoint[-B <: StreamSockets] {
 
 object Endpoint {
   final case class Ip(address: IpAddress) extends Endpoint[IpStreams] {
-    def connect()(using io: Io[IpStreams], async: Async): io.backend.Connection = HigherLevel.connect(address)
-    def listen()(using io: Io[IpStreams], async: Async): io.backend.Listener = HigherLevel.listen(address)
+    def connect()(using io: Io[IpStreams], async: Async): io.backend.Connection = SimpleIO.connect(address)
+    def listen()(using io: Io[IpStreams], async: Async): io.backend.Listener = SimpleIO.listen(address)
   }
 
   final case class Unix(address: UnixAddress) extends Endpoint[UnixStreams] {
-    def connect()(using io: Io[UnixStreams], async: Async): io.backend.Connection = HigherLevel.connect(address)
-    def listen()(using io: Io[UnixStreams], async: Async): io.backend.Listener = HigherLevel.listen(address)
+    def connect()(using io: Io[UnixStreams], async: Async): io.backend.Connection = SimpleIO.connect(address)
+    def listen()(using io: Io[UnixStreams], async: Async): io.backend.Listener = SimpleIO.listen(address)
   }
 }
