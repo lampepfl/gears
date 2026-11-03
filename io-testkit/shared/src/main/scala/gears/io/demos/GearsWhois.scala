@@ -13,8 +13,8 @@ import java.nio.charset.StandardCharsets
 
 import DemoIO.text
 
-/** Resolve, connect to port 43, send one query line, print the raw reply. Written with `SimpleIO` where a result
-  * reads better than an op and a slot: `resolve` returns the addresses, `read` the bytes received.
+/** Resolve, connect to port 43, send one query line, print the raw reply. Written with `SimpleIO` where a result reads
+  * better than an op and a slot: `resolve` returns the addresses, `read` the bytes received.
   */
 object GearsWhois {
   def run(host: String, port: Int, query: String)(using io: Io[IpStreams & Resolving], async: Async): Unit = {
