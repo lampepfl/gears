@@ -3,6 +3,7 @@ package gears.io.testkit
 import gears.async.Async
 import gears.async.Future
 import gears.async.io.IpAddress
+import gears.async.io.IpSocketAddress
 import gears.async.io.testkit.ProgramSuite
 
 import java.io.IOException
@@ -34,7 +35,7 @@ trait SimpleIOChecks extends ProgramSuite {
     val port = freePort()
     val replySize = 256 * 1024
     val received = running { io ?=>
-      val address = IpAddress.IPv4("127.0.0.1", port)
+      val address = IpSocketAddress(IpAddress.IPv4Loopback, port)
       val listener = SimpleIO.listen(address)
       try {
         val server = Future {

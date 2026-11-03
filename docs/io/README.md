@@ -80,8 +80,8 @@ Each is stated on the interface where it applies, and checked by the contract su
 - **Cancelling or timing out** an op stops it: an op that waits for its handle has done nothing, so a read that
   timed out took no bytes and leaves the connection usable; an opener leaves its slot empty and nothing open; once
   `perform` returns or throws, the op's buffers and slots are the caller's again (`Io.perform`).
-- **Misuse fails as the op is built or performed**, with an `IllegalArgumentException`, never ignored: an address that
-  is not numeric, an option a backend lacks or that does not apply, an empty packet on a connected socket, a read into
+- **Misuse fails as the op is built or performed**, with an `IllegalArgumentException`, never ignored: an option a backend lacks
+  or that does not apply, an empty packet on a connected socket, a read into
   a buffer with no room or a read-only one. I/O failures are `IOException`s.
 - **One op at a time on a stream's direction**: a second read, or write, pending is refused, since two would take or
   interleave the stream's bytes. A datagram socket's sends and receives and a listener's accepts, each whole, take
@@ -96,6 +96,32 @@ Each is stated on the interface where it applies, and checked by the contract su
 Left to a higher level, on purpose: ops, `perform` and slots are mutable records the caller owns and reuses, the
 lowest level there is. A result-returning or streaming API wraps that; the interface makes sure it can be written once
 over every backend.
+
+## Addresses
+
+`IpAddress(protocol, bytes)` stores an explicit `Protocol` and an immutable `IArray[Byte]` in network byte order.
+`Protocol` is a sealed enum with `IPv4` and `IPv6` cases. Construction copies the bytes and validates the length for
+that protocol: four bytes for IPv4 and sixteen for IPv6. Equality and hashing include the protocol, scope ID and byte
+contents. `bytes` exposes an immutable view, and `toBytes` returns a mutable copy for platform APIs.
+`IpAddress.ipv4(192, 168, 1, 1)` takes four `Int` octets in the range 0 to 255, and
+`IpAddress.ipv6(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1)` takes eight `Int` groups in the range 0 to 65535.
+Both constructors reject out-of-range arguments with an `IllegalArgumentException`.
+New protocols can be added to the enum together with their validation and formatting. The reference backend explicitly
+lists its supported protocols and rejects unsupported ones with an `IllegalArgumentException` when socket operations
+are built.
+IPv6 addresses can carry a nonnegative numeric `scopeId` identifying a zone on the local system; zero means unspecified.
+Pass `scopeId = 7` to `ipv6`, or to the `apply` and `fromBytes` overloads that take `Protocol.IPv6`.
+These scoped overloads reject `Protocol.IPv4` at compile time. Scope is supplied at construction.
+For example, `IpAddress.ipv6(0xfe80, 0, 0, 0, 0, 0, 0, 1, scopeId = 7)` formats as `fe80::1%7`.
+IPv4 requires scope zero. The reference backend preserves numeric scopes through resolution and socket address conversion;
+interface names supplied to the JDK resolver are converted to numeric scope IDs by the JDK.
+IPv4-mapped IPv6 values retain their sixteen bytes; backends report unscoped IPv4 peers as IPv4 addresses.
+
+`IpSocketAddress(address, port)` combines an IP address with a port validated at construction, from 0 to 65535.
+Socket operations take these values without parsing text. `resolve` returns `List[IpAddress]`, using the backend's
+resolver. The IP command-line demos resolve their host argument and select the requested family, so those commands
+require the `Resolving` capability as well as sockets. `toString` provides numeric address formatting for display.
+Unix socket addresses continue to use `UnixAddress(path)`.
 
 ## The reference backend
 

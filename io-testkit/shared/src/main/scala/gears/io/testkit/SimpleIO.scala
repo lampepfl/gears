@@ -10,10 +10,10 @@ import gears.async.io.Fifos
 import gears.async.io.Io
 import gears.async.io.IpAddress
 import gears.async.io.IpDatagrams
+import gears.async.io.IpSocketAddress
 import gears.async.io.IpStreams
 import gears.async.io.Pipes
 import gears.async.io.Received
-import gears.async.io.ResolvedAddress
 import gears.async.io.Resolving
 import gears.async.io.Slot
 import gears.async.io.StreamSockets
@@ -45,7 +45,7 @@ object SimpleIO {
   }
 
   /** Connects a stream socket to `address` and returns it. */
-  def connect(address: IpAddress)(using io: Io[IpStreams], async: Async): io.backend.Connection =
+  def connect(address: IpSocketAddress)(using io: Io[IpStreams], async: Async): io.backend.Connection =
     opened[io.backend.Connection](io.backend.ops.connect(address, _))
 
   /** Connects a stream socket to a Unix socket path and returns it. */
@@ -53,7 +53,7 @@ object SimpleIO {
     opened[io.backend.Connection](io.backend.ops.connect(address, _))
 
   /** Listens on `address` and returns the listener. */
-  def listen(address: IpAddress)(using io: Io[IpStreams], async: Async): io.backend.Listener =
+  def listen(address: IpSocketAddress)(using io: Io[IpStreams], async: Async): io.backend.Listener =
     opened[io.backend.Listener](io.backend.ops.listen(address, _))
 
   /** Listens on a Unix socket path and returns the listener. */
@@ -61,11 +61,11 @@ object SimpleIO {
     opened[io.backend.Listener](io.backend.ops.listen(address, _))
 
   /** Opens a datagram socket bound to `local` and returns it. */
-  def bindDatagram(local: IpAddress)(using io: Io[IpDatagrams], async: Async): io.backend.BoundDatagram =
+  def bindDatagram(local: IpSocketAddress)(using io: Io[IpDatagrams], async: Async): io.backend.BoundDatagram =
     opened[io.backend.BoundDatagram](io.backend.ops.bindDatagram(local, _))
 
   /** Opens a datagram socket connected to `remote`, bound to `local` if given, and returns it. */
-  def connectDatagram(local: IpAddress | Null, remote: IpAddress)(using
+  def connectDatagram(local: IpSocketAddress | Null, remote: IpSocketAddress)(using
       io: Io[IpDatagrams],
       async: Async
   ): io.backend.ConnectedDatagram =
@@ -153,8 +153,8 @@ object SimpleIO {
   }
 
   /** Resolves `host` and returns its addresses. */
-  def resolve(host: String)(using io: Io[Resolving], async: Async): List[ResolvedAddress] = {
-    val into = Slot[List[ResolvedAddress]]()
+  def resolve(host: String)(using io: Io[Resolving], async: Async): List[IpAddress] = {
+    val into = Slot[List[IpAddress]]()
     io.perform(io.backend.ops.resolve(host, into))
     into.clear()
   }

@@ -186,15 +186,14 @@ final class CloseOp(h: RefHandle) extends RefOp {
 
 // ---- Stream sockets
 
-final class ConnectOp(address: IpAddress | UnixAddress, options: SocketOptions, into: Slot[ConnectionHandle])
+final class ConnectOp(address: IpSocketAddress | UnixAddress, options: SocketOptions, into: Slot[ConnectionHandle])
     extends RefOp {
   override protected def slots = List(into)
   protected def body(ctx: Ctx)(using Async): Unit = {
     val (socket, target, unix) = address match {
-      case ip: IpAddress =>
-        val family =
-          if ip.isInstanceOf[IpAddress.IPv4] then StandardProtocolFamily.INET else StandardProtocolFamily.INET6
-        (SocketChannel.open(family), Addresses.jdk(ip), false)
+      case ip: IpSocketAddress =>
+        val protocol = Addresses.protocol(ip.address.protocol)
+        (SocketChannel.open(protocol), Addresses.jdk(ip), false)
       case path: UnixAddress => (SocketChannel.open(StandardProtocolFamily.UNIX), Addresses.jdk(path), true)
     }
     try {
@@ -211,19 +210,18 @@ final class ConnectOp(address: IpAddress | UnixAddress, options: SocketOptions, 
   }
 }
 
-final class ListenOp(address: IpAddress | UnixAddress, options: SocketOptions, into: Slot[ListenerHandle])
+final class ListenOp(address: IpSocketAddress | UnixAddress, options: SocketOptions, into: Slot[ListenerHandle])
     extends RefOp {
   override protected def slots = List(into)
   protected def body(ctx: Ctx)(using Async): Unit = {
     val server = address match {
-      case _: IpAddress.IPv4 => ServerSocketChannel.open(StandardProtocolFamily.INET)
-      case _: IpAddress.IPv6 => ServerSocketChannel.open(StandardProtocolFamily.INET6)
-      case _: UnixAddress    => ServerSocketChannel.open(StandardProtocolFamily.UNIX)
+      case ip: IpSocketAddress => ServerSocketChannel.open(Addresses.protocol(ip.address.protocol))
+      case _: UnixAddress      => ServerSocketChannel.open(StandardProtocolFamily.UNIX)
     }
     try {
       server.configureBlocking(false)
       val (kind, path) = address match {
-        case ip: IpAddress =>
+        case ip: IpSocketAddress =>
           server.setOption(StandardSocketOptions.SO_REUSEADDR, true)
           (SocketOption.Kind.Listener, null)
         case unix: UnixAddress =>
@@ -236,8 +234,8 @@ final class ListenOp(address: IpAddress | UnixAddress, options: SocketOptions, i
         .opening(options, kind)
         .foreach((o, v) => if Options.on(server, o) then Options.set(server, o, v))
       address match {
-        case ip: IpAddress     => server.bind(Addresses.jdk(ip), 1024)
-        case unix: UnixAddress => server.bind(Addresses.jdk(unix), 1024)
+        case ip: IpSocketAddress => server.bind(Addresses.jdk(ip), 1024)
+        case unix: UnixAddress   => server.bind(Addresses.jdk(unix), 1024)
       }
       into.set(new ListenerHandle(server, path != null, options, path))
     } catch {
@@ -319,18 +317,16 @@ final class ShutdownOutputOp(c: ConnectionHandle) extends RefOp {
 // ---- Datagram sockets
 
 final class OpenDatagramOp(
-    local: IpAddress | Null,
-    remote: IpAddress | Null,
+    local: IpSocketAddress | Null,
+    remote: IpSocketAddress | Null,
     options: SocketOptions,
     into: Slot[? <: DatagramHandle]
 ) extends RefOp {
   override protected def slots = List(into)
   protected def body(ctx: Ctx)(using Async): Unit = {
-    val family = (if local != null then local else remote) match {
-      case _: IpAddress.IPv4 => StandardProtocolFamily.INET
-      case _                 => StandardProtocolFamily.INET6
-    }
-    val datagrams = DatagramChannel.open(family)
+    val address = if local != null then local else remote.nn
+    val protocol = Addresses.protocol(address.address.protocol)
+    val datagrams = DatagramChannel.open(protocol)
     try {
       datagrams.configureBlocking(false)
       val kind = if remote == null then SocketOption.Kind.BoundDatagram else SocketOption.Kind.ConnectedDatagram
@@ -348,7 +344,9 @@ final class OpenDatagramOp(
   }
 }
 
-final class ReceiveOp(h: DatagramHandle, buf: ByteBuffer, from: Slot[IpAddress] | Null) extends RefOp with Repeatable {
+final class ReceiveOp(h: DatagramHandle, buf: ByteBuffer, from: Slot[IpSocketAddress] | Null)
+    extends RefOp
+    with Repeatable {
   override protected def handle = h
   override protected def slots = if from == null then Nil else List(from)
   override protected def check(): Unit =
@@ -374,7 +372,9 @@ final class ReceiveOp(h: DatagramHandle, buf: ByteBuffer, from: Slot[IpAddress] 
   }
 }
 
-final class SendOp(h: DatagramHandle, bufs: Array[ByteBuffer], to: IpAddress | Null) extends RefOp with Repeatable {
+final class SendOp(h: DatagramHandle, bufs: Array[ByteBuffer], to: IpSocketAddress | Null)
+    extends RefOp
+    with Repeatable {
   override protected def handle = h
   override protected def check(): Unit =
     if to == null && !bufs.exists(_.hasRemaining()) then
@@ -512,7 +512,7 @@ final class BlockingOp[A <: AnyRef](work: () => A, into: Slot[A] | Null) extends
     OnThread[A](this, work, v => if into != null then into.set(v), interrupt = true).run(ctx)
 }
 
-final class ResolveOp(host: String, into: Slot[List[ResolvedAddress]]) extends RefOp {
+final class ResolveOp(host: String, into: Slot[List[IpAddress]]) extends RefOp {
   override protected def slots = List(into)
   protected def body(ctx: Ctx)(using Async): Unit = {
     val lookup = () => {
@@ -520,6 +520,6 @@ final class ResolveOp(host: String, into: Slot[List[ResolvedAddress]]) extends R
       if found.isEmpty then throw new IOException(s"Failed to resolve $host: it has no IPv4 or IPv6 address")
       found
     }
-    OnThread[List[ResolvedAddress]](this, lookup, into.set, interrupt = false).run(ctx)
+    OnThread[List[IpAddress]](this, lookup, into.set, interrupt = false).run(ctx)
   }
 }

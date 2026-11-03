@@ -175,12 +175,12 @@ trait StreamSocketOps[Op, H <: AnyRef] extends Ops[Op, H] {
     * path a Unix one is bound to, empty for one with none. Not an op: every backend answers at once, since opening was
     * the op, completed once the socket was bound. Fails with an `IOException` on a closed handle.
     */
-  def localAddress(handle: Listener | Connection): IpAddress | UnixAddress
+  def localAddress(handle: Listener | Connection): IpSocketAddress | UnixAddress
 
   /** The address of a connection's peer: the address connected to, or for one accepted, the client's, the empty path
     * for a Unix client with none. Not an op, as `localAddress`. Fails with an `IOException` on a closed handle.
     */
-  def peerAddress(handle: Connection): IpAddress | UnixAddress
+  def peerAddress(handle: Connection): IpSocketAddress | UnixAddress
 }
 
 /** The ops that open IP stream sockets, for a backend that has them (see `IpStreams`), used once open as any stream
@@ -191,10 +191,11 @@ trait IpStreamOps[Op, H <: AnyRef] extends StreamSocketOps[Op, H] with SocketOpt
   /** Opens a stream socket and connects it to `address`. Completes once connected, after writing the socket into
     * `into`, which must be empty; fails if the connection is refused or cannot be made.
     */
-  final def connect(address: IpAddress, into: Slot[Connection]): Op = connect(address, SocketOptions.default, into)
+  final def connect(address: IpSocketAddress, into: Slot[Connection]): Op =
+    connect(address, SocketOptions.default, into)
 
   /** As the other `connect`, the socket opening with `options` (see `SocketOptions`). */
-  def connect(address: IpAddress, options: SocketOptions, into: Slot[Connection]): Op
+  def connect(address: IpSocketAddress, options: SocketOptions, into: Slot[Connection]): Op
 
   /** Opens a stream socket listening on `address`. Completes once it is listening, after writing it into `into`, which
     * must be empty; fails if the address is in use or cannot be bound. A port another listener holds is in use, but not
@@ -202,12 +203,12 @@ trait IpStreamOps[Op, H <: AnyRef] extends StreamSocketOps[Op, H] with SocketOpt
     * backend binds as `SO_REUSEADDR` does, as Go, libuv and Rust's standard library always do, since Network.framework
     * cannot refuse such a port.
     */
-  final def listen(address: IpAddress, into: Slot[Listener]): Op = listen(address, SocketOptions.default, into)
+  final def listen(address: IpSocketAddress, into: Slot[Listener]): Op = listen(address, SocketOptions.default, into)
 
   /** As the other `listen`, the listener opening with `options`, and each connection it accepts with those of them that
     * apply to a connection, `NoDelay` and `KeepAlive` (see `SocketOptions`).
     */
-  def listen(address: IpAddress, options: SocketOptions, into: Slot[Listener]): Op
+  def listen(address: IpSocketAddress, options: SocketOptions, into: Slot[Listener]): Op
 }
 
 /** The ops of IP datagram sockets, for a backend that has them (see `IpDatagrams`). A datagram socket is bound,
@@ -225,23 +226,23 @@ trait IpDatagramOps[Op, H <: AnyRef] extends SocketOptionOps[Op, H] {
   /** Opens a datagram socket bound to `local`, port 0 for any. Completes once it is bound, after writing it into
     * `into`, which must be empty; fails if `local` is in use or cannot be bound.
     */
-  final def bindDatagram(local: IpAddress, into: Slot[BoundDatagram]): Op =
+  final def bindDatagram(local: IpSocketAddress, into: Slot[BoundDatagram]): Op =
     bindDatagram(local, SocketOptions.default, into)
 
   /** As the other `bindDatagram`, the socket opening with `options`, of those that apply to a datagram socket. */
-  def bindDatagram(local: IpAddress, options: SocketOptions, into: Slot[BoundDatagram]): Op
+  def bindDatagram(local: IpSocketAddress, options: SocketOptions, into: Slot[BoundDatagram]): Op
 
   /** Opens a datagram socket connected to `remote`, bound to `local` if given, of the same family, else to an ephemeral
     * port. Completes once it is connected, after writing it into `into`, which must be empty; fails if `local` is in
     * use or cannot be bound. Connecting sends nothing: it only fixes the peer, which alone it then hears.
     */
-  final def connectDatagram(local: IpAddress | Null, remote: IpAddress, into: Slot[ConnectedDatagram]): Op =
+  final def connectDatagram(local: IpSocketAddress | Null, remote: IpSocketAddress, into: Slot[ConnectedDatagram]): Op =
     connectDatagram(local, remote, SocketOptions.default, into)
 
   /** As the other `connectDatagram`, the socket opening with `options`, of those that apply to a datagram socket. */
   def connectDatagram(
-      local: IpAddress | Null,
-      remote: IpAddress,
+      local: IpSocketAddress | Null,
+      remote: IpSocketAddress,
       options: SocketOptions,
       into: Slot[ConnectedDatagram]
   ): Op
@@ -253,7 +254,7 @@ trait IpDatagramOps[Op, H <: AnyRef] extends SocketOptionOps[Op, H] {
     * holds it. A buffer of no capacity fails the op with an `IllegalArgumentException`, receiving nothing, since it
     * would drop a whole packet.
     */
-  def receive(handle: BoundDatagram, buf: ByteBuffer, from: Slot[IpAddress]): Op & Repeatable
+  def receive(handle: BoundDatagram, buf: ByteBuffer, from: Slot[IpSocketAddress]): Op & Repeatable
 
   /** Receives one packet on a connected datagram socket, from its peer, as the other `receive` does. */
   def receive(handle: ConnectedDatagram, buf: ByteBuffer): Op & Repeatable
@@ -265,7 +266,7 @@ trait IpDatagramOps[Op, H <: AnyRef] extends SocketOptionOps[Op, H] {
     * port nothing listens on say, fails neither this send nor a later one, to that peer or another, as no system tells
     * a socket that is not connected of its packets' fate.
     */
-  def send(handle: BoundDatagram, buf: ByteBuffer, to: IpAddress): Op & Repeatable
+  def send(handle: BoundDatagram, buf: ByteBuffer, to: IpSocketAddress): Op & Repeatable
 
   /** Sends `buf` as one packet on a connected datagram socket, to its peer, as the other `send` does. Fails with an
     * `IllegalArgumentException`, sending nothing, if `buf` is empty: no backend sends an empty packet on a connected
@@ -274,7 +275,7 @@ trait IpDatagramOps[Op, H <: AnyRef] extends SocketOptionOps[Op, H] {
   def send(handle: ConnectedDatagram, buf: ByteBuffer): Op & Repeatable
 
   /** Sends `bufs`, in order, as one packet, to `to`, as the other `send` sends one buffer, consuming them all. */
-  def send(handle: BoundDatagram, bufs: Array[ByteBuffer], to: IpAddress): Op & Repeatable
+  def send(handle: BoundDatagram, bufs: Array[ByteBuffer], to: IpSocketAddress): Op & Repeatable
 
   /** Sends `bufs`, in order, as one packet, to the peer, as the other `send` sends one buffer: never an empty one. */
   def send(handle: ConnectedDatagram, bufs: Array[ByteBuffer]): Op & Repeatable
@@ -283,11 +284,11 @@ trait IpDatagramOps[Op, H <: AnyRef] extends SocketOptionOps[Op, H] {
     * no local address, the ephemeral port connecting gave it. Not an op, as `StreamSocketOps.localAddress`.
     */
   @annotation.targetName("datagramLocalAddress")
-  def localAddress(handle: BoundDatagram | ConnectedDatagram): IpAddress
+  def localAddress(handle: BoundDatagram | ConnectedDatagram): IpSocketAddress
 
   /** The peer a datagram socket is connected to, the only sender it hears. Not an op. */
   @annotation.targetName("datagramPeerAddress")
-  def peerAddress(handle: ConnectedDatagram): IpAddress
+  def peerAddress(handle: ConnectedDatagram): IpSocketAddress
 }
 
 /** Regular files as ops, for a backend that has them (see `RegularFiles`). A file is opened by an op, since opening
@@ -340,15 +341,14 @@ trait FileOps[Op, H <: AnyRef] extends Ops[Op, H] {
 /** Name resolution, for a backend that has it (see `Resolving`). */
 trait ResolveOps[Op, H <: AnyRef] extends Ops[Op, H] {
 
-  /** Resolves a host name, without blocking the caller's worker. Completes after writing its addresses, in numeric form
-    * (an IPv6 one as `inet_ntop` writes it), into `into`, which must be empty; fails with an `IOException` if the name
-    * cannot be resolved, or has no IPv4 or IPv6 address. An empty name, or one with a NUL in it, is refused as the op
-    * is built, with an `IllegalArgumentException`. A cancel that arrives before the write leaves `into` empty, and is
-    * delivered at once, though the lookup, which cannot be interrupted, runs on to its end on a thread of its own, its
-    * result dropped; one after the write is too late, and the op completes. A time limit is a cancel, so it holds to
-    * its time.
+  /** Resolves a host name, without blocking the caller's worker. Completes after writing its `IpAddress` values into
+    * `into`, which must be empty; fails with an `IOException` if the name cannot be resolved, or has no IPv4 or IPv6
+    * address. IPv6 scope IDs are preserved. An empty name, or one with a NUL in it, is refused as the op is built, with
+    * an `IllegalArgumentException`. A cancel that arrives before the write leaves `into` empty, and is delivered at
+    * once, though the lookup, which cannot be interrupted, runs on to its end on a thread of its own, its result
+    * dropped; one after the write is too late, and the op completes. A time limit is a cancel, so it holds to its time.
     */
-  def resolve(host: String, into: Slot[List[ResolvedAddress]]): Op
+  def resolve(host: String, into: Slot[List[IpAddress]]): Op
 }
 
 /** The ops of pipes, for a backend that has them (see `Pipes`): `read` on its read end, `write` on its write end.
