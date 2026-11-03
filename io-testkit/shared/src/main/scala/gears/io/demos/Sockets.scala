@@ -3,7 +3,7 @@ package gears.io.demos
 import gears.async.Async
 import gears.async.Future
 import gears.async.io.Io
-import gears.async.io.IpAddress
+import gears.async.io.IpSocketAddress
 import gears.async.io.IpStreams
 import gears.async.io.StreamSockets
 import gears.async.io.UnixAddress
@@ -14,7 +14,7 @@ import java.nio.file.Files
 import java.nio.file.Paths
 
 /** Where a stream demo's server listens: an IP address, or a Unix path on a backend with Unix stream sockets. */
-type StreamAddress = IpAddress | UnixAddress
+type StreamAddress = IpSocketAddress | UnixAddress
 
 /** The stream demos' sockets, for either family of address. */
 object Sockets {
@@ -22,15 +22,15 @@ object Sockets {
   /** A stream socket connected to `address`, of either family, on a backend with both. */
   def connect(address: StreamAddress)(using io: Io[IpStreams & UnixStreams], async: Async): io.backend.Connection =
     address match {
-      case unix: UnixAddress => SimpleIO.connect(unix)
-      case ip: IpAddress     => SimpleIO.connect(ip)
+      case unix: UnixAddress   => SimpleIO.connect(unix)
+      case ip: IpSocketAddress => SimpleIO.connect(ip)
     }
 
   /** A listener on `address`, of either family, listening, on a backend with both. */
   def listen(address: StreamAddress)(using io: Io[IpStreams & UnixStreams], async: Async): io.backend.Listener =
     address match {
-      case unix: UnixAddress => SimpleIO.listen(unix)
-      case ip: IpAddress     => SimpleIO.listen(ip)
+      case unix: UnixAddress   => SimpleIO.listen(unix)
+      case ip: IpSocketAddress => SimpleIO.listen(ip)
     }
 
   /** Accepts connections on `listener` until the program ends, handing each to `serve` in a future of its own. A failed
@@ -86,7 +86,7 @@ sealed trait Endpoint[-B <: StreamSockets] {
 }
 
 object Endpoint {
-  final case class Ip(address: IpAddress) extends Endpoint[IpStreams] {
+  final case class Ip(address: IpSocketAddress) extends Endpoint[IpStreams] {
     def connect()(using io: Io[IpStreams], async: Async): io.backend.Connection = SimpleIO.connect(address)
     def listen()(using io: Io[IpStreams], async: Async): io.backend.Listener = SimpleIO.listen(address)
   }

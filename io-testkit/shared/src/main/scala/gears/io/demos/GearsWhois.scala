@@ -1,9 +1,8 @@
 package gears.io.demos
 
 import gears.async.Async
-import gears.async.io.AddressFamily
 import gears.async.io.Io
-import gears.async.io.IpAddress
+import gears.async.io.IpSocketAddress
 import gears.async.io.IpStreams
 import gears.async.io.Resolving
 import gears.async.io.testkit.BufferArena
@@ -22,10 +21,7 @@ object GearsWhois {
       val buf = arena.allocate(8192)
       val resolvedAll = SimpleIO.resolve(host) // a failed lookup throws
       val resolved = resolvedAll.head
-      val address = resolved.family match {
-        case AddressFamily.IPv6 => IpAddress.IPv6(resolved.host, port)
-        case AddressFamily.IPv4 => IpAddress.IPv4(resolved.host, port)
-      }
+      val address = IpSocketAddress(resolved, port)
       println(s"resolved $host to $address (${resolvedAll.length} addresses)")
       val fd = SimpleIO.connect(address)
       try {
@@ -55,8 +51,7 @@ object GearsWhois {
   def resolve(host: String)(using io: Io[Resolving], async: Async): Unit = {
     val resolvedAll = SimpleIO.resolve(host) // a failed lookup throws
     resolvedAll.foreach { a =>
-      val family = if a.family == AddressFamily.IPv4 then "IPv4" else "IPv6"
-      println(s"$family ${a.host}")
+      println(s"${a.protocol} $a")
     }
     println(s"resolved $host to ${resolvedAll.length} addresses")
   }

@@ -6,6 +6,7 @@ import gears.async.UnboundedChannel
 import gears.async.io.Io
 import gears.async.io.IpAddress
 import gears.async.io.IpDatagrams
+import gears.async.io.IpSocketAddress
 import gears.async.io.Slot
 import gears.async.io.testkit.BufferArena
 import gears.io.testkit.SimpleIO
@@ -74,7 +75,7 @@ object GearsQuicTimers {
       io: Io[IpDatagrams],
       async: Async.Spawn
   ): Unit = {
-    val socket = SimpleIO.bindDatagram(IpAddress.IPv4("127.0.0.1", 0))
+    val socket = SimpleIO.bindDatagram(IpSocketAddress(IpAddress.IPv4Loopback, 0))
     val address = io.backend.ops.localAddress(socket)
     val counts = new Counts
     val closed = UnboundedChannel[Long]()
@@ -117,7 +118,7 @@ object GearsQuicTimers {
   )(using Async.Spawn): Unit = {
     val drivers = mutable.HashMap.empty[Long, UnboundedChannel[Event]]
     val packet = buffer(64)
-    val from = Slot[IpAddress]()
+    val from = Slot[IpSocketAddress]()
     val receive = io.backend.ops.receive(socket, packet, from)
     while true do {
       packet.clear()
@@ -149,7 +150,7 @@ object GearsQuicTimers {
       io: Io[IpDatagrams],
       socket: io.backend.BoundDatagram,
       id: Long,
-      peer: IpAddress,
+      peer: IpSocketAddress,
       inbox: UnboundedChannel[Event],
       counts: Counts,
       buffer: Int => ByteBuffer
@@ -216,7 +217,7 @@ object GearsQuicTimers {
     */
   private def client(
       io: Io[IpDatagrams],
-      server: IpAddress,
+      server: IpSocketAddress,
       id: Long,
       packets: Int,
       interval: FiniteDuration,

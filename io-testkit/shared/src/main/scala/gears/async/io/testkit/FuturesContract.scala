@@ -9,9 +9,9 @@ import gears.async.Future.awaitAll
 import gears.async.io.Backend
 import gears.async.io.Io
 import gears.async.io.IpAddress
+import gears.async.io.IpSocketAddress
 import gears.async.io.IpSockets
 import gears.async.io.Pipes
-import gears.async.io.ResolvedAddress
 import gears.async.io.Resolving
 import gears.async.io.Slot
 import gears.async.io.UnixAddress
@@ -275,7 +275,7 @@ trait FuturesContract extends ProgramSuite {
   test("a connect is performed only once, and a listener's port is free once its close is performed") {
     val port = freePort()
     val outcome = running { io ?=>
-      val address = IpAddress.IPv4("127.0.0.1", port)
+      val address = IpSocketAddress(IpAddress.IPv4Loopback, port)
       val listening = Slot[Listener]()
       val listener = opening(io, listening, io.backend.ops.listen(address, listening))
       val accepted = Slot[Connection]()
@@ -306,10 +306,15 @@ trait FuturesContract extends ProgramSuite {
     val port = freePort()
     val outcome = running { io ?=>
       val boundInto = Slot[BoundDatagram]()
-      val server = opening(io, boundInto, io.backend.ops.bindDatagram(IpAddress.IPv4("127.0.0.1", port), boundInto))
+      val server =
+        opening(io, boundInto, io.backend.ops.bindDatagram(IpSocketAddress(IpAddress.IPv4Loopback, port), boundInto))
       val clientInto = Slot[ConnectedDatagram]()
       val client =
-        opening(io, clientInto, io.backend.ops.connectDatagram(null, IpAddress.IPv4("127.0.0.1", port), clientInto))
+        opening(
+          io,
+          clientInto,
+          io.backend.ops.connectDatagram(null, IpSocketAddress(IpAddress.IPv4Loopback, port), clientInto)
+        )
       try {
         def refused(op: io.Op): Boolean =
           try {
@@ -322,7 +327,7 @@ trait FuturesContract extends ProgramSuite {
         none.limit(0)
         List(
           refused(io.backend.ops.send(client, empty)),
-          refused(io.backend.ops.receive(server, none.slice(), Slot[IpAddress]()))
+          refused(io.backend.ops.receive(server, none.slice(), Slot[IpSocketAddress]()))
         ).mkString(" ")
       } finally {
         io.perform(io.backend.ops.close(client))
@@ -338,15 +343,20 @@ trait FuturesContract extends ProgramSuite {
     val port = freePort()
     val outcome = running { io ?=>
       val boundInto = Slot[BoundDatagram]()
-      val server = opening(io, boundInto, io.backend.ops.bindDatagram(IpAddress.IPv4("127.0.0.1", port), boundInto))
+      val server =
+        opening(io, boundInto, io.backend.ops.bindDatagram(IpSocketAddress(IpAddress.IPv4Loopback, port), boundInto))
       val clientInto = Slot[ConnectedDatagram]()
       val client =
-        opening(io, clientInto, io.backend.ops.connectDatagram(null, IpAddress.IPv4("127.0.0.1", port), clientInto))
+        opening(
+          io,
+          clientInto,
+          io.backend.ops.connectDatagram(null, IpSocketAddress(IpAddress.IPv4Loopback, port), clientInto)
+        )
       try {
         def receiving(): Future[String] = {
           val buf = arena.allocate(16)
           val receiver = Future {
-            io.perform(io.backend.ops.receive(server, buf, Slot[IpAddress]()))
+            io.perform(io.backend.ops.receive(server, buf, Slot[IpSocketAddress]()))
             StandardCharsets.UTF_8.decode(buf).toString
           }
           io.perform(io.backend.ops.timer(20)) // so that it waits, behind those before it
@@ -372,16 +382,21 @@ trait FuturesContract extends ProgramSuite {
     val port = freePort()
     val outcome = running { io ?=>
       val boundInto = Slot[BoundDatagram]()
-      val server = opening(io, boundInto, io.backend.ops.bindDatagram(IpAddress.IPv4("127.0.0.1", port), boundInto))
+      val server =
+        opening(io, boundInto, io.backend.ops.bindDatagram(IpSocketAddress(IpAddress.IPv4Loopback, port), boundInto))
       val clientInto = Slot[ConnectedDatagram]()
       val client =
-        opening(io, clientInto, io.backend.ops.connectDatagram(null, IpAddress.IPv4("127.0.0.1", port), clientInto))
+        opening(
+          io,
+          clientInto,
+          io.backend.ops.connectDatagram(null, IpSocketAddress(IpAddress.IPv4Loopback, port), clientInto)
+        )
       try {
         val senders = 4
         val each = 25
         val received = Future {
           val buf = arena.allocate(32)
-          val from = Slot[IpAddress]()
+          val from = Slot[IpSocketAddress]()
           val receive = io.backend.ops.receive(server, buf, from)
           (1 to senders * each).map { _ =>
             buf.clear()
@@ -415,7 +430,7 @@ trait FuturesContract extends ProgramSuite {
   test("futures accepting on one listener at once each take their own connection") {
     val port = freePort()
     val outcome = running { io ?=>
-      val address = IpAddress.IPv4("127.0.0.1", port)
+      val address = IpSocketAddress(IpAddress.IPv4Loopback, port)
       val listening = Slot[Listener]()
       val listener = opening(io, listening, io.backend.ops.listen(address, listening))
       try {
@@ -696,7 +711,7 @@ trait FuturesContract extends ProgramSuite {
     val failure = running { io ?=>
       val into = Slot[Connection]()
       try {
-        io.perform(io.backend.ops.connect(IpAddress.IPv4("127.0.0.1", port), into))
+        io.perform(io.backend.ops.connect(IpSocketAddress(IpAddress.IPv4Loopback, port), into))
         io.perform(io.backend.ops.close(into.clear()))
         null
       } catch {
@@ -710,7 +725,7 @@ trait FuturesContract extends ProgramSuite {
 
   test("an op that is not Repeatable is performed only once") {
     val failure = running { io ?=>
-      val into = Slot[List[ResolvedAddress]]()
+      val into = Slot[List[IpAddress]]()
       val resolve = io.backend.ops.resolve("localhost", into)
       io.perform(resolve)
       into.clear()

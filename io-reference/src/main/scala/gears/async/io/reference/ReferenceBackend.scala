@@ -132,7 +132,7 @@ object ReferenceOps
 
   def shutdownOutput(handle: ConnectionHandle): RefOp = ShutdownOutputOp(handle)
 
-  def localAddress(handle: ListenerHandle | ConnectionHandle): IpAddress | UnixAddress = {
+  def localAddress(handle: ListenerHandle | ConnectionHandle): IpSocketAddress | UnixAddress = {
     handle.checkOpen()
     handle match {
       case l: ListenerHandle =>
@@ -142,22 +142,22 @@ object ReferenceOps
     }
   }
 
-  def peerAddress(handle: ConnectionHandle): IpAddress | UnixAddress = {
+  def peerAddress(handle: ConnectionHandle): IpSocketAddress | UnixAddress = {
     handle.checkOpen()
     if handle.unix then Addresses.unix(handle.socket.getRemoteAddress())
     else Addresses.ip(handle.socket.getRemoteAddress())
   }
 
-  def connect(address: IpAddress, options: SocketOptions, into: Slot[ConnectionHandle]): RefOp = {
-    val checked = Addresses.checked(address)
+  def connect(address: IpSocketAddress, options: SocketOptions, into: Slot[ConnectionHandle]): RefOp = {
+    Addresses.checked(address)
     Options.check(options, Kind.Connection)
-    ConnectOp(checked, options, into)
+    ConnectOp(address, options, into)
   }
 
-  def listen(address: IpAddress, options: SocketOptions, into: Slot[ListenerHandle]): RefOp = {
-    val checked = Addresses.checked(address)
+  def listen(address: IpSocketAddress, options: SocketOptions, into: Slot[ListenerHandle]): RefOp = {
+    Addresses.checked(address)
     Options.check(options, Kind.Listener)
-    ListenOp(checked, options, into)
+    ListenOp(address, options, into)
   }
 
   def connect(address: UnixAddress, options: SocketOptions, into: Slot[ConnectionHandle]): RefOp = {
@@ -174,15 +174,15 @@ object ReferenceOps
 
   // ---- IP datagram sockets
 
-  def bindDatagram(local: IpAddress, options: SocketOptions, into: Slot[BoundDatagramHandle]): RefOp = {
-    val checked = Addresses.checked(local)
+  def bindDatagram(local: IpSocketAddress, options: SocketOptions, into: Slot[BoundDatagramHandle]): RefOp = {
+    Addresses.checked(local)
     Options.check(options, Kind.BoundDatagram)
-    OpenDatagramOp(checked, null, options, into)
+    OpenDatagramOp(local, null, options, into)
   }
 
   def connectDatagram(
-      local: IpAddress | Null,
-      remote: IpAddress,
+      local: IpSocketAddress | Null,
+      remote: IpSocketAddress,
       options: SocketOptions,
       into: Slot[ConnectedDatagramHandle]
   ): RefOp = {
@@ -191,31 +191,31 @@ object ReferenceOps
     OpenDatagramOp(l, r, options, into)
   }
 
-  def receive(handle: BoundDatagramHandle, buf: ByteBuffer, from: Slot[IpAddress]): RefOp & Repeatable =
+  def receive(handle: BoundDatagramHandle, buf: ByteBuffer, from: Slot[IpSocketAddress]): RefOp & Repeatable =
     ReceiveOp(handle, fillable(buf), from)
 
   def receive(handle: ConnectedDatagramHandle, buf: ByteBuffer): RefOp & Repeatable =
     ReceiveOp(handle, fillable(buf), null)
 
-  def send(handle: BoundDatagramHandle, buf: ByteBuffer, to: IpAddress): RefOp & Repeatable =
+  def send(handle: BoundDatagramHandle, buf: ByteBuffer, to: IpSocketAddress): RefOp & Repeatable =
     SendOp(handle, Array(buf), Addresses.checked(to))
 
   def send(handle: ConnectedDatagramHandle, buf: ByteBuffer): RefOp & Repeatable = SendOp(handle, Array(buf), null)
 
-  def send(handle: BoundDatagramHandle, bufs: Array[ByteBuffer], to: IpAddress): RefOp & Repeatable =
+  def send(handle: BoundDatagramHandle, bufs: Array[ByteBuffer], to: IpSocketAddress): RefOp & Repeatable =
     SendOp(handle, several(bufs), Addresses.checked(to))
 
   def send(handle: ConnectedDatagramHandle, bufs: Array[ByteBuffer]): RefOp & Repeatable =
     SendOp(handle, several(bufs), null)
 
   @targetName("datagramLocalAddress")
-  def localAddress(handle: BoundDatagramHandle | ConnectedDatagramHandle): IpAddress = {
+  def localAddress(handle: BoundDatagramHandle | ConnectedDatagramHandle): IpSocketAddress = {
     handle.checkOpen()
     Addresses.ip(handle.datagrams.getLocalAddress())
   }
 
   @targetName("datagramPeerAddress")
-  def peerAddress(handle: ConnectedDatagramHandle): IpAddress = {
+  def peerAddress(handle: ConnectedDatagramHandle): IpSocketAddress = {
     handle.checkOpen()
     Addresses.ip(handle.datagrams.getRemoteAddress())
   }
@@ -268,7 +268,7 @@ object ReferenceOps
 
   def pipe(read: Slot[ReadEnd], write: Slot[WriteEnd]): RefOp = PipeOp(read, write)
 
-  def resolve(host: String, into: Slot[List[ResolvedAddress]]): RefOp = {
+  def resolve(host: String, into: Slot[List[IpAddress]]): RefOp = {
     if host.isEmpty then throw new IllegalArgumentException("An empty host name names no host")
     Addresses.checkPath(host)
     ResolveOp(host, into)

@@ -4,8 +4,8 @@ import gears.async.Async
 import gears.async.Future
 import gears.async.io.Backend
 import gears.async.io.Io
-import gears.async.io.IpAddress
 import gears.async.io.IpDatagrams
+import gears.async.io.IpSocketAddress
 import gears.async.io.Slot
 import gears.async.io.UnixAddress
 import gears.async.io.UnixDatagrams
@@ -39,7 +39,7 @@ object GearsDatagram {
   }
 
   /** Exchanges a packet with an IP datagram server; connecting the socket also assigns it an ephemeral local port. */
-  def run(address: IpAddress, message: String)(using io: Io[IpDatagrams], async: Async): Unit = {
+  def run(address: IpSocketAddress, message: String)(using io: Io[IpDatagrams], async: Async): Unit = {
     BufferArena.scoped { arena =>
       val request = arena.of(message.getBytes(StandardCharsets.UTF_8))
       val response = arena.allocate(65536)
@@ -93,11 +93,11 @@ object GearsDatagram {
     }
 
   /** Echoes each packet on an IP datagram socket to its sender. */
-  def serve(address: IpAddress)(using io: Io[IpDatagrams], async: Async): Unit =
+  def serve(address: IpSocketAddress)(using io: Io[IpDatagrams], async: Async): Unit =
     BufferArena.scoped { arena =>
       val packet = arena.allocate(65536)
       val socket = SimpleIO.bindDatagram(address)
-      val sender = Slot[IpAddress]()
+      val sender = Slot[IpSocketAddress]()
       val ops = io.backend.ops
       try echo(io, ops.receive(socket, packet, sender), packet, () => ops.send(socket, packet, sender.clear()))
       finally io.perform(ops.close(socket))

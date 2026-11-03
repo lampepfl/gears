@@ -9,9 +9,9 @@ import gears.async.Future.awaitAll
 import gears.async.io.Backend
 import gears.async.io.Io
 import gears.async.io.IpAddress
+import gears.async.io.IpSocketAddress
 import gears.async.io.IpSockets
 import gears.async.io.Pipes
-import gears.async.io.ResolvedAddress
 import gears.async.io.Resolving
 import gears.async.io.Slot
 import gears.async.io.UnixAddress
@@ -79,7 +79,7 @@ trait ProgramSuite extends ContractSuite {
       var attempts = 0
       var found: (Listener, Connect) | Null = null
       while found == null do {
-        val address = IpAddress.IPv4("127.0.0.1", 20000 + random.nextInt(30000))
+        val address = IpSocketAddress(IpAddress.IPv4Loopback, 20000 + random.nextInt(30000))
         val listening = Slot[Listener]()
         try {
           val listener = opening(io, listening, io.backend.ops.listen(address, listening))
@@ -108,7 +108,8 @@ trait ProgramSuite extends ContractSuite {
       val candidate = 20000 + random.nextInt(30000)
       val into = Slot[Listener]()
       try {
-        val listener = opening(io, into, io.backend.ops.listen(IpAddress.IPv4("127.0.0.1", candidate), into))
+        val listener =
+          opening(io, into, io.backend.ops.listen(IpSocketAddress(IpAddress.IPv4Loopback, candidate), into))
         io.perform(io.backend.ops.close(listener))
         port = candidate
       } catch {

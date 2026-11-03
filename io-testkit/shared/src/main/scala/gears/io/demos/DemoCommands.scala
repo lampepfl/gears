@@ -1,16 +1,20 @@
 package gears.io.demos
 
+import gears.async.Async
 import gears.async.io.Backend
 import gears.async.io.Blocking
 import gears.async.io.Fifos
-import gears.async.io.IpAddress
+import gears.async.io.Io
 import gears.async.io.IpDatagrams
+import gears.async.io.IpSocketAddress
 import gears.async.io.IpStreams
 import gears.async.io.Pipes
+import gears.async.io.Protocol
 import gears.async.io.Resolving
 import gears.async.io.UnixAddress
 import gears.async.io.UnixDatagrams
 import gears.async.io.UnixStreams
+import gears.io.testkit.SimpleIO
 
 import scala.concurrent.duration.*
 
@@ -77,19 +81,19 @@ class DemoCommands(backends: DemoBackends) {
   }
   @main(name = "sock4-serve")
   def sock4Serve(@arg host: String = "127.0.0.1", @arg port: Int = 9999, choice: BackendChoice): Unit = {
-    streams(choice).run(GearsServerSocket.run(IpAddress.IPv4(host, port)))
+    ipStreams(choice).run(GearsServerSocket.run(ipAddress(host, port, Protocol.IPv4)))
   }
   @main(name = "sock4")
   def sock4(@arg host: String = "127.0.0.1", @arg port: Int = 9999, choice: BackendChoice): Unit = {
-    streams(choice).run(GearsSocket.run(IpAddress.IPv4(host, port)))
+    ipStreams(choice).run(GearsSocket.run(ipAddress(host, port, Protocol.IPv4)))
   }
   @main(name = "sock6-serve")
   def sock6Serve(@arg host: String = "::1", @arg port: Int = 9999, choice: BackendChoice): Unit = {
-    streams(choice).run(GearsServerSocket.run(IpAddress.IPv6(host, port)))
+    ipStreams(choice).run(GearsServerSocket.run(ipAddress(host, port, Protocol.IPv6)))
   }
   @main(name = "sock6")
   def sock6(@arg host: String = "::1", @arg port: Int = 9999, choice: BackendChoice): Unit = {
-    streams(choice).run(GearsSocket.run(IpAddress.IPv6(host, port)))
+    ipStreams(choice).run(GearsSocket.run(ipAddress(host, port, Protocol.IPv6)))
   }
   @main
   def kvServe(@arg sock: String, choice: BackendChoice): Unit = {
@@ -101,7 +105,7 @@ class DemoCommands(backends: DemoBackends) {
   }
   @main(name = "kv4-serve")
   def kv4Serve(@arg host: String = "127.0.0.1", @arg port: Int = 9999, choice: BackendChoice): Unit = {
-    streams(choice).run(GearsKeyValue.serve(IpAddress.IPv4(host, port)))
+    ipStreams(choice).run(GearsKeyValue.serve(ipAddress(host, port, Protocol.IPv4)))
   }
   @main(name = "kv4")
   def kv4(
@@ -110,15 +114,15 @@ class DemoCommands(backends: DemoBackends) {
       @arg count: Int = 1000,
       choice: BackendChoice
   ): Unit = {
-    streams(choice).run(GearsKeyValue.run(IpAddress.IPv4(host, port), count))
+    ipStreams(choice).run(GearsKeyValue.run(ipAddress(host, port, Protocol.IPv4), count))
   }
   @main(name = "kv6-serve")
   def kv6Serve(@arg host: String = "::1", @arg port: Int = 9999, choice: BackendChoice): Unit = {
-    streams(choice).run(GearsKeyValue.serve(IpAddress.IPv6(host, port)))
+    ipStreams(choice).run(GearsKeyValue.serve(ipAddress(host, port, Protocol.IPv6)))
   }
   @main(name = "kv6")
   def kv6(@arg host: String = "::1", @arg port: Int = 9999, @arg count: Int = 1000, choice: BackendChoice): Unit = {
-    streams(choice).run(GearsKeyValue.run(IpAddress.IPv6(host, port), count))
+    ipStreams(choice).run(GearsKeyValue.run(ipAddress(host, port, Protocol.IPv6), count))
   }
   @main
   def datagramServe(@arg sock: String, choice: BackendChoice): Unit = {
@@ -139,7 +143,7 @@ class DemoCommands(backends: DemoBackends) {
   }
   @main(name = "datagram4-serve")
   def datagram4Serve(@arg host: String = "127.0.0.1", @arg port: Int = 9999, choice: BackendChoice): Unit = {
-    ipDatagrams(choice).run(GearsDatagram.serve(IpAddress.IPv4(host, port)))
+    ipDatagrams(choice).run(GearsDatagram.serve(ipAddress(host, port, Protocol.IPv4)))
   }
   @main(name = "datagram4")
   def datagram4(
@@ -148,11 +152,11 @@ class DemoCommands(backends: DemoBackends) {
       @arg(short = 'm') message: String = "Hello from the gears datagram demo!",
       choice: BackendChoice
   ): Unit = {
-    ipDatagrams(choice).run(GearsDatagram.run(IpAddress.IPv4(host, port), message))
+    ipDatagrams(choice).run(GearsDatagram.run(ipAddress(host, port, Protocol.IPv4), message))
   }
   @main(name = "datagram6-serve")
   def datagram6Serve(@arg host: String = "::1", @arg port: Int = 9999, choice: BackendChoice): Unit = {
-    ipDatagrams(choice).run(GearsDatagram.serve(IpAddress.IPv6(host, port)))
+    ipDatagrams(choice).run(GearsDatagram.serve(ipAddress(host, port, Protocol.IPv6)))
   }
   @main(name = "datagram6")
   def datagram6(
@@ -161,7 +165,7 @@ class DemoCommands(backends: DemoBackends) {
       @arg(short = 'm') message: String = "Hello from the gears datagram demo!",
       choice: BackendChoice
   ): Unit = {
-    ipDatagrams(choice).run(GearsDatagram.run(IpAddress.IPv6(host, port), message))
+    ipDatagrams(choice).run(GearsDatagram.run(ipAddress(host, port, Protocol.IPv6), message))
   }
   @main
   def whois(
@@ -186,8 +190,26 @@ class DemoCommands(backends: DemoBackends) {
     backends.needing(choice.backend, "name resolution") { case b: Resolving => b }.run(GearsWhois.resolve(host))
   }
 
-  private def ipDatagrams(choice: BackendChoice): DemoRunner[IpDatagrams] =
-    backends.needing(choice.backend, "IP datagram sockets") { case b: IpDatagrams => b }
+  private def ipDatagrams(choice: BackendChoice): DemoRunner[IpDatagrams & Resolving] =
+    backends.needing(choice.backend, "IP datagram sockets and name resolution") { case b: (IpDatagrams & Resolving) =>
+      b
+    }
+
+  private def ipStreams(choice: BackendChoice): DemoRunner[UnixStreams & IpStreams & Resolving] =
+    backends.needing(choice.backend, "Unix and IP stream sockets and name resolution") {
+      case b: (UnixStreams & IpStreams & Resolving) => b
+    }
+
+  /** Converts command-line host text at the boundary; socket operations take address values. */
+  private def ipAddress(host: String, port: Int, protocol: Protocol)(using
+      io: Io[Resolving],
+      async: Async
+  ): IpSocketAddress = {
+    val address = SimpleIO.resolve(host).find(_.protocol == protocol).getOrElse {
+      throw new java.io.IOException(s"No $protocol address for $host")
+    }
+    IpSocketAddress(address, port)
+  }
 
   /** Runs the command `args` names. */
   def main(args: Array[String]): Unit = {
