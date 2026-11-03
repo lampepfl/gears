@@ -15,7 +15,7 @@ it. Futures, groups, `sleep` and `withTimeout` work as anywhere in gears, `sleep
    `IpDatagramContract`, `UnixStreamContract`, `FileContract` and the rest) what each capability adds;
    `FuturesContract` checks programs of several futures.
 3. **The reference backend**, `io-reference/`: the semantics on the JDK's channels, over a plain selector poll.
-4. **The higher level**, `gears.io.higherlevel` in `io-testkit/`: an API with result-returning openers and streams,
+4. **SimpleIO**, `gears.io.testkit.SimpleIO` in `io-testkit/`: an API with result-returning openers and streams,
    written over the public interface alone, which shows what the interface is for.
 
 ## Layout
@@ -23,7 +23,7 @@ it. Futures, groups, `sleep` and `withTimeout` work as anywhere in gears, `sleep
 | where | holds | depends on |
 | --- | --- | --- |
 | `gears.async.io` (core, `shared/`) | the interface: `Io` and `Io.run`, `Backend` and its capabilities, `Ops`, `Slot`, addresses, socket options, `Deadline`, `BufferPool` | the rest of gears |
-| `ioTestkit` (`io-testkit/`, JVM, Scala Native and Scala.js) | the contract suites, `BufferArena`, `higherlevel` (`gears.io.higherlevel`) with `HigherLevelChecks`, and the gears demos (`gears.io.demos`) with their command line, `DemoCommands` | core, munit, mainargs |
+| `ioTestkit` (`io-testkit/`, JVM, Scala Native and Scala.js) | the contract suites and `BufferArena` (`gears.async.io.testkit`), `SimpleIO` with `SimpleIOChecks` (`gears.io.testkit`), and the gears demos (`gears.io.demos`) with their command line, `DemoCommands` | core, munit, mainargs |
 | `ioReference` (`io-reference/`, JVM) | the reference backend, `gears.async.io.reference.ReferenceBackend`, and its suites | core, the testkit's contracts |
 | `ioReferenceDemos` (`io-reference/demos/`) | the demos over the reference backend: `ioReferenceDemos/run <command>` | the reference backend, the testkit |
 
@@ -106,19 +106,19 @@ waited for on one selector that one thread polls, then tried again. Timers park 
 by the caller; blocking code and name lookups run on threads of their own. Nothing is tuned for speed: it is what the
 contracts are checked against, and the plainest way to read the semantics as code.
 
-## The higher level and the demos
+## SimpleIO and the demos
 
-`higherlevel`, in `ioTestkit`, is written over the public interface alone, in a package outside `gears.async`
-(`gears.io.higherlevel`, the demos beside it in `gears.io.demos`), so that it sees only what a program sees. It has
+`SimpleIO`, in `gears.io.testkit`, is written over the public interface alone. Its package and the demos' package,
+`gears.io.demos`, are outside `gears.async`, so they see only what a program sees. `SimpleIO` has
 result-returning openers, `read`, `writeAll`, `accept`, `resolve`, `closeGracefully`, and `chunks`, a stream over one
 repeatable pooled read consumed as a gears channel, with the pool's window and the channel's backlog as back-pressure.
-`HigherLevelChecks` runs it over every backend. Each demo takes the `Io` it runs with, over the capabilities it needs,
+`SimpleIOChecks` runs it over every backend. Each demo takes the `Io` it runs with, over the capabilities it needs,
 and its `Async`, and only a backend's demo application starts a run: `ioReferenceDemos/run <command>`.
 
 ## Running the suites
 
 ```
-sbt ioReference/test        # the contracts, the futures contract and the higher level over the reference backend
+sbt ioReference/test        # the contracts, the futures contract and SimpleIO over the reference backend
 sbt ioTestkitJVM/test       # the testkit's own tests
 sbt 'ioTestkitNative/compile; ioTestkitJS/compile'
 ```

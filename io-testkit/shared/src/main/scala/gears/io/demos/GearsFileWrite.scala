@@ -4,7 +4,7 @@ import gears.async.Async
 import gears.async.io.Fifos
 import gears.async.io.Io
 import gears.async.io.testkit.BufferArena
-import gears.io.higherlevel.HigherLevel
+import gears.io.testkit.SimpleIO
 
 import java.nio.charset.StandardCharsets
 
@@ -15,7 +15,7 @@ object GearsFileWrite {
       val bytes = message.getBytes(StandardCharsets.UTF_8)
       val buf = arena.allocate(math.max(bytes.length, 1))
       println(s"attempt to open file $fifo")
-      val file = HigherLevel.openFifoForWriting(fifo)
+      val file = SimpleIO.openFifoForWriting(fifo)
       try {
         println(s"opened file: $file")
         println("Event registered for file write.")

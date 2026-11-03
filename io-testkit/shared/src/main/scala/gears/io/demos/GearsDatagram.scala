@@ -10,7 +10,7 @@ import gears.async.io.Slot
 import gears.async.io.UnixAddress
 import gears.async.io.UnixDatagrams
 import gears.async.io.testkit.BufferArena
-import gears.io.higherlevel.HigherLevel
+import gears.io.testkit.SimpleIO
 
 import java.io.IOException
 import java.nio.ByteBuffer
@@ -30,7 +30,7 @@ object GearsDatagram {
     BufferArena.scoped { arena =>
       val request = arena.of(message.getBytes(StandardCharsets.UTF_8))
       val response = arena.allocate(65536)
-      val socket = HigherLevel.connectDatagram(UnixAddress(localSock), UnixAddress(sock))
+      val socket = SimpleIO.connectDatagram(UnixAddress(localSock), UnixAddress(sock))
       val ops = io.backend.ops
       val receive = ops.receive(socket, response)
       try exchange(io, sock, ops.send(socket, request), receive, request, response)
@@ -43,7 +43,7 @@ object GearsDatagram {
     BufferArena.scoped { arena =>
       val request = arena.of(message.getBytes(StandardCharsets.UTF_8))
       val response = arena.allocate(65536)
-      val socket = HigherLevel.connectDatagram(null, address)
+      val socket = SimpleIO.connectDatagram(null, address)
       val ops = io.backend.ops
       val receive = ops.receive(socket, response)
       try exchange(io, address, ops.send(socket, request), receive, request, response)
@@ -85,7 +85,7 @@ object GearsDatagram {
   def serve(address: UnixAddress)(using io: Io[UnixDatagrams], async: Async): Unit =
     BufferArena.scoped { arena =>
       val packet = arena.allocate(65536)
-      val socket = HigherLevel.bindDatagram(address)
+      val socket = SimpleIO.bindDatagram(address)
       val sender = Slot[UnixAddress]() // each packet's sender, written alongside the packet itself
       val ops = io.backend.ops
       try echo(io, ops.receive(socket, packet, sender), packet, () => ops.send(socket, packet, sender.clear()))
@@ -96,7 +96,7 @@ object GearsDatagram {
   def serve(address: IpAddress)(using io: Io[IpDatagrams], async: Async): Unit =
     BufferArena.scoped { arena =>
       val packet = arena.allocate(65536)
-      val socket = HigherLevel.bindDatagram(address)
+      val socket = SimpleIO.bindDatagram(address)
       val sender = Slot[IpAddress]()
       val ops = io.backend.ops
       try echo(io, ops.receive(socket, packet, sender), packet, () => ops.send(socket, packet, sender.clear()))

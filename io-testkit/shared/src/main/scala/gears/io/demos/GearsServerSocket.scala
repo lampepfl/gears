@@ -8,7 +8,7 @@ import gears.async.io.StreamSockets
 import gears.async.io.UnixAddress
 import gears.async.io.UnixStreams
 import gears.async.io.testkit.BufferArena
-import gears.io.higherlevel.HigherLevel
+import gears.io.testkit.SimpleIO
 
 import java.io.EOFException
 import java.io.IOException
@@ -50,7 +50,7 @@ object GearsServerSocket {
         // One misbehaving client must not take the server down.
         println(s"Client socket $client failed: ${e.getMessage}")
     } finally
-      try HigherLevel.closeGracefully(using io)(client, arena.allocate(256))
+      try SimpleIO.closeGracefully(using io)(client, arena.allocate(256))
       finally arena.close()
   }
 

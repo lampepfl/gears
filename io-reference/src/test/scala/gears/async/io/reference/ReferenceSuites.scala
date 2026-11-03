@@ -9,7 +9,7 @@ import gears.async.io.testkit.OpsContract
 import gears.async.io.testkit.ResolveContract
 import gears.async.io.testkit.SocketContract
 import gears.async.io.testkit.UnixStreamContract
-import gears.io.higherlevel.HigherLevelChecks
+import gears.io.testkit.SimpleIOChecks
 
 /** The contracts of every capability the reference backend has. */
 class ReferenceContractSuite
@@ -27,6 +27,6 @@ class ReferenceFuturesSuite extends FuturesContract {
   val backend: ReferenceBackend.type = ReferenceBackend
 }
 
-class ReferenceHigherLevelSuite extends HigherLevelChecks {
+class ReferenceSimpleIOSuite extends SimpleIOChecks {
   val backend: ReferenceBackend.type = ReferenceBackend
 }

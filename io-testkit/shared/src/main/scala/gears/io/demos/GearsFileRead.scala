@@ -4,7 +4,7 @@ import gears.async.Async
 import gears.async.io.Fifos
 import gears.async.io.Io
 import gears.async.io.testkit.BufferArena
-import gears.io.higherlevel.HigherLevel
+import gears.io.testkit.SimpleIO
 
 import java.io.ByteArrayOutputStream
 import java.nio.charset.StandardCharsets
@@ -20,7 +20,7 @@ object GearsFileRead {
       val chunk = arena.allocate(1024)
       val contents = new ByteArrayOutputStream()
       println(s"attempt to open file $fifo")
-      val file = HigherLevel.openFifoForReading(fifo)
+      val file = SimpleIO.openFifoForReading(fifo)
       try {
         println(s"opened file: $file")
         // One repeatable op, performed again for each chunk; a read that adds nothing is the writer's end.

@@ -7,7 +7,7 @@ import gears.async.io.StreamSockets
 import gears.async.io.UnixAddress
 import gears.async.io.UnixStreams
 import gears.async.io.testkit.BufferArena
-import gears.io.higherlevel.HigherLevel
+import gears.io.testkit.SimpleIO
 
 import java.io.IOException
 
@@ -34,7 +34,7 @@ object GearsSocket {
           io.perform(write)
           println(s"Wrote ${buf.position() - before} bytes to socket.")
         }
-        HigherLevel.shutdownOutput(socket) // the request ends here, and the server's reply follows to its end
+        SimpleIO.shutdownOutput(socket) // the request ends here, and the server's reply follows to its end
         // The response, read exactly: its header, then its body, through the same buffer.
         val read = io.backend.ops.read(socket, buf)
         val reader = new FrameReader(buf)
