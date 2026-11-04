@@ -64,7 +64,8 @@ trait IpStreamContract extends ContractSuite {
 
   test("an IPv4 stream socket accepts, connects and echoes") {
     running { io ?=>
-      val (listener, port) = onFreePort(port => tcpListen(io, IpSocketAddress(IpAddress.IPv4Loopback, port)))
+      val listener = tcpListen(io, IpSocketAddress(IpAddress.IPv4Loopback, 0))
+      val port = io.backend.ops.localAddress(listener).asInstanceOf[IpSocketAddress].port
       try {
         val (client, server) = tcpPair(io, listener, port)
         try {
@@ -86,7 +87,8 @@ trait IpStreamContract extends ContractSuite {
 
   test("a stream shut down for writing sends what was written, then its end, and still reads") {
     running { io ?=>
-      val (listener, port) = onFreePort(port => tcpListen(io, IpSocketAddress(IpAddress.IPv4Loopback, port)))
+      val listener = tcpListen(io, IpSocketAddress(IpAddress.IPv4Loopback, 0))
+      val port = io.backend.ops.localAddress(listener).asInstanceOf[IpSocketAddress].port
       try {
         val (client, server) = tcpPair(io, listener, port)
         try {
@@ -115,7 +117,8 @@ trait IpStreamContract extends ContractSuite {
     val pool = backend.pool(bufferSize = 64, buffers = 2)
     try
       running { io ?=>
-        val (listener, port) = onFreePort(port => tcpListen(io, IpSocketAddress(IpAddress.IPv4Loopback, port)))
+        val listener = tcpListen(io, IpSocketAddress(IpAddress.IPv4Loopback, 0))
+        val port = io.backend.ops.localAddress(listener).asInstanceOf[IpSocketAddress].port
         try {
           val (client, server) = tcpPair(io, listener, port)
           try {
@@ -142,7 +145,8 @@ trait IpStreamContract extends ContractSuite {
   private def withConnections(io: Io[backend.type], count: Int)(
       body: Seq[(backend.Connection, backend.Connection)] => Unit
   )(using Async.Spawn): Unit = {
-    val (listener, port) = onFreePort(port => tcpListen(io, IpSocketAddress(IpAddress.IPv4Loopback, port)))
+    val listener = tcpListen(io, IpSocketAddress(IpAddress.IPv4Loopback, 0))
+    val port = io.backend.ops.localAddress(listener).asInstanceOf[IpSocketAddress].port
     val pairs = scala.collection.mutable.ArrayBuffer.empty[(backend.Connection, backend.Connection)]
     try {
       for _ <- 1 to count do pairs += tcpPair(io, listener, port)
@@ -266,7 +270,8 @@ trait IpStreamContract extends ContractSuite {
 
   test("closing a connection whose peer stopped reading completes at once, though bytes written have not gone") {
     running { io ?=>
-      val (listener, port) = onFreePort(port => tcpListen(io, IpSocketAddress(IpAddress.IPv4Loopback, port)))
+      val listener = tcpListen(io, IpSocketAddress(IpAddress.IPv4Loopback, 0))
+      val port = io.backend.ops.localAddress(listener).asInstanceOf[IpSocketAddress].port
       try {
         val (client, server) = tcpPair(io, listener, port)
         try {
@@ -292,7 +297,8 @@ trait IpStreamContract extends ContractSuite {
 
   test("a listener listens once its listen op completes, and accepts") {
     running { io ?=>
-      val (listener, port) = onFreePort(port => tcpListen(io, IpSocketAddress(IpAddress.IPv4Loopback, port)))
+      val listener = tcpListen(io, IpSocketAddress(IpAddress.IPv4Loopback, 0))
+      val port = io.backend.ops.localAddress(listener).asInstanceOf[IpSocketAddress].port
       try {
         val (client, server) = tcpPair(io, listener, port)
         close(io, server)
@@ -303,7 +309,8 @@ trait IpStreamContract extends ContractSuite {
 
   test("listening on an address in use fails the listen op, leaving its slot empty") {
     running { io ?=>
-      val (taken, port) = onFreePort(port => tcpListen(io, IpSocketAddress(IpAddress.IPv4Loopback, port)))
+      val taken = tcpListen(io, IpSocketAddress(IpAddress.IPv4Loopback, 0))
+      val port = io.backend.ops.localAddress(taken).asInstanceOf[IpSocketAddress].port
       try {
         val into = Slot[backend.Listener]()
         val failure = attempt(io, io.backend.ops.listen(IpSocketAddress(IpAddress.IPv4Loopback, port), into))
@@ -315,7 +322,8 @@ trait IpStreamContract extends ContractSuite {
 
   test("acceptAll takes the pending connections, at most max at a time, until each is accepted") {
     running { io ?=>
-      val (listener, port) = onFreePort(port => tcpListen(io, IpSocketAddress(IpAddress.IPv4Loopback, port)))
+      val listener = tcpListen(io, IpSocketAddress(IpAddress.IPv4Loopback, 0))
+      val port = io.backend.ops.localAddress(listener).asInstanceOf[IpSocketAddress].port
       try {
         // Connected before any accept: they wait in the listener's queue.
         val clients = (1 to 3).map(_ => tcpConnect(io, IpSocketAddress(IpAddress.IPv4Loopback, port)))
@@ -337,7 +345,8 @@ trait IpStreamContract extends ContractSuite {
 
   test("a connect to a port nothing listens on fails, leaving its slot empty") {
     running { io ?=>
-      val (listener, port) = onFreePort(port => tcpListen(io, IpSocketAddress(IpAddress.IPv4Loopback, port)))
+      val listener = tcpListen(io, IpSocketAddress(IpAddress.IPv4Loopback, 0))
+      val port = io.backend.ops.localAddress(listener).asInstanceOf[IpSocketAddress].port
       close(io, listener)
       val into = Slot[backend.Connection]()
       val failure = attempt(io, io.backend.ops.connect(IpSocketAddress(IpAddress.IPv4Loopback, port), into))
@@ -348,7 +357,8 @@ trait IpStreamContract extends ContractSuite {
 
   test("a port whose connection lingers in TIME_WAIT can be listened on again at once") {
     running { io ?=>
-      val (listener, port) = onFreePort(port => tcpListen(io, IpSocketAddress(IpAddress.IPv4Loopback, port)))
+      val listener = tcpListen(io, IpSocketAddress(IpAddress.IPv4Loopback, 0))
+      val port = io.backend.ops.localAddress(listener).asInstanceOf[IpSocketAddress].port
       val (client, server) = tcpPair(io, listener, port)
       close(io, server) // the server's side closes first, so its end of the connection is left in TIME_WAIT
       val buf = allocate(8)
@@ -361,7 +371,7 @@ trait IpStreamContract extends ContractSuite {
 
   test("an accept on a closed listener fails, as does one waiting when it is closed") {
     running { io ?=>
-      val (listener, _) = onFreePort(port => tcpListen(io, IpSocketAddress(IpAddress.IPv4Loopback, port)))
+      val listener = tcpListen(io, IpSocketAddress(IpAddress.IPv4Loopback, 0))
       val waiting = Future(io.perform(io.backend.ops.accept(listener, Slot[backend.Connection]())))
       io.perform(io.backend.ops.timer(20)) // for the accept to be waiting
       close(io, listener)
@@ -374,7 +384,8 @@ trait IpStreamContract extends ContractSuite {
 
   test("a closed listener's port can be listened on again once its close op completes") {
     running { io ?=>
-      val (first, port) = onFreePort(port => tcpListen(io, IpSocketAddress(IpAddress.IPv4Loopback, port)))
+      val first = tcpListen(io, IpSocketAddress(IpAddress.IPv4Loopback, 0))
+      val port = io.backend.ops.localAddress(first).asInstanceOf[IpSocketAddress].port
       assertEquals(attempt(io, io.backend.ops.close(first)), null)
       close(io, tcpListen(io, IpSocketAddress(IpAddress.IPv4Loopback, port)))
     }
@@ -382,7 +393,8 @@ trait IpStreamContract extends ContractSuite {
 
   test("a close op on a connection ends its peer's stream") {
     running { io ?=>
-      val (listener, port) = onFreePort(port => tcpListen(io, IpSocketAddress(IpAddress.IPv4Loopback, port)))
+      val listener = tcpListen(io, IpSocketAddress(IpAddress.IPv4Loopback, 0))
+      val port = io.backend.ops.localAddress(listener).asInstanceOf[IpSocketAddress].port
       try {
         val (client, server) = tcpPair(io, listener, port)
         try {
@@ -592,7 +604,8 @@ trait IpStreamContract extends ContractSuite {
 
   test("accepts pending at once on a listener take turns, from any future, each its own connection") {
     running { io ?=>
-      val (listener, port) = onFreePort(port => tcpListen(io, IpSocketAddress(IpAddress.IPv4Loopback, port)))
+      val listener = tcpListen(io, IpSocketAddress(IpAddress.IPv4Loopback, 0))
+      val port = io.backend.ops.localAddress(listener).asInstanceOf[IpSocketAddress].port
       try {
         val accepts = List.fill(3) {
           val into = Slot[backend.Connection]()
@@ -606,6 +619,49 @@ trait IpStreamContract extends ContractSuite {
         assertEquals(accepted.distinct.size, 3, "each accept took its own connection")
         for connection <- accepted ++ clients do close(io, connection)
       } finally close(io, listener)
+    }
+  }
+
+  test(
+    "an IPv6 listener on :: accepts an IPv4 client"
+  ) {
+    running { io ?=>
+      val listener = tcpListen(io, IpSocketAddress(IpAddress.IPv6Any, 0))
+      val port = io.backend.ops.localAddress(listener).asInstanceOf[IpSocketAddress].port
+      try {
+        val accepted = Slot[backend.Connection]()
+        val accepting = Future(opening(io, accepted, io.backend.ops.accept(listener, accepted)))
+        val into = Slot[backend.Connection]()
+        val client = opening(io, into, io.backend.ops.connect(IpSocketAddress(IpAddress.IPv4Loopback, port), into))
+        close(io, client)
+        close(io, accepting.await)
+      } finally close(io, listener)
+
+    }
+  }
+
+  test("connect, listen and shutdownOutput are one-shot: performed again, they throw IllegalStateException") {
+    running { io ?=>
+      val into = Slot[backend.Listener]()
+      val listening = io.backend.ops.listen(IpSocketAddress(IpAddress.IPv4Loopback, 0), into)
+      assertEquals(attempt(io, listening), null)
+      val listener = into.clear()
+      val address = io.backend.ops.localAddress(listener).asInstanceOf[IpSocketAddress]
+      intercept[IllegalStateException](io.perform(listening))
+      val accepted = Slot[backend.Connection]()
+      val accepting = Future(io.perform(io.backend.ops.accept(listener, accepted)))
+      val connected = Slot[backend.Connection]()
+      val connecting = io.backend.ops.connect(address, connected)
+      assertEquals(attempt(io, connecting), null)
+      intercept[IllegalStateException](io.perform(connecting))
+      val client = connected.clear()
+      val shutting = io.backend.ops.shutdownOutput(client)
+      assertEquals(attempt(io, shutting), null)
+      intercept[IllegalStateException](io.perform(shutting))
+      close(io, client)
+      accepting.await
+      close(io, accepted.clear())
+      close(io, listener)
     }
   }
 }

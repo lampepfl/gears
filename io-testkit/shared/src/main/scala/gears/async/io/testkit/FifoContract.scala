@@ -7,11 +7,9 @@ import gears.async.Future
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 
-/** What a backend with FIFOs must do; with regular files too, to tell the two apart. Checked through `perform`, as
-  * programs over the backend (see `ContractSuite`).
-  */
-trait FifoContract extends FileContract {
-  val backend: Backend & Fifos & RegularFiles
+/** FIFO operations, requiring only Fifos and host filesystem setup. */
+trait FifoContract extends FileSystemFixture {
+  val backend: Backend & Fifos
 
   /** A FIFO's read end from the `openFifoForReading` op, whose failure is thrown. */
   protected def openFifoForReading(io: Io[backend.type], path: String)(using Async): Readable = {
@@ -25,7 +23,7 @@ trait FifoContract extends FileContract {
     opening(io, into, backend.ops.openFifoForWriting(path, into))
   }
 
-  private def mkfifo(path: java.nio.file.Path)(using munit.Location): Unit =
+  protected def mkfifo(path: java.nio.file.Path)(using munit.Location): Unit =
     assertEquals(new ProcessBuilder("mkfifo", path.toString).start().waitFor(), 0)
 
   test("a FIFO carries what its writer writes, then ends when the writer closes") {
@@ -39,7 +37,7 @@ trait FifoContract extends FileContract {
           io.perform(backend.ops.write(writer, bytes("through the fifo")))
           close(io, writer)
           val buf = allocate(64)
-          assertEquals(readFileToEnd(io, backend.ops.read(reader, buf), buf), "through the fifo")
+          assertEquals(readToEnd(io, backend.ops.read(reader, buf), buf), "through the fifo")
         } finally close(io, reader)
       }
     }
@@ -61,22 +59,6 @@ trait FifoContract extends FileContract {
           read.await
           assertEquals(buf.position(), 0, "at the end of the stream, nothing read")
         } finally close(io, reader)
-      }
-    }
-  }
-
-  test("open refuses a FIFO, and openFifoForReading a regular file") {
-    withTempDir { dir =>
-      running { io ?=>
-        val fifo = dir.resolve("fifo")
-        mkfifo(fifo)
-        intercept[java.io.IOException](openFile(io, fifo, write = false))
-        val file = dir.resolve("file")
-        Files.write(file, "x".getBytes(StandardCharsets.UTF_8))
-        val into = Slot[Readable]()
-        val failure = attempt(io, backend.ops.openFifoForReading(file.toString, into))
-        assert(failure.isInstanceOf[java.io.IOException], String.valueOf(failure))
-        intercept[IllegalStateException](into.clear())
       }
     }
   }

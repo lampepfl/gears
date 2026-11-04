@@ -3,12 +3,11 @@ package testkit
 
 import gears.async.Async
 import gears.async.AsyncOperations
+import gears.async.Future
 
 import java.io.IOException
 import java.nio.ByteBuffer
 import java.nio.charset.StandardCharsets
-import java.nio.file.Files
-import java.nio.file.Path
 
 import munit.FunSuite
 
@@ -42,13 +41,18 @@ trait ContractSuite extends FunSuite {
     super.test(if knownFailures(options.name) then options.fail else options)(body)
 
   // The buffers of every check, which its futures share across threads.
-  protected lazy val arena: BufferArena = BufferArena.open()
+  private var openedArena: BufferArena | Null = null
+
+  protected def arena: BufferArena = synchronized {
+    if openedArena == null then openedArena = BufferArena.open()
+    openedArena.nn
+  }
 
   /** A buffer of `capacity` bytes that the backend's ops can fill and drain, live until the suite ends. */
   protected def allocate(capacity: Int): ByteBuffer = arena.allocate(capacity)
 
   override def afterAll(): Unit = {
-    arena.close()
+    if openedArena != null then openedArena.nn.close()
     super.afterAll()
   }
 
@@ -69,21 +73,22 @@ trait ContractSuite extends FunSuite {
   protected def close(io: Io[backend.type], handle: Handle)(using Async): Unit =
     io.perform(io.backend.ops.close(handle))
 
-  /** Opens something on a free port: no interface tells which port is free, so it tries a few. */
-  protected def onFreePort[K](open: Int => K): (K, Int) = {
-    val random = new java.util.Random()
-    var attempts = 0
-    var result: (K, Int) | Null = null
-    while result == null do {
-      val port = 20000 + random.nextInt(30000)
-      try result = (open(port), port)
-      catch {
-        case e: IOException =>
-          attempts += 1
-          if attempts > 10 then throw e
-      }
+  /** Gives a future just started the time to perform its op and wait in it. */
+  protected def settle(io: Io[backend.type])(using Async): Unit = io.perform(io.backend.ops.timer(30))
+
+  /** The failure `future` ended with, or null if it completed. */
+  protected def failureOf(future: Future[?])(using Async): Throwable | Null =
+    future.awaitResult.failed.toOption.orNull
+
+  /** Performs `read` until it completes without adding bytes, returning what `buf` then holds. */
+  protected def readToEnd(io: Io[backend.type], read: io.Op, buf: ByteBuffer)(using Async): String = {
+    var atEnd = false
+    while !atEnd do {
+      val before = buf.position()
+      io.perform(read)
+      atEnd = buf.position() == before
     }
-    result
+    text(buf)
   }
 
   /** A buffer holding `text`, flipped and ready to drain. */
@@ -102,16 +107,4 @@ trait ContractSuite extends FunSuite {
     new String(out, StandardCharsets.UTF_8)
   }
 
-  /** Runs `body` with a temporary directory, deleted with what is in it once `body` returns. */
-  protected def withTempDir[T](body: Path => T): T = {
-    val dir = Files.createTempDirectory("gears-io")
-    try body(dir)
-    finally
-      if Files.exists(dir) then {
-        val entries = Files.list(dir)
-        try entries.forEach(Files.deleteIfExists(_): Unit)
-        finally entries.close()
-        Files.deleteIfExists(dir): Unit
-      }
-  }
 }

@@ -17,7 +17,7 @@ import scala.util.Success
 /** What a backend with regular files must do: opened by the `open` op, read as a stream, and read, written and synced
   * at offsets; checked through `perform`, as programs over the backend (see `ContractSuite`).
   */
-trait FileContract extends ContractSuite {
+trait FileContract extends FileSystemFixture {
   val backend: Backend & RegularFiles
 
   /** Opens the file at `path` with the `open` op, throwing its failure. */

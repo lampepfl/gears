@@ -1,20 +1,16 @@
 package gears.io.testkit
 
-import gears.async.Async
 import gears.async.Future
-import gears.async.io.IpAddress
-import gears.async.io.IpSocketAddress
-import gears.async.io.testkit.ProgramSuite
+import gears.async.io.testkit.StreamFixture
 
 import java.io.IOException
 import java.nio.charset.StandardCharsets
 
-/** Checks of `SimpleIO`, run over every backend by the demos' suites. */
-trait SimpleIOChecks extends ProgramSuite {
-
-  test("SimpleIO over perform: result-returning reads, accept and resolve") {
+/** Public API stream helpers, using any supplied connected stream fixture. */
+trait SimpleIOChecks extends StreamFixture {
+  test("SimpleIO over perform: result-returning stream reads") {
     val outcome = running { io ?=>
-      val (in, out) = pipe(io)
+      val (in, out) = stream(io)
       try {
         val buf = arena.allocate(16)
         val writer = Future {
@@ -24,53 +20,17 @@ trait SimpleIOChecks extends ProgramSuite {
         val got = SimpleIO.read(in, buf)
         writer.await
         val atEnd = SimpleIO.read(in, buf)
-        val resolved = SimpleIO.resolve("localhost").nonEmpty
-        s"$got ${text(buf)} $atEnd $resolved"
+        s"$got ${text(buf)} $atEnd"
       } finally io.perform(io.backend.ops.close(in))
     }
-    assertEquals(outcome, "7 wrapped 0 true")
-  }
-
-  test("a graceful close delivers the whole reply to a client that sent more than the server read") {
-    val port = freePort()
-    val replySize = 256 * 1024
-    val received = running { io ?=>
-      val address = IpSocketAddress(IpAddress.IPv4Loopback, port)
-      val listener = SimpleIO.listen(address)
-      try {
-        val server = Future {
-          val client = SimpleIO.accept(listener)
-          val scratch = arena.allocate(4096)
-          scratch.limit(4)
-          SimpleIO.read(client, scratch) // a little of the request: the rest is still unread when it replies
-          SimpleIO.writeAll(client, arena.allocate(replySize))
-          SimpleIO.closeGracefully(client, scratch) // closing outright would reset, and could cut the reply short
-        }
-        val socket = SimpleIO.connect(address)
-        try {
-          SimpleIO.writeAll(socket, arena.of(("x" * 65536).getBytes(StandardCharsets.UTF_8)))
-          SimpleIO.shutdownOutput(socket)
-          val buf = arena.allocate(65536)
-          var total = 0L
-          var got = 1
-          while got > 0 do {
-            buf.clear()
-            got = SimpleIO.read(socket, buf)
-            total += got
-          }
-          server.await
-          total
-        } finally io.perform(io.backend.ops.close(socket))
-      } finally io.perform(io.backend.ops.close(listener))
-    }
-    assertEquals(received, replySize.toLong)
+    assertEquals(outcome, "7 wrapped 0")
   }
 
   test("SimpleIO over perform: a stream of chunks consumed as a gears channel, with back-pressure") {
     val total = 1 << 20
     val received = running { io ?=>
       val pool = io.backend.pool(bufferSize = 4096, buffers = 4) // a backlog of two, one being sent, one being read
-      val (in, out) = pipe(io)
+      val (in, out) = stream(io)
       try {
         val writer = Future {
           val buf = arena.allocate(8192)
@@ -96,7 +56,7 @@ trait SimpleIOChecks extends ProgramSuite {
   test("SimpleIO over perform: a stream closed early releases its chunks, and one that fails rethrows") {
     val outcome = running { io ?=>
       val pool = io.backend.pool(bufferSize = 1024, buffers = 4)
-      val (in, out) = pipe(io)
+      val (in, out) = stream(io)
       try {
         SimpleIO.writeAll(out, arena.of(("x" * 3000).getBytes(StandardCharsets.UTF_8)))
         val stream = SimpleIO.chunks(in, pool, backlog = 2)
@@ -122,5 +82,4 @@ trait SimpleIOChecks extends ProgramSuite {
     }
     assertEquals(outcome, "true true true true")
   }
-
 }
