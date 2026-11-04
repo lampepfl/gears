@@ -36,7 +36,8 @@ trait IpDatagramContract extends ContractSuite {
 
   test("an IPv4 datagram goes to a bound socket, which learns its sender, and its reply to the connected client") {
     running { io ?=>
-      val (server, port) = onFreePort(port => bindDatagram(io, IpSocketAddress(IpAddress.IPv4Loopback, port)))
+      val server = bindDatagram(io, IpSocketAddress(IpAddress.IPv4Loopback, 0))
+      val port = io.backend.ops.localAddress(server).port
       try {
         val client = connectDatagram(io, null, IpSocketAddress(IpAddress.IPv4Loopback, port))
         try {
@@ -63,7 +64,8 @@ trait IpDatagramContract extends ContractSuite {
 
   test("datagram sends: never empty when connected, empty ones from a bound socket, and no lost packets") {
     running { io ?=>
-      val (server, port) = onFreePort(port => bindDatagram(io, IpSocketAddress(IpAddress.IPv4Loopback, port)))
+      val server = bindDatagram(io, IpSocketAddress(IpAddress.IPv4Loopback, 0))
+      val port = io.backend.ops.localAddress(server).port
       val serverAddress = IpSocketAddress(IpAddress.IPv4Loopback, port)
       try {
         val connected = connectDatagram(io, null, serverAddress)
@@ -100,8 +102,10 @@ trait IpDatagramContract extends ContractSuite {
 
   test("a bound socket sends to peers that have not sent first from its own port, on its own port 0 or not") {
     running { io ?=>
-      val (first, firstPort) = onFreePort(port => bindDatagram(io, IpSocketAddress(IpAddress.IPv4Loopback, port)))
-      val (second, secondPort) = onFreePort(port => bindDatagram(io, IpSocketAddress(IpAddress.IPv4Loopback, port)))
+      val first = bindDatagram(io, IpSocketAddress(IpAddress.IPv4Loopback, 0))
+      val firstPort = io.backend.ops.localAddress(first).port
+      val second = bindDatagram(io, IpSocketAddress(IpAddress.IPv4Loopback, 0))
+      val secondPort = io.backend.ops.localAddress(second).port
       try {
         def senderOf(to: backend.BoundDatagram)(using munit.Location): Int = {
           val from = Slot[IpSocketAddress]()
@@ -111,7 +115,11 @@ trait IpDatagramContract extends ContractSuite {
             case other => fail(s"unexpected sender $other")
           }
         }
-        val (fixed, fixedPort) = onFreePort(port => bindDatagram(io, IpSocketAddress(IpAddress.IPv4Loopback, port)))
+        val probe = bindDatagram(io, IpSocketAddress(IpAddress.IPv4Loopback, 0))
+        val fixedAddress = io.backend.ops.localAddress(probe)
+        close(io, probe)
+        val fixed = bindDatagram(io, fixedAddress)
+        val fixedPort = fixedAddress.port
         try {
           io.perform(backend.ops.send(fixed, bytes("one"), IpSocketAddress(IpAddress.IPv4Loopback, firstPort)))
           assertEquals(senderOf(first), fixedPort)
@@ -134,10 +142,12 @@ trait IpDatagramContract extends ContractSuite {
 
   test("a packet lost on a socket that is not connected fails no send, to its peer or another") {
     running { io ?=>
-      val (server, port) = onFreePort(port => bindDatagram(io, IpSocketAddress(IpAddress.IPv4Loopback, port)))
+      val server = bindDatagram(io, IpSocketAddress(IpAddress.IPv4Loopback, 0))
+      val port = io.backend.ops.localAddress(server).port
       try {
         // A port nothing listens on, which loopback answers with port unreachable.
-        val (gone, gonePort) = onFreePort(port => bindDatagram(io, IpSocketAddress(IpAddress.IPv4Loopback, port)))
+        val gone = bindDatagram(io, IpSocketAddress(IpAddress.IPv4Loopback, 0))
+        val gonePort = io.backend.ops.localAddress(gone).port
         close(io, gone)
         val nowhere = IpSocketAddress(IpAddress.IPv4Loopback, gonePort)
         val unconnected = bindDatagram(io, IpSocketAddress(IpAddress.IPv4Loopback, 0))
@@ -160,7 +170,8 @@ trait IpDatagramContract extends ContractSuite {
     "an IPv6 datagram reports its sender as an address value"
   ) {
     running { io ?=>
-      val (server, port) = onFreePort(port => bindDatagram(io, IpSocketAddress(IpAddress.IPv6Loopback, port)))
+      val server = bindDatagram(io, IpSocketAddress(IpAddress.IPv6Loopback, 0))
+      val port = io.backend.ops.localAddress(server).port
       try {
         val client = connectDatagram(io, null, IpSocketAddress(IpAddress.IPv6Loopback, port))
         try {
@@ -180,7 +191,8 @@ trait IpDatagramContract extends ContractSuite {
 
   test("a packet larger than the receive buffer fills it, the rest dropped, and the next packet arrives whole") {
     running { io ?=>
-      val (server, port) = onFreePort(port => bindDatagram(io, IpSocketAddress(IpAddress.IPv4Loopback, port)))
+      val server = bindDatagram(io, IpSocketAddress(IpAddress.IPv4Loopback, 0))
+      val port = io.backend.ops.localAddress(server).port
       try {
         val client = connectDatagram(io, null, IpSocketAddress(IpAddress.IPv4Loopback, port))
         try {
@@ -200,7 +212,8 @@ trait IpDatagramContract extends ContractSuite {
 
   test("datagrams not received are dropped once the socket's buffer is full, not queued without bound") {
     running { io ?=>
-      val (server, port) = onFreePort(port => bindDatagram(io, IpSocketAddress(IpAddress.IPv4Loopback, port)))
+      val server = bindDatagram(io, IpSocketAddress(IpAddress.IPv4Loopback, 0))
+      val port = io.backend.ops.localAddress(server).port
       try {
         val client = connectDatagram(io, null, IpSocketAddress(IpAddress.IPv4Loopback, port))
         try {
@@ -232,7 +245,8 @@ trait IpDatagramContract extends ContractSuite {
 
   test("a datagram socket's op completes once it is bound, and fails, leaving its slot empty, on an address in use") {
     running { io ?=>
-      val (server, port) = onFreePort(port => bindDatagram(io, IpSocketAddress(IpAddress.IPv4Loopback, port)))
+      val server = bindDatagram(io, IpSocketAddress(IpAddress.IPv4Loopback, 0))
+      val port = io.backend.ops.localAddress(server).port
       try {
         val into = Slot[backend.BoundDatagram]()
         val failure = attempt(io, backend.ops.bindDatagram(IpSocketAddress(IpAddress.IPv4Loopback, port), into))
@@ -507,6 +521,51 @@ trait IpDatagramContract extends ContractSuite {
         close(io, receiver)
         close(io, sender)
       }
+    }
+  }
+
+  test("a datagram socket refuses local and remote addresses of different families") {
+    val ops = backend.ops
+    intercept[IllegalArgumentException](
+      ops.connectDatagram(
+        IpSocketAddress(IpAddress.IPv4Loopback, 0),
+        IpSocketAddress(IpAddress.IPv6Loopback, 9),
+        Slot[backend.ConnectedDatagram]()
+      )
+    )
+  }
+
+  test("an IPv6 datagram socket on :: receives and replies to IPv4") {
+    running { io ?=>
+      val server = bindDatagram(io, IpSocketAddress(IpAddress.IPv6Any, 0))
+      val serverPort = io.backend.ops.localAddress(server).port
+      try {
+        val client = bindDatagram(io, IpSocketAddress(IpAddress.IPv4Loopback, 0))
+        try {
+          assertEquals(
+            attempt(io, io.backend.ops.send(client, bytes("v4"), IpSocketAddress(IpAddress.IPv4Loopback, serverPort))),
+            null
+          )
+          val from = Slot[IpSocketAddress]()
+          assertEquals(attempt(io, io.backend.ops.receive(server, allocate(16), from)), null)
+          val sender = from.clear()
+          assertEquals(sender.address, IpAddress.IPv4Loopback, "an IPv4 sender, not IPv4-mapped")
+          assertEquals(attempt(io, io.backend.ops.send(server, bytes("back"), sender)), null)
+          val buf = allocate(16)
+          assertEquals(attempt(io, io.backend.ops.receive(client, buf, Slot[IpSocketAddress]())), null)
+          assertEquals(StandardCharsets.UTF_8.decode(buf).toString, "back")
+        } finally close(io, client)
+      } finally close(io, server)
+    }
+  }
+
+  test("binding a datagram socket is one-shot") {
+    running { io ?=>
+      val bound = Slot[backend.BoundDatagram]()
+      val binding = io.backend.ops.bindDatagram(IpSocketAddress(IpAddress.IPv4Loopback, 0), bound)
+      assertEquals(attempt(io, binding), null)
+      intercept[IllegalStateException](io.perform(binding))
+      close(io, bound.clear())
     }
   }
 }

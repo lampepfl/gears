@@ -11,9 +11,9 @@ it. Futures, groups, `sleep` and `withTimeout` work as anywhere in gears, `sleep
    `Backend.scala` (backends and their capabilities), `Ops.scala` (every op and the rules they share),
    `SocketOptions.scala`, `Addresses.scala`, `Deadline.scala` and `BufferPool.scala`. All a program sees.
 2. **The contract suites**, in `io-testkit/`: what every backend must do, each check a program over the backend
-   through `perform`. `OpsContract` checks what every backend has; the capability contracts (`IpStreamContract`,
-   `IpDatagramContract`, `UnixStreamContract`, `FileContract` and the rest) what each capability adds;
-   `FuturesContract` checks programs of several futures.
+   through `perform`. `OpsContract` and `FuturesContract` check core timers and program execution using only `Backend`.
+   Stream checks take a fixture that supplies connected handles. Each capability contract requires only the capability
+   it checks; combinations such as FIFOs versus regular files are separate integration contracts.
 3. **The reference backend**, `io-reference/`: the semantics on the JDK's channels, over a plain selector poll.
 4. **SimpleIO**, `gears.io.testkit.SimpleIO` in `io-testkit/`: an API with result-returning openers and streams,
    written over the public interface alone, which shows what the interface is for.
@@ -33,6 +33,37 @@ under `gears.async.io`, since what a backend implements and programs do not see 
 op (`Io.performWithin`) and how it runs a program (`Backend.run`, which `Io.run` calls). A handle is an object of its
 backend's own class, so a program can neither forge one nor pass one backend's handle to another, whose `Handle` is a
 different type.
+
+## Choosing contract suites
+
+A backend can start with `OpsContract` and `FuturesContract`; neither requires opening a handle or any optional
+capability. Host-thread deadline checks are opt-in through `ThreadedTimerContract`, so they are not imposed on browsers.
+
+| contracts | required capability or fixture |
+| --- | --- |
+| `OpsContract`, `FuturesContract` | `Backend` only |
+| `StreamContract`, `StreamFuturesContract`, `SimpleIOChecks` | `StreamFixture`, supplying connected readable/writable ends |
+| `PipeContract`, `PipeFuturesContract` | `Pipes`; `PipeContract` also runs `StreamContract` using `PipeFixture` |
+| `BlockingContract`, `BlockingFuturesContract` | `Blocking` |
+| `IpStreamContract`, `IpStreamFuturesContract`, `SimpleIOIpStreamChecks` | `IpStreams` |
+| `IpDatagramContract`, `IpDatagramFuturesContract` | `IpDatagrams` |
+| `UnixStreamContract`, `UnixDatagramContract` | the corresponding Unix socket capability and host filesystem setup |
+| `FileContract` | `RegularFiles` and host filesystem setup |
+| `FifoContract` | `Fifos` and host filesystem setup |
+| `FifoFileContract` | `Fifos & RegularFiles`, checking that the two kinds are distinguished |
+| `ResolveContract`, `ResolveFuturesContract`, `SimpleIOResolveChecks` | `Resolving` |
+
+A stream fixture supplies independently closable, connected, buffered byte-stream ends; closing the write end delivers
+EOF after queued bytes. It owns and cleans up any listener or other setup resources. `PipeFixture` and `IpStreamFixture`
+provide implementations using only their respective capabilities. The reference backend runs the common stream checks
+against both fixtures. Socket setup binds port zero and reads back the assigned address through `localAddress`, without
+probing random ports. Explicit binds reuse an assigned address when checking conflicts, port reuse or a requested source
+port. Socket programs do not implicitly switch to Unix sockets, and datagram programs never open a TCP listener.
+Filesystem setup lives in `FileSystemFixture`, outside `ContractSuite`.
+
+Each reference suite exposes its backend through the narrow capability type it tests. Missing capabilities therefore
+fail compilation, rather than silently skipping checks or reporting them as passing. `SocketContract` remains an optional
+aggregate of the two IP transport contracts.
 
 ## The concepts
 
@@ -138,15 +169,17 @@ contracts are checked against, and the plainest way to read the semantics as cod
 `gears.io.demos`, are outside `gears.async`, so they see only what a program sees. `SimpleIO` has
 result-returning openers, `read`, `writeAll`, `accept`, `resolve`, `closeGracefully`, and `chunks`, a stream over one
 repeatable pooled read consumed as a gears channel, with the pool's window and the channel's backlog as back-pressure.
-`SimpleIOChecks` runs it over every backend. Each demo takes the `Io` it runs with, over the capabilities it needs,
-and its `Async`, and only a backend's demo application starts a run: `ioReferenceDemos/run <command>`.
+`SimpleIOChecks` checks its stream helpers over a supplied stream fixture; `SimpleIOIpStreamChecks` and
+`SimpleIOResolveChecks` check their respective capabilities independently. Each demo takes the `Io` it runs with, over
+the capabilities it needs, and its `Async`, and only a backend's demo application starts a run:
+`ioReferenceDemos/run <command>`.
 
 ## Running the suites
 
 ```
-sbt ioReference/test        # the contracts, the futures contract and SimpleIO over the reference backend
-sbt ioTestkitJVM/test       # the testkit's own tests
-sbt 'ioTestkitNative/compile; ioTestkitJS/compile'
+sbt --client ioReference/test        # capability contracts, futures and SimpleIO over the reference backend
+sbt --client ioTestkitJVM/test       # the testkit's own tests
+sbt --client 'ioTestkitNative/compile; ioTestkitJS/compile'
 ```
 
 A backend written elsewhere depends on `gears-io-testkit` and extends the contracts of the capabilities it has, as

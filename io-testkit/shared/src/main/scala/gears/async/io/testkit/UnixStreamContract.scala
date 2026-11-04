@@ -9,7 +9,7 @@ import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 
 /** What a backend with Unix stream sockets must do, with or without IP sockets. */
-trait UnixStreamContract extends ContractSuite {
+trait UnixStreamContract extends FileSystemFixture {
   val backend: Backend & UnixStreams
 
   /** A listener on a Unix socket path, listening, from the `listen` op, whose failure is thrown. */

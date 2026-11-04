@@ -10,7 +10,7 @@ import java.nio.file.Files
 /** What a backend with Unix datagram sockets must do, with or without IP sockets: checked through `perform`, as
   * programs over the backend (see `ContractSuite`).
   */
-trait UnixDatagramContract extends ContractSuite {
+trait UnixDatagramContract extends FileSystemFixture {
   val backend: Backend & UnixDatagrams
 
   /** A Unix datagram socket bound to `local`, from the `bindDatagram` op, whose failure is thrown. */
