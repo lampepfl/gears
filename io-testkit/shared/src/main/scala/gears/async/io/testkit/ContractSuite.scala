@@ -2,7 +2,6 @@ package gears.async.io
 package testkit
 
 import gears.async.Async
-import gears.async.AsyncOperations
 import gears.async.Future
 
 import java.io.ByteArrayOutputStream
@@ -31,7 +30,7 @@ trait ContractSuite extends FunSuite {
   /** Runs `body` as a program over `backend`, given the backend's `Io`, and returns its result: `Io.run`, unless a
     * backend's suite runs its programs another way.
     */
-  protected def running[T](body: Io[backend.type] ?=> (Async.Spawn, AsyncOperations) ?=> T): T =
+  protected def running[T](body: Io[backend.type] ?=> Async.Spawn ?=> T): T =
     Io.run(using backend)(body)
 
   /** Checks this backend is known to fail, by name: they are expected to fail, so one that starts passing is reported,

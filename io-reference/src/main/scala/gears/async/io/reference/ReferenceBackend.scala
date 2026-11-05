@@ -2,7 +2,6 @@ package gears.async.io
 package reference
 
 import gears.async.Async
-import gears.async.AsyncOperations
 import gears.async.Future
 import gears.async.VThreadScheduler
 import gears.async.VThreadSupport
@@ -47,14 +46,13 @@ object ReferenceBackend
   def pool(bufferSize: Int, buffers: Int): BufferPool = new RefPool(bufferSize, buffers)
 
   /** Runs `program` on gears' virtual threads, each op performed by the future performing it. */
-  private[io] def run[T](program: Io[this.type] ?=> (Async.Spawn, AsyncOperations) ?=> T): T = {
+  private[io] def run[T](program: Io[this.type] ?=> Async.Spawn ?=> T): T = {
     given VThreadSupport.type = VThreadSupport
     given VThreadScheduler.type = VThreadScheduler
     val io: Io[this.type] = new Io[this.type] {
       val backend: ReferenceBackend.type = ReferenceBackend
       private[io] def performWithin(op: RefOp, timeoutMillis: Int)(using Async): Unit = op.perform(timeoutMillis)
     }
-    given AsyncOperations = io
     // `Async.blocking` runs its body on the calling thread, which may be a platform thread; a future's is virtual.
     Async.blocking(Future(program(using io)).await)
   }
