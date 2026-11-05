@@ -6,6 +6,10 @@ import gears.io.testkit.SimpleIOChecks
 import gears.io.testkit.SimpleIOIpStreamChecks
 import gears.io.testkit.SimpleIOResolveChecks
 
+import java.net.Inet6Address
+import java.net.NetworkInterface
+import scala.jdk.CollectionConverters.*
+
 /** Each suite sees only the capabilities required by its contracts. */
 class ReferenceContractSuite extends OpsContract {
   val backend: Backend = ReferenceBackend
@@ -46,6 +50,25 @@ class ReferenceFileSuite extends FileContract {
 
 class ReferenceResolveSuite extends ResolveContract {
   val backend: Resolving = ReferenceBackend
+
+  override protected def namedScopedAddresses: List[(String, IpAddress)] =
+    NetworkInterface
+      .getNetworkInterfaces()
+      .asScala
+      .flatMap(interface =>
+        interface.getInetAddresses().asScala.collect {
+          case address: Inet6Address if address.isLinkLocalAddress() && address.getScopeId() > 0 =>
+            (interface.getName(), address)
+        }
+      )
+      .nextOption()
+      .toList
+      .flatMap { (name, address) =>
+        val expected = IpAddress.fromBytes(Protocol.IPv6, address.getAddress(), address.getScopeId())
+        val compressed = expected.toString.takeWhile(_ != '%')
+        val expanded = address.getHostAddress().takeWhile(_ != '%')
+        List(s"$compressed%$name", s"$expanded%$name", s"[$compressed%$name]").map(_ -> expected)
+      }
 }
 
 class ReferenceSimpleIOSuite extends SimpleIOChecks with PipeFixture {
