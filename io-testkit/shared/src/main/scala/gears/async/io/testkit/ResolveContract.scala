@@ -1,6 +1,8 @@
 package gears.async.io
 package testkit
 
+import java.io.IOException
+
 /** What a backend that resolves host names must do: checked through `perform`, as programs over the backend (see
   * `ContractSuite`).
   */
@@ -32,5 +34,19 @@ trait ResolveContract extends ContractSuite {
     }
     intercept[IllegalArgumentException](backend.ops.resolve("", Slot[List[IpAddress]]()))
     intercept[IllegalArgumentException](backend.ops.resolve("local\u0000host", Slot[List[IpAddress]]()))
+  }
+
+  test("an op that is not Repeatable is performed only once") {
+    val failure = running { io ?=>
+      val into = Slot[List[IpAddress]]()
+      val resolve = io.backend.ops.resolve("localhost", into)
+      io.perform(resolve)
+      into.clear()
+      try {
+        io.perform(resolve)
+        null
+      } catch case t: Throwable => t
+    }
+    assert(failure.isInstanceOf[IllegalStateException], String.valueOf(failure))
   }
 }

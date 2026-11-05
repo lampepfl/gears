@@ -4,7 +4,8 @@ package testkit
 import gears.async.Async
 
 /** Supplies independently closable connected stream ends. Writes go from `out` to `in`; closing `out` delivers EOF
-  * after queued bytes. The fixture owns any extra setup resources and releases them before returning the pair.
+  * after queued bytes. Provide room for at least 64 bytes of setup writes before the tests start a reader. The fixture
+  * owns any extra setup resources and releases them before returning the pair.
   */
 trait StreamFixture extends ContractSuite {
   protected def stream(io: Io[backend.type])(using Async.Spawn): (Readable, Writable)

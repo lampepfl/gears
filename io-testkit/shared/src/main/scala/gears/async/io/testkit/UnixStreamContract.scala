@@ -14,35 +14,21 @@ trait UnixStreamContract extends FileSystemFixture {
 
   /** A listener on a Unix socket path, listening, from the `listen` op, whose failure is thrown. */
   private def unixListen(io: Io[backend.type], address: UnixAddress)(using Async): backend.Listener = {
-    val into = Slot[backend.Listener]()
-    opening(io, into, io.backend.ops.listen(address, into))
+    opening(io)(slot => io.backend.ops.listen(address, slot))
   }
 
   /** A connection to a Unix socket path, from the `connect` op, whose failure is thrown. */
   private def unixConnect(io: Io[backend.type], address: UnixAddress)(using Async): backend.Connection = {
-    val into = Slot[backend.Connection]()
-    opening(io, into, io.backend.ops.connect(address, into))
+    opening(io)(slot => io.backend.ops.connect(address, slot))
   }
 
   /** A connection to `listener`, at `address`: its client's end and the one `listener` accepted. */
   private def unixPair(io: Io[backend.type], listener: backend.Listener, address: UnixAddress)(using
       Async.Spawn
   ): (backend.Connection, backend.Connection) = {
-    val accepted = Slot[backend.Connection]()
-    val accepting = Future(opening(io, accepted, io.backend.ops.accept(listener, accepted)))
+    val accepting = Future(opening(io)(slot => io.backend.ops.accept(listener, slot)))
     val client = unixConnect(io, address)
     (client, accepting.await)
-  }
-
-  /** Performs `read`, into `buf`, until it completes adding nothing, the end of the stream: what `buf` then holds. */
-  private def unixReadToEnd(io: Io[backend.type], read: io.Op, buf: ByteBuffer)(using Async): String = {
-    var atEnd = false
-    while !atEnd do {
-      val before = buf.position()
-      io.perform(read)
-      atEnd = buf.position() == before
-    }
-    text(buf)
   }
 
   test("a socket's reads end after the bytes sent before its peer closed") {
@@ -53,10 +39,10 @@ trait UnixStreamContract extends FileSystemFixture {
         try {
           val (client, server) = unixPair(io, listener, address)
           try {
-            io.perform(io.backend.ops.write(client, bytes("last words")))
+            writeAll(io, client, bytes("last words"))
             close(io, client)
             val buf = allocate(64)
-            assertEquals(unixReadToEnd(io, io.backend.ops.read(server, buf), buf), "last words")
+            assertEquals(readToEnd(io, io.backend.ops.read(server, buf), buf), "last words")
           } finally close(io, server)
         } finally close(io, listener)
       }
@@ -71,14 +57,16 @@ trait UnixStreamContract extends FileSystemFixture {
         try {
           val (client, server) = unixPair(io, listener, address)
           try {
-            io.perform(io.backend.ops.write(client, bytes("ping")))
+            writeAll(io, client, bytes("ping"))
             val serverBuf = allocate(16)
             io.perform(io.backend.ops.read(server, serverBuf))
+            readExactly(io, io.backend.ops.read(server, serverBuf), serverBuf, 4)
             assertEquals(text(serverBuf), "ping")
             serverBuf.flip()
-            io.perform(io.backend.ops.write(server, serverBuf))
+            writeAll(io, server, serverBuf)
             val clientBuf = allocate(16)
             io.perform(io.backend.ops.read(client, clientBuf))
+            readExactly(io, io.backend.ops.read(client, clientBuf), clientBuf, 4)
             assertEquals(text(clientBuf), "ping")
           } finally {
             close(io, server)
@@ -182,18 +170,13 @@ trait UnixStreamContract extends FileSystemFixture {
     withTempDir { dir =>
       running { io ?=>
         val address = UnixAddress(dir.resolve("buffers.sock").toString)
-        val listening = Slot[backend.Listener]()
         val listenerOptions =
           SocketOptions.default.set(SocketOption.ReceiveBuffer, 65536).set(SocketOption.SendBuffer, 65536)
-        val listener = opening(io, listening, io.backend.ops.listen(address, listenerOptions, listening))
+        val listener = opening(io)(slot => io.backend.ops.listen(address, listenerOptions, slot))
         try {
-          val accepted = Slot[backend.Connection]()
-          val accepting = Future(opening(io, accepted, io.backend.ops.accept(listener, accepted)))
-          val into = Slot[backend.Connection]()
-          val client = opening(
-            io,
-            into,
-            io.backend.ops.connect(address, SocketOptions.default.set(SocketOption.ReceiveBuffer, 65536), into)
+          val accepting = Future(opening(io)(slot => io.backend.ops.accept(listener, slot)))
+          val client = opening(io)(slot =>
+            io.backend.ops.connect(address, SocketOptions.default.set(SocketOption.ReceiveBuffer, 65536), slot)
           )
           val server = accepting.await
           try {

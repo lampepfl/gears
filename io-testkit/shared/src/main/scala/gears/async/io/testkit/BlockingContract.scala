@@ -119,4 +119,33 @@ trait BlockingContract extends ContractSuite {
 
     }
   }
+
+  test("cancelling a blocking op waits for its acknowledgement before returning borrowed resources") {
+    running { io ?=>
+      val entered = new java.util.concurrent.atomic.AtomicBoolean
+      val stopped = new java.util.concurrent.atomic.AtomicBoolean
+      val release = new java.util.concurrent.CountDownLatch(1)
+      val waiting = Future {
+        io.perform(io.backend.ops.blocking { () =>
+          entered.set(true)
+          var released = false
+          while !released do
+            try {
+              release.await()
+              released = true
+            } catch case _: InterruptedException => () // cleanup cannot finish until the test releases it
+          stopped.set(true)
+        })
+      }
+      try {
+        while !entered.get() do sleep(1)
+        waiting.cancel()
+        sleep(10)
+        assert(waiting.poll().isEmpty, "cancellation returned before the blocker released its resources")
+      } finally release.countDown()
+      val failure = waiting.awaitResult.failed.get
+      assert(failure.isInstanceOf[CancellationException])
+      assert(stopped.get())
+    }
+  }
 }

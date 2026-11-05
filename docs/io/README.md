@@ -11,7 +11,7 @@ it. Futures, groups, `sleep` and `withTimeout` work as anywhere in gears, `sleep
    `Backend.scala` (backends and their capabilities), `Ops.scala` (every op and the rules they share),
    `SocketOptions.scala`, `Addresses.scala`, `Deadline.scala` and `BufferPool.scala`. All a program sees.
 2. **The contract suites**, in `io-testkit/`: what every backend must do, each check a program over the backend
-   through `perform`. `OpsContract` and `FuturesContract` check core timers and program execution using only `Backend`.
+   through `perform`. `OpsContract` checks core timers and program execution using only `Backend`.
    Stream checks take a fixture that supplies connected handles. Each capability contract requires only the capability
    it checks; combinations such as FIFOs versus regular files are separate integration contracts.
 3. **The reference backend**, `io-reference/`: the semantics on the JDK's channels, over a plain selector poll.
@@ -36,34 +36,40 @@ different type.
 
 ## Choosing contract suites
 
-A backend can start with `OpsContract` and `FuturesContract`; neither requires opening a handle or any optional
-capability. Host-thread deadline checks are opt-in through `ThreadedTimerContract`, so they are not imposed on browsers.
+A backend can start with `OpsContract`, which requires no handle fixture or optional capability. Host-thread deadline checks are opt-in through `ThreadedTimerContract`, so they are not imposed on browsers.
 
 | contracts | required capability or fixture |
 | --- | --- |
-| `OpsContract`, `FuturesContract` | `Backend` only |
-| `StreamContract`, `StreamFuturesContract`, `SimpleIOChecks` | `StreamFixture`, supplying connected readable/writable ends |
-| `PipeContract`, `PipeFuturesContract` | `Pipes`; `PipeContract` also runs `StreamContract` using `PipeFixture` |
-| `BlockingContract`, `BlockingFuturesContract` | `Blocking` |
-| `IpStreamContract`, `IpStreamFuturesContract`, `SimpleIOIpStreamChecks` | `IpStreams` |
-| `IpDatagramContract`, `IpDatagramFuturesContract` | `IpDatagrams` |
+| `OpsContract` | `Backend` only |
+| `StreamContract`, `SimpleIOChecks` | `StreamFixture`, supplying connected readable/writable ends |
+| `PipeContract` | `Pipes`; `PipeContract` also runs `StreamContract` using `PipeFixture` |
+| `BlockingContract` | `Blocking` |
+| `IpStreamContract`, `SimpleIOIpStreamChecks` | `IpStreams` |
+| `IpDatagramContract` | `IpDatagrams` |
 | `UnixStreamContract`, `UnixDatagramContract` | the corresponding Unix socket capability and host filesystem setup |
 | `FileContract` | `RegularFiles` and host filesystem setup |
 | `FifoContract` | `Fifos` and host filesystem setup |
 | `FifoFileContract` | `Fifos & RegularFiles`, checking that the two kinds are distinguished |
-| `ResolveContract`, `ResolveFuturesContract`, `SimpleIOResolveChecks` | `Resolving` |
+| `ResolveContract`, `SimpleIOResolveChecks` | `Resolving` |
 
 A stream fixture supplies independently closable, connected, buffered byte-stream ends; closing the write end delivers
-EOF after queued bytes. It owns and cleans up any listener or other setup resources. `PipeFixture` and `IpStreamFixture`
+EOF after queued bytes. Allow at least 64 bytes of setup writes before a reader starts; transfer and chunk sizes may
+otherwise be arbitrarily small. It owns and cleans up any listener or other setup resources. `PipeFixture` and `IpStreamFixture`
 provide implementations using only their respective capabilities. The reference backend runs the common stream checks
 against both fixtures. Socket setup binds port zero and reads back the assigned address through `localAddress`, without
 probing random ports. Explicit binds reuse an assigned address when checking conflicts, port reuse or a requested source
 port. Socket programs do not implicitly switch to Unix sockets, and datagram programs never open a TCP listener.
-Filesystem setup lives in `FileSystemFixture`, outside `ContractSuite`.
+Filesystem setup lives in `FileSystemFixture`, outside `ContractSuite`. The common `opening` helper allocates its own
+output slot: `opening(io)(slot => io.backend.ops.connect(address, slot))`. Checks that inspect slot
+occupancy or one-shot behaviour still construct their ops and slots explicitly. Shared transfer helpers repeat partial
+reads and writes, and pooled checks compare byte sequences without imposing chunk boundaries. Pool exhaustion may
+fail immediately or wait for a released buffer, as allowed by the interface. `FifoFileContract` registers only the
+cross-capability check; it does not inherit the individual FIFO and file suites.
 
 Each reference suite exposes its backend through the narrow capability type it tests. Missing capabilities therefore
-fail compilation, rather than silently skipping checks or reporting them as passing. `SocketContract` remains an optional
-aggregate of the two IP transport contracts.
+fail compilation, rather than silently skipping checks or reporting them as passing. Concurrency checks live with the
+capability they exercise; there is no separate futures-contract hierarchy. The three independent `SimpleIO` check traits
+share `SimpleIOChecks.scala` without combining their capability requirements.
 
 ## The concepts
 

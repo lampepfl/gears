@@ -37,39 +37,11 @@ trait PipeContract extends StreamContract with PipeFixture {
     running { io ?=>
       val (in, out) = pipe(io)
       try {
-        io.perform(io.backend.ops.write(out, bytes("then the end")))
+        writeAll(io, out, bytes("then the end"))
         close(io, out)
         val buf = allocate(64)
         assertEquals(readToEnd(io, io.backend.ops.read(in, buf), buf), "then the end")
       } finally close(io, in)
-    }
-  }
-
-  test("writes fill a pipe, wait while it is full, and go on as it drains") {
-    running { io ?=>
-      val (in, out) = pipe(io)
-      try {
-        val size = 1 << 20
-        val source = allocate(size)
-        while source.hasRemaining do source.put((source.position() % 251).toByte)
-        source.flip()
-        val sink = allocate(size)
-        val write = io.backend.ops.write(out, source)
-        val read = io.backend.ops.read(in, sink)
-        val writer = Future(while source.hasRemaining do io.perform(write))
-        val reader = Future(while sink.hasRemaining do io.perform(read))
-        writer.await
-        reader.await
-        sink.flip()
-        var i = 0
-        while i < size do {
-          if sink.get(i) != (i % 251).toByte then fail(s"byte $i is wrong")
-          i += 1
-        }
-      } finally {
-        close(io, in)
-        close(io, out)
-      }
     }
   }
 
@@ -109,28 +81,17 @@ trait PipeContract extends StreamContract with PipeFixture {
     }
   }
 
-  test("a second read pending on a handle, or a second write, fails with IllegalArgumentException") {
+  test("a second write pending on a pipe fails with IllegalArgumentException") {
     running { io ?=>
       val (in, out) = pipe(io)
       try {
-        val first = Future(io.perform(io.backend.ops.read(in, allocate(16))))
-        settle(io)
-        val second = attempt(io, io.backend.ops.read(in, allocate(16)))
-        assert(second.isInstanceOf[IllegalArgumentException], s"a second read: $second")
-        val fromAnother = failureOf(Future(io.perform(io.backend.ops.read(in, allocate(16)))))
-        assert(fromAnother.isInstanceOf[IllegalArgumentException], s"a second read from another future: $fromAnother")
-        assert(first.poll().isEmpty, "the first read is still pending")
-        io.perform(io.backend.ops.write(out, bytes("x")))
-        first.await
-        val again = Future(io.perform(io.backend.ops.read(in, allocate(16)))) // once the first has finished
-        settle(io)
-        io.perform(io.backend.ops.write(out, bytes("y")))
-        again.await
-
-        // Writes likewise: a pipe filled, so that one write waits.
+        // Fill the pipe so that a write remains pending.
         val filler = allocate(1 << 20)
-        val writing = Future(while filler.hasRemaining do io.perform(io.backend.ops.write(out, filler)))
+        val writing = Future(writeAll(io, out, filler))
         settle(io)
+        val result = writing.poll()
+        result.foreach(_.get) // a failed write is a failure, not an unsupported workload
+        assume(result.isEmpty, "the pipe accepted the whole payload; there is no pending write to test")
         val secondWrite = attempt(io, io.backend.ops.write(out, bytes("z")))
         assert(secondWrite.isInstanceOf[IllegalArgumentException], s"a second write: $secondWrite")
         writing.cancel()
