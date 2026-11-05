@@ -7,7 +7,7 @@ import gears.io.testkit.SimpleIOIpStreamChecks
 import gears.io.testkit.SimpleIOResolveChecks
 
 /** Each suite sees only the capabilities required by its contracts. */
-class ReferenceContractSuite extends OpsContract with FuturesContract {
+class ReferenceContractSuite extends OpsContract {
   val backend: Backend = ReferenceBackend
 }
 
@@ -15,24 +15,24 @@ class ReferenceThreadedTimerSuite extends ThreadedTimerContract {
   val backend: Backend = ReferenceBackend
 }
 
-class ReferenceBlockingSuite extends BlockingContract with BlockingFuturesContract {
+class ReferenceBlockingSuite extends BlockingContract {
   val backend: Blocking = ReferenceBackend
 }
 
-class ReferencePipeSuite extends PipeContract with StreamFuturesContract with PipeFuturesContract {
+class ReferencePipeSuite extends PipeContract {
   val backend: Pipes = ReferenceBackend
 }
 
 /** Runs the same stream contracts using TCP, without exposing Pipes to the suite. */
-class ReferenceSocketStreamSuite extends StreamContract with StreamFuturesContract with IpStreamFixture {
+class ReferenceSocketStreamSuite extends StreamContract with IpStreamFixture {
   val backend: IpStreams = ReferenceBackend
 }
 
-class ReferenceIpStreamSuite extends IpStreamContract with IpStreamFuturesContract {
+class ReferenceIpStreamSuite extends IpStreamContract {
   val backend: IpStreams = ReferenceBackend
 }
 
-class ReferenceIpDatagramSuite extends IpDatagramContract with IpDatagramFuturesContract {
+class ReferenceIpDatagramSuite extends IpDatagramContract {
   val backend: IpDatagrams = ReferenceBackend
 }
 
@@ -44,7 +44,7 @@ class ReferenceFileSuite extends FileContract {
   val backend: RegularFiles = ReferenceBackend
 }
 
-class ReferenceResolveSuite extends ResolveContract with ResolveFuturesContract {
+class ReferenceResolveSuite extends ResolveContract {
   val backend: Resolving = ReferenceBackend
 }
 

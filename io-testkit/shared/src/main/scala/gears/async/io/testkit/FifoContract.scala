@@ -13,18 +13,13 @@ trait FifoContract extends FileSystemFixture {
 
   /** A FIFO's read end from the `openFifoForReading` op, whose failure is thrown. */
   protected def openFifoForReading(io: Io[backend.type], path: String)(using Async): Readable = {
-    val into = Slot[Readable]()
-    opening(io, into, backend.ops.openFifoForReading(path, into))
+    opening(io)(slot => backend.ops.openFifoForReading(path, slot))
   }
 
   /** A FIFO's write end from the `openFifoForWriting` op, whose failure is thrown. */
   protected def openFifoForWriting(io: Io[backend.type], path: String)(using Async): Writable = {
-    val into = Slot[Writable]()
-    opening(io, into, backend.ops.openFifoForWriting(path, into))
+    opening(io)(slot => backend.ops.openFifoForWriting(path, slot))
   }
-
-  protected def mkfifo(path: java.nio.file.Path)(using munit.Location): Unit =
-    assertEquals(new ProcessBuilder("mkfifo", path.toString).start().waitFor(), 0)
 
   test("a FIFO carries what its writer writes, then ends when the writer closes") {
     withTempDir { dir =>
@@ -34,7 +29,7 @@ trait FifoContract extends FileSystemFixture {
         val reader = openFifoForReading(io, fifo.toString) // a non-blocking writer needs a reader to open
         try {
           val writer = openFifoForWriting(io, fifo.toString)
-          io.perform(backend.ops.write(writer, bytes("through the fifo")))
+          writeAll(io, writer, bytes("through the fifo"))
           close(io, writer)
           val buf = allocate(64)
           assertEquals(readToEnd(io, backend.ops.read(reader, buf), buf), "through the fifo")

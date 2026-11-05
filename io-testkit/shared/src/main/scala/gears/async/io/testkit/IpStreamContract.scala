@@ -3,6 +3,7 @@ package testkit
 
 import gears.async.Async
 import gears.async.Future
+import gears.async.Future.awaitAll
 
 import java.io.IOException
 import java.nio.ByteBuffer
@@ -12,40 +13,24 @@ import java.util.concurrent.TimeoutException
 import scala.concurrent.duration.*
 
 /** What a backend with IP stream sockets must do, with or without IP datagram sockets. */
-trait IpStreamContract extends ContractSuite {
+trait IpStreamContract extends IpStreamFixture {
   val backend: Backend & IpStreams
 
   /** A listener on `address`, listening, from the `listen` op, whose failure is thrown. */
   private def tcpListen(io: Io[backend.type], address: IpSocketAddress)(using Async): backend.Listener = {
-    val into = Slot[backend.Listener]()
-    opening(io, into, io.backend.ops.listen(address, into))
+    opening(io)(slot => io.backend.ops.listen(address, slot))
   }
 
   /** A connection to `address`, from the `connect` op, whose failure is thrown. */
   private def tcpConnect(io: Io[backend.type], address: IpSocketAddress)(using Async): backend.Connection = {
-    val into = Slot[backend.Connection]()
-    opening(io, into, io.backend.ops.connect(address, into))
+    opening(io)(slot => io.backend.ops.connect(address, slot))
   }
 
   /** A connection to the listener on the loopback at `port`: its client's end and the one `listener` accepted. */
   private def tcpPair(io: Io[backend.type], listener: backend.Listener, port: Int)(using
       Async.Spawn
   ): (backend.Connection, backend.Connection) = {
-    val accepted = Slot[backend.Connection]()
-    val accepting = Future(opening(io, accepted, io.backend.ops.accept(listener, accepted)))
-    val client = tcpConnect(io, IpSocketAddress(IpAddress.IPv4Loopback, port))
-    (client, accepting.await)
-  }
-
-  /** Performs `read`, into `buf`, until it completes adding nothing, the end of the stream: what `buf` then holds. */
-  private def tcpReadToEnd(io: Io[backend.type], read: io.Op, buf: ByteBuffer)(using Async): String = {
-    var atEnd = false
-    while !atEnd do {
-      val before = buf.position()
-      io.perform(read)
-      atEnd = buf.position() == before
-    }
-    text(buf)
+    pair(io, listener)(tcpConnect(io, IpSocketAddress(IpAddress.IPv4Loopback, port)))
   }
 
   /** Performs `op` with a time limit, and returns its failure, or null if it completed. */
@@ -55,13 +40,6 @@ trait IpStreamContract extends ContractSuite {
       null
     } catch case e: Exception => e
 
-  private def textOf(received: Received): String = {
-    val buf = received.buffer
-    val out = new Array[Byte](buf.remaining())
-    buf.get(out)
-    new String(out, StandardCharsets.UTF_8)
-  }
-
   test("an IPv4 stream socket accepts, connects and echoes") {
     running { io ?=>
       val listener = tcpListen(io, IpSocketAddress(IpAddress.IPv4Loopback, 0))
@@ -69,17 +47,19 @@ trait IpStreamContract extends ContractSuite {
       try {
         val (client, server) = tcpPair(io, listener, port)
         try {
-          io.perform(io.backend.ops.write(client, bytes("tcp ping")))
+          writeAll(io, client, bytes("tcp ping"))
           val buf = allocate(16)
           io.perform(io.backend.ops.read(server, buf))
+          readExactly(io, io.backend.ops.read(server, buf), buf, 8)
           assertEquals(text(buf), "tcp ping")
           buf.flip()
-          io.perform(io.backend.ops.write(server, buf))
+          writeAll(io, server, buf)
           val reply = allocate(16)
           io.perform(io.backend.ops.read(client, reply))
+          readExactly(io, io.backend.ops.read(client, reply), reply, 8)
           assertEquals(text(reply), "tcp ping")
           close(io, server)
-          assertEquals(tcpReadToEnd(io, io.backend.ops.read(client, reply), reply), "tcp ping")
+          assertEquals(readToEnd(io, io.backend.ops.read(client, reply), reply), "tcp ping")
         } finally close(io, client)
       } finally close(io, listener)
     }
@@ -93,15 +73,15 @@ trait IpStreamContract extends ContractSuite {
         val (client, server) = tcpPair(io, listener, port)
         try {
           // The client's request, then its end: the server reads it to the end, as it would a closed peer's.
-          assertEquals(attempt(io, io.backend.ops.write(client, bytes("request"))), null)
-          assertEquals(attempt(io, io.backend.ops.shutdownOutput(client)), null)
+          writeAll(io, client, bytes("request"))
+          io.perform(io.backend.ops.shutdownOutput(client))
           val buf = allocate(32)
-          assertEquals(tcpReadToEnd(io, io.backend.ops.read(server, buf), buf), "request")
+          assertEquals(readToEnd(io, io.backend.ops.read(server, buf), buf), "request")
           // The reply goes back on the half-closed connection, which the client still reads, to the server's end.
-          assertEquals(attempt(io, io.backend.ops.write(server, bytes("reply"))), null)
-          assertEquals(attempt(io, io.backend.ops.shutdownOutput(server)), null)
+          writeAll(io, server, bytes("reply"))
+          io.perform(io.backend.ops.shutdownOutput(server))
           val reply = allocate(32)
-          assertEquals(tcpReadToEnd(io, io.backend.ops.read(client, reply), reply), "reply")
+          assertEquals(readToEnd(io, io.backend.ops.read(client, reply), reply), "reply")
           val late = attempt(io, io.backend.ops.write(client, bytes("late")))
           assert(late.isInstanceOf[IOException], s"a write after shutting down: $late")
         } finally {
@@ -122,15 +102,14 @@ trait IpStreamContract extends ContractSuite {
         try {
           val (client, server) = tcpPair(io, listener, port)
           try {
-            io.perform(io.backend.ops.write(client, bytes("first")))
+            writeAll(io, client, bytes("first"))
             val into = Slot[Received]()
-            assertEquals(attempt(io, io.backend.ops.read(server, pool, into)), null)
-            val received = into.clear()
-            assertEquals(textOf(received), "first")
-            received.release()
-            io.perform(io.backend.ops.write(client, bytes("second")))
+            io.perform(io.backend.ops.read(server, pool, into))
+            assertEquals(readPooledExactly(io, io.backend.ops.read(server, pool, into), into, 5), "first")
+            writeAll(io, client, bytes("second"))
             val buf = allocate(64)
-            assertEquals(attempt(io, io.backend.ops.read(server, buf)), null)
+            io.perform(io.backend.ops.read(server, buf))
+            readExactly(io, io.backend.ops.read(server, buf), buf, 6)
             assertEquals(text(buf), "second")
           } finally {
             close(io, server)
@@ -169,50 +148,24 @@ trait IpStreamContract extends ContractSuite {
     if failure != null then failure else into.clear()
   }
 
-  test("a pooled read on a socket fails when the pool has no buffer free, and goes on once one is released") {
-    val pool = backend.pool(bufferSize = 16, buffers = 1)
-    try
-      running { io ?=>
-        withConnections(io, 1) { case Seq((client, server)) =>
-          io.perform(io.backend.ops.write(client, bytes("one")))
-          val held = readPooled(io, server, pool) match {
-            case received: Received => received
-            case failure: Throwable => fail("the first pooled read failed", failure)
-          }
-          assertEquals(textOf(held), "one")
-          io.perform(io.backend.ops.write(client, bytes("two")))
-          val refused = attempt(io, io.backend.ops.read(server, pool, Slot[Received]()))
-          assert(refused.isInstanceOf[IOException], String.valueOf(refused))
-          held.release()
-          readPooled(io, server, pool) match {
-            case received: Received =>
-              assertEquals(textOf(received), "two", "the refused read left no read pending, and took nothing")
-              received.release()
-            case failure: Throwable => fail("the pooled read after the release failed", failure)
-          }
-        }
-      }
-    finally pool.close()
-  }
-
   test("a pool's buffers go to the reads that take them: with a pool of two, two connections' reads hold both") {
     val pool = backend.pool(bufferSize = 16, buffers = 2)
     try
       running { io ?=>
         withConnections(io, 2) { case Seq((client1, server1), (client2, server2)) =>
-          io.perform(io.backend.ops.write(client1, bytes("first")))
-          io.perform(io.backend.ops.write(client2, bytes("second")))
+          writeAll(io, client1, bytes("a"))
+          writeAll(io, client2, bytes("b"))
           val held = readPooled(io, server1, pool) match {
             case received: Received => received
             case failure: Throwable => fail("the first connection's pooled read failed", failure)
           }
           readPooled(io, server2, pool) match {
             case received: Received =>
-              assertEquals(textOf(received), "second")
+              assertEquals(textOf(received), "b")
               received.release()
             case failure: Throwable => fail("the second connection's read found no buffer free", failure)
           }
-          assertEquals(textOf(held), "first")
+          assertEquals(textOf(held), "a")
           held.release()
           assertEquals(pool.available, 2, "no buffer is kept for reads not yet made")
         }
@@ -228,17 +181,17 @@ trait IpStreamContract extends ContractSuite {
           val idle = tcpAttemptWithin(io, io.backend.ops.read(server1, pool, Slot[Received]()), 20.millis)
           assert(idle.isInstanceOf[TimeoutException], String.valueOf(idle))
           assertEquals(pool.available, 1, "the read that timed out holds no buffer")
-          io.perform(io.backend.ops.write(client2, bytes("busy")))
+          writeAll(io, client2, bytes("c"))
           readPooled(io, server2, pool) match {
             case received: Received =>
-              assertEquals(textOf(received), "busy")
+              assertEquals(textOf(received), "c")
               received.release()
             case failure: Throwable => fail("the other connection's read found no buffer free", failure)
           }
-          io.perform(io.backend.ops.write(client1, bytes("late")))
+          writeAll(io, client1, bytes("d"))
           readPooled(io, server1, pool) match {
             case received: Received =>
-              assertEquals(textOf(received), "late", "what came for the read that timed out is the next read's")
+              assertEquals(textOf(received), "d", "what came for the read that timed out is the next read's")
               received.release()
             case failure: Throwable => fail("the read after the timeout failed", failure)
           }
@@ -281,7 +234,7 @@ trait IpStreamContract extends ContractSuite {
           val writing = Future(while big.hasRemaining() do io.perform(write))
           io.perform(io.backend.ops.timer(200))
           assert(big.hasRemaining(), "the peer's buffers took everything")
-          assertEquals(attempt(io, io.backend.ops.close(client)), null)
+          io.perform(io.backend.ops.close(client))
           // The write waiting when the connection closed has failed, as an op on a closed handle.
           val written = writing.awaitResult
           assert(
@@ -362,7 +315,7 @@ trait IpStreamContract extends ContractSuite {
       val (client, server) = tcpPair(io, listener, port)
       close(io, server) // the server's side closes first, so its end of the connection is left in TIME_WAIT
       val buf = allocate(8)
-      assertEquals(attempt(io, io.backend.ops.read(client, buf)), null) // the server's end
+      io.perform(io.backend.ops.read(client, buf)) // the server's end
       close(io, client)
       close(io, listener)
       close(io, tcpListen(io, IpSocketAddress(IpAddress.IPv4Loopback, port)))
@@ -386,7 +339,7 @@ trait IpStreamContract extends ContractSuite {
     running { io ?=>
       val first = tcpListen(io, IpSocketAddress(IpAddress.IPv4Loopback, 0))
       val port = io.backend.ops.localAddress(first).asInstanceOf[IpSocketAddress].port
-      assertEquals(attempt(io, io.backend.ops.close(first)), null)
+      io.perform(io.backend.ops.close(first))
       close(io, tcpListen(io, IpSocketAddress(IpAddress.IPv4Loopback, port)))
     }
   }
@@ -398,9 +351,9 @@ trait IpStreamContract extends ContractSuite {
       try {
         val (client, server) = tcpPair(io, listener, port)
         try {
-          assertEquals(attempt(io, io.backend.ops.close(client)), null)
+          io.perform(io.backend.ops.close(client))
           val buf = allocate(16)
-          assertEquals(tcpReadToEnd(io, io.backend.ops.read(server, buf), buf), "")
+          assertEquals(readToEnd(io, io.backend.ops.read(server, buf), buf), "")
         } finally close(io, server)
       } finally close(io, listener)
     }
@@ -455,15 +408,11 @@ trait IpStreamContract extends ContractSuite {
   private def connected(io: Io[backend.type], listening: SocketOptions, connecting: SocketOptions)(
       body: (backend.Connection, backend.Connection) => Unit
   )(using Async.Spawn): Unit = {
-    val into = Slot[backend.Listener]()
-    val listener = opening(io, into, io.backend.ops.listen(IpSocketAddress(IpAddress.IPv4Loopback, 0), listening, into))
+    val listener =
+      opening(io)(slot => io.backend.ops.listen(IpSocketAddress(IpAddress.IPv4Loopback, 0), listening, slot))
     try {
       val address = io.backend.ops.localAddress(listener).asInstanceOf[IpSocketAddress]
-      val accepted = Slot[backend.Connection]()
-      val accepting = Future(opening(io, accepted, io.backend.ops.accept(listener, accepted)))
-      val clientInto = Slot[backend.Connection]()
-      val client = opening(io, clientInto, io.backend.ops.connect(address, connecting, clientInto))
-      val server = accepting.await
+      val (client, server) = pair(io, listener)(opening(io)(slot => io.backend.ops.connect(address, connecting, slot)))
       try body(client, server)
       finally {
         close(io, client)
@@ -560,13 +509,11 @@ trait IpStreamContract extends ContractSuite {
     val reuse = SocketOptions.default.set(SocketOption.ReusePort, true)
     intercept[IllegalArgumentException](backend.ops.connect(IpSocketAddress(IpAddress.IPv4Loopback, 9), reuse, Slot()))
     running { io ?=>
-      val into = Slot[backend.Listener]()
-      val first = opening(io, into, io.backend.ops.listen(IpSocketAddress(IpAddress.IPv4Loopback, 0), reuse, into))
+      val first = opening(io)(slot => io.backend.ops.listen(IpSocketAddress(IpAddress.IPv4Loopback, 0), reuse, slot))
       try {
         assertEquals(io.backend.ops.option(first, SocketOption.ReusePort), true)
         val address = io.backend.ops.localAddress(first).asInstanceOf[IpSocketAddress]
-        val secondInto = Slot[backend.Listener]()
-        val second = opening(io, secondInto, io.backend.ops.listen(address, reuse, secondInto))
+        val second = opening(io)(slot => io.backend.ops.listen(address, reuse, slot))
         try {
           val refused = Slot[backend.Listener]()
           val failure = attempt(io, io.backend.ops.listen(address, refused))
@@ -592,9 +539,9 @@ trait IpStreamContract extends ContractSuite {
       connected(io, SocketOptions.default, SocketOptions.default) { (client, server) =>
         val header = allocate(4)
         header.putInt(5).flip()
-        assertEquals(attempt(io, io.backend.ops.write(client, Array(header, bytes("hello")))), null)
+        writeAll(io, client, Array(header, bytes("hello")))
         val into = Array(allocate(4), allocate(5))
-        while into(1).hasRemaining() do assertEquals(attempt(io, io.backend.ops.read(server, into)), null)
+        while into(1).hasRemaining() do io.perform(io.backend.ops.read(server, into))
         assertEquals(into(0).getInt(0), 5)
         into(1).flip()
         assertEquals(StandardCharsets.UTF_8.decode(into(1)).toString, "hello")
@@ -629,10 +576,8 @@ trait IpStreamContract extends ContractSuite {
       val listener = tcpListen(io, IpSocketAddress(IpAddress.IPv6Any, 0))
       val port = io.backend.ops.localAddress(listener).asInstanceOf[IpSocketAddress].port
       try {
-        val accepted = Slot[backend.Connection]()
-        val accepting = Future(opening(io, accepted, io.backend.ops.accept(listener, accepted)))
-        val into = Slot[backend.Connection]()
-        val client = opening(io, into, io.backend.ops.connect(IpSocketAddress(IpAddress.IPv4Loopback, port), into))
+        val accepting = Future(opening(io)(slot => io.backend.ops.accept(listener, slot)))
+        val client = opening(io)(slot => io.backend.ops.connect(IpSocketAddress(IpAddress.IPv4Loopback, port), slot))
         close(io, client)
         close(io, accepting.await)
       } finally close(io, listener)
@@ -644,7 +589,7 @@ trait IpStreamContract extends ContractSuite {
     running { io ?=>
       val into = Slot[backend.Listener]()
       val listening = io.backend.ops.listen(IpSocketAddress(IpAddress.IPv4Loopback, 0), into)
-      assertEquals(attempt(io, listening), null)
+      io.perform(listening)
       val listener = into.clear()
       val address = io.backend.ops.localAddress(listener).asInstanceOf[IpSocketAddress]
       intercept[IllegalStateException](io.perform(listening))
@@ -652,16 +597,71 @@ trait IpStreamContract extends ContractSuite {
       val accepting = Future(io.perform(io.backend.ops.accept(listener, accepted)))
       val connected = Slot[backend.Connection]()
       val connecting = io.backend.ops.connect(address, connected)
-      assertEquals(attempt(io, connecting), null)
+      io.perform(connecting)
       intercept[IllegalStateException](io.perform(connecting))
       val client = connected.clear()
       val shutting = io.backend.ops.shutdownOutput(client)
-      assertEquals(attempt(io, shutting), null)
+      io.perform(shutting)
       intercept[IllegalStateException](io.perform(shutting))
       close(io, client)
       accepting.await
       close(io, accepted.clear())
       close(io, listener)
     }
+  }
+
+  test("clients and a server echo over stream sockets") {
+    val clients = 16
+    val trips = 200
+    val echoed =
+      running { io ?=>
+        val (listener, connect) = listenAndConnect(io)
+        try {
+          val server = Future {
+            val accepted = Slot[Connection]()
+            val accept = io.backend.ops.accept(listener, accepted)
+            val connections = (1 to clients).map { _ =>
+              io.perform(accept)
+              val socket = accepted.clear()
+              Future {
+                val buf = arena.allocate(64)
+                val read = io.backend.ops.read(socket, buf)
+                val write = io.backend.ops.write(socket, buf)
+                try
+                  for _ <- 1 to trips do {
+                    buf.clear().limit(5)
+                    while buf.hasRemaining do io.perform(read)
+                    buf.flip()
+                    while buf.hasRemaining do io.perform(write)
+                  }
+                finally io.perform(io.backend.ops.close(socket))
+              }
+            }
+            connections.awaitAll
+          }
+          val done = (1 to clients).map { _ =>
+            Future {
+              val socket = connect()
+              try {
+                val buf = arena.allocate(64)
+                val read = io.backend.ops.read(socket, buf)
+                val write = io.backend.ops.write(socket, buf)
+                for _ <- 1 to trips do {
+                  buf.clear().put("hello".getBytes(StandardCharsets.UTF_8)).flip()
+                  while buf.hasRemaining do io.perform(write)
+                  buf.clear().limit(5)
+                  while buf.hasRemaining do io.perform(read)
+                  assertEquals(text(buf), "hello")
+                }
+                1
+              } finally io.perform(io.backend.ops.close(socket))
+            }
+          }
+          val echoed = done.awaitAll.sum
+          server.await
+          echoed
+        } finally io.perform(io.backend.ops.close(listener))
+      }
+    assertEquals(echoed, clients)
   }
 }

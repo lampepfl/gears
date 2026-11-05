@@ -15,16 +15,14 @@ trait UnixDatagramContract extends FileSystemFixture {
 
   /** A Unix datagram socket bound to `local`, from the `bindDatagram` op, whose failure is thrown. */
   protected def bindUnixDatagram(io: Io[backend.type], local: UnixAddress)(using Async): backend.UnixBoundDatagram = {
-    val into = Slot[backend.UnixBoundDatagram]()
-    opening(io, into, backend.ops.bindDatagram(local, into))
+    opening(io)(slot => backend.ops.bindDatagram(local, slot))
   }
 
   /** A Unix datagram socket connected to `remote`, from the `connectDatagram` op, whose failure is thrown. */
   protected def connectUnixDatagram(io: Io[backend.type], local: UnixAddress | Null, remote: UnixAddress)(using
       Async
   ): backend.UnixConnectedDatagram = {
-    val into = Slot[backend.UnixConnectedDatagram]()
-    opening(io, into, backend.ops.connectDatagram(local, remote, into))
+    opening(io)(slot => backend.ops.connectDatagram(local, remote, slot))
   }
 
   /** The packet in `buf`, received and flipped, as text. */
@@ -159,18 +157,12 @@ trait UnixDatagramContract extends FileSystemFixture {
     withTempDir { dir =>
       running { io ?=>
         val path = UnixAddress(dir.resolve("buffers.sock").toString)
-        val boundInto = Slot[backend.UnixBoundDatagram]()
-        val bound = opening(
-          io,
-          boundInto,
-          backend.ops.bindDatagram(path, SocketOptions.default.set(SocketOption.ReceiveBuffer, 65536), boundInto)
+        val bound = opening(io)(slot =>
+          backend.ops.bindDatagram(path, SocketOptions.default.set(SocketOption.ReceiveBuffer, 65536), slot)
         )
-        val connectedInto = Slot[backend.UnixConnectedDatagram]()
-        val connected = opening(
-          io,
-          connectedInto,
+        val connected = opening(io)(slot =>
           backend.ops
-            .connectDatagram(null, path, SocketOptions.default.set(SocketOption.SendBuffer, 65536), connectedInto)
+            .connectDatagram(null, path, SocketOptions.default.set(SocketOption.SendBuffer, 65536), slot)
         )
         try {
           assert(backend.ops.option(bound, SocketOption.ReceiveBuffer) >= 65536)

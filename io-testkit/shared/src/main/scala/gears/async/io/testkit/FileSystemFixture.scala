@@ -19,4 +19,7 @@ trait FileSystemFixture extends ContractSuite {
         Files.deleteIfExists(dir): Unit
       }
   }
+
+  protected def mkfifo(path: java.nio.file.Path)(using munit.Location): Unit =
+    assertEquals(new ProcessBuilder("mkfifo", path.toString).start().waitFor(), 0)
 }

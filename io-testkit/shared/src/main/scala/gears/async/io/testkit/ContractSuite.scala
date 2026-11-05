@@ -5,6 +5,8 @@ import gears.async.Async
 import gears.async.AsyncOperations
 import gears.async.Future
 
+import java.io.ByteArrayOutputStream
+import java.io.EOFException
 import java.io.IOException
 import java.nio.ByteBuffer
 import java.nio.charset.StandardCharsets
@@ -63,9 +65,10 @@ trait ContractSuite extends FunSuite {
       null
     } catch case e: Exception => e
 
-  /** Performs `op`, which opens a handle into `into`, and returns the handle. */
-  protected def opening[K <: Handle](io: Io[backend.type], into: Slot[K], op: io.Op)(using Async): K = {
-    io.perform(op)
+  /** Allocates the output slot, builds and performs its opening op, and returns the opened handle. */
+  protected def opening[K <: Handle](io: Io[backend.type])(build: Slot[K] => io.Op)(using Async): K = {
+    val into = Slot[K]()
+    io.perform(build(into))
     into.clear()
   }
 
@@ -79,6 +82,62 @@ trait ContractSuite extends FunSuite {
   /** The failure `future` ended with, or null if it completed. */
   protected def failureOf(future: Future[?])(using Async): Throwable | Null =
     future.awaitResult.failed.toOption.orNull
+
+  /** Drains every buffer, allowing each performance to make only partial progress. */
+  protected def writeAll(io: Io[backend.type], out: Writable, buf: ByteBuffer)(using Async): Unit = {
+    val write = io.backend.ops.write(out, buf)
+    while buf.hasRemaining() do {
+      val before = buf.position()
+      io.perform(write)
+      assert(buf.position() > before, "a nonempty write made no progress")
+    }
+  }
+
+  protected def writeAll(io: Io[backend.type], out: Writable, bufs: Array[ByteBuffer])(using Async): Unit = {
+    val write = io.backend.ops.write(out, bufs)
+    while bufs.exists(_.hasRemaining()) do {
+      val before = bufs.map(_.remaining().toLong).sum
+      io.perform(write)
+      assert(bufs.map(_.remaining().toLong).sum < before, "a nonempty write made no progress")
+    }
+  }
+
+  /** Reads up to an absolute position without consuming bytes beyond it. EOF before that position is a failure. */
+  protected def readExactly(io: Io[backend.type], read: io.Op, buf: ByteBuffer, until: Int)(using Async): Unit = {
+    require(until >= buf.position() && until <= buf.limit())
+    val limit = buf.limit()
+    buf.limit(until)
+    try
+      while buf.hasRemaining() do {
+        val before = buf.position()
+        io.perform(read)
+        if buf.position() == before then throw new EOFException(s"Expected $until bytes, received $before")
+      }
+    finally buf.limit(limit)
+  }
+
+  /** Reads a known byte count across pooled chunks, including a result already waiting in `into`. */
+  protected def readPooledExactly(io: Io[backend.type], read: io.Op, into: Slot[Received], size: Int)(using
+      Async
+  ): String = {
+    val bytes = new ByteArrayOutputStream()
+    while bytes.size() < size do {
+      if into.isEmpty then io.perform(read)
+      val received = into.clear()
+      try {
+        val chunk = received.buffer
+        if !chunk.hasRemaining() then throw new EOFException(s"Expected $size bytes, received ${bytes.size()}")
+        val copy = new Array[Byte](chunk.remaining())
+        chunk.get(copy)
+        bytes.write(copy)
+        assert(bytes.size() <= size, "the pooled read returned unexpected extra bytes")
+      } finally received.release()
+    }
+    new String(bytes.toByteArray(), StandardCharsets.UTF_8)
+  }
+
+  /** Decodes a received chunk without changing its position or releasing it. */
+  protected def textOf(received: Received): String = StandardCharsets.UTF_8.decode(received.buffer.duplicate()).toString
 
   /** Performs `read` until it completes without adding bytes, returning what `buf` then holds. */
   protected def readToEnd(io: Io[backend.type], read: io.Op, buf: ByteBuffer)(using Async): String = {

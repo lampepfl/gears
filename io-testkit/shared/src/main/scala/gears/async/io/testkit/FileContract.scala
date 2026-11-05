@@ -22,19 +22,7 @@ trait FileContract extends FileSystemFixture {
 
   /** Opens the file at `path` with the `open` op, throwing its failure. */
   protected def openFile(io: Io[backend.type], path: Path, write: Boolean)(using Async): backend.File = {
-    val into = Slot[backend.File]()
-    opening(io, into, backend.ops.open(path.toString, write, into))
-  }
-
-  /** Performs `read` into `buf` until the end of the stream, which adds nothing, and returns what `buf` holds. */
-  protected def readFileToEnd(io: Io[backend.type], read: backend.Op, buf: ByteBuffer)(using Async): String = {
-    var atEnd = false
-    while !atEnd do {
-      val before = buf.position()
-      io.perform(read)
-      atEnd = buf.position() == before
-    }
-    text(buf)
+    opening(io)(slot => backend.ops.open(path.toString, write, slot))
   }
 
   test("open refuses what is not a regular file, leaving its slot empty") {
@@ -58,7 +46,7 @@ trait FileContract extends FileSystemFixture {
         val file = openFile(io, path, write = false)
         try {
           val buf = allocate(64)
-          assertEquals(readFileToEnd(io, backend.ops.read(file, buf), buf), "file contents")
+          assertEquals(readToEnd(io, backend.ops.read(file, buf), buf), "file contents")
         } finally close(io, file)
       }
     }
@@ -74,15 +62,17 @@ trait FileContract extends FileSystemFixture {
           val buf = allocate(2)
           val read = backend.ops.read(file, buf, offset = 6)
           io.perform(read)
+          readExactly(io, read, buf, 2)
           assertEquals(text(buf), "67")
           buf.clear()
           io.perform(read)
+          readExactly(io, read, buf, 2)
           assertEquals(text(buf), "89")
           buf.clear()
           io.perform(read)
           assertEquals(buf.position(), 0)
           val fresh = allocate(4)
-          io.perform(backend.ops.read(file, fresh, offset = 0))
+          readExactly(io, backend.ops.read(file, fresh, offset = 0), fresh, 4)
           assertEquals(text(fresh), "0123")
         } finally close(io, file)
       }
@@ -105,6 +95,7 @@ trait FileContract extends FileSystemFixture {
           assert(positional.isInstanceOf[IllegalArgumentException], String.valueOf(positional))
           buf.clear()
           io.perform(read)
+          readExactly(io, read, buf, 4)
           assertEquals(text(buf), "2345")
         } finally close(io, file)
       }
@@ -164,7 +155,7 @@ trait FileContract extends FileSystemFixture {
         try {
           for part <- List("ab", "cd") do {
             val buf = bytes(part)
-            while buf.hasRemaining do io.perform(backend.ops.write(writing, buf))
+            writeAll(io, writing, buf)
           }
         } finally close(io, writing)
         assertEquals(Files.readString(path), "abcd456789", "neither truncated nor appended to")
@@ -172,9 +163,11 @@ trait FileContract extends FileSystemFixture {
         try {
           val first = allocate(4)
           io.perform(backend.ops.read(reading, first))
+          readExactly(io, backend.ops.read(reading, first), first, 4)
           assertEquals(text(first), "abcd")
           val rest = allocate(16)
           io.perform(backend.ops.read(reading, rest))
+          readExactly(io, backend.ops.read(reading, rest), rest, 6)
           assertEquals(text(rest), "456789")
         } finally close(io, reading)
       }
@@ -188,7 +181,9 @@ trait FileContract extends FileSystemFixture {
         Files.write(path, "0123456789".getBytes(StandardCharsets.UTF_8))
         val file = openFile(io, path, write = true)
         try {
-          io.perform(backend.ops.write(file, bytes("ab"), offset = 2))
+          val buf = bytes("ab")
+          val write = backend.ops.write(file, buf, offset = 2)
+          while buf.hasRemaining() do io.perform(write)
           val sync = backend.ops.sync(file)
           io.perform(sync)
           io.perform(sync) // repeatable
@@ -227,7 +222,7 @@ trait FileContract extends FileSystemFixture {
           val read = backend.ops.read(file, buf, offset = 0)
           for expected <- Seq("01", "23", "45") do {
             buf.clear()
-            io.perform(read, 5.seconds)
+            readExactly(io, read, buf, expected.length)
             assertEquals(text(buf), expected)
           }
         } finally close(io, file)

@@ -19,16 +19,14 @@ trait IpDatagramContract extends ContractSuite {
 
   /** A datagram socket bound to `local`, from the `bindDatagram` op, whose failure is thrown. */
   protected def bindDatagram(io: Io[backend.type], local: IpSocketAddress)(using Async): backend.BoundDatagram = {
-    val into = Slot[backend.BoundDatagram]()
-    opening(io, into, backend.ops.bindDatagram(local, into))
+    opening(io)(slot => backend.ops.bindDatagram(local, slot))
   }
 
   /** A datagram socket connected to `remote`, from the `connectDatagram` op, whose failure is thrown. */
   protected def connectDatagram(io: Io[backend.type], local: IpSocketAddress | Null, remote: IpSocketAddress)(using
       Async
   ): backend.ConnectedDatagram = {
-    val into = Slot[backend.ConnectedDatagram]()
-    opening(io, into, backend.ops.connectDatagram(local, remote, into))
+    opening(io)(slot => backend.ops.connectDatagram(local, remote, slot))
   }
 
   /** The packet in `buf`, received and flipped, as text. */
@@ -309,8 +307,7 @@ trait IpDatagramContract extends ContractSuite {
 
   /** A bound socket opening with `options` on loopback, port 0. */
   private def boundWith(io: Io[backend.type], options: SocketOptions)(using Async): backend.BoundDatagram = {
-    val into = Slot[backend.BoundDatagram]()
-    opening(io, into, backend.ops.bindDatagram(IpSocketAddress(IpAddress.IPv4Loopback, 0), options, into))
+    opening(io)(slot => backend.ops.bindDatagram(IpSocketAddress(IpAddress.IPv4Loopback, 0), options, slot))
   }
 
   /** The loopback interface's MTU, if the platform tells it. */
@@ -359,7 +356,7 @@ trait IpDatagramContract extends ContractSuite {
       val fragmenting = boundWith(io, room)
       val whole = boundWith(io, room.set(SocketOption.DontFragment, true))
       try {
-        assertEquals(attempt(io, backend.ops.send(fragmenting, allocate(size), to)), null, "sent fragmented")
+        io.perform(backend.ops.send(fragmenting, allocate(size), to))
         val failure = attempt(io, backend.ops.send(whole, allocate(size), to))
         assert(failure.isInstanceOf[IOException], s"a datagram of $size bytes, MTU $mtu: $failure")
       } finally {
@@ -381,8 +378,7 @@ trait IpDatagramContract extends ContractSuite {
       try {
         assertEquals(backend.ops.option(first, SocketOption.ReusePort), true)
         val port = backend.ops.localAddress(first)
-        val into = Slot[backend.BoundDatagram]()
-        val second = opening(io, into, backend.ops.bindDatagram(port, reuse, into))
+        val second = opening(io)(slot => backend.ops.bindDatagram(port, reuse, slot))
         try {
           val refused = Slot[backend.BoundDatagram]()
           val failure = attempt(io, backend.ops.bindDatagram(port, refused))
@@ -547,12 +543,12 @@ trait IpDatagramContract extends ContractSuite {
             null
           )
           val from = Slot[IpSocketAddress]()
-          assertEquals(attempt(io, io.backend.ops.receive(server, allocate(16), from)), null)
+          io.perform(io.backend.ops.receive(server, allocate(16), from))
           val sender = from.clear()
           assertEquals(sender.address, IpAddress.IPv4Loopback, "an IPv4 sender, not IPv4-mapped")
-          assertEquals(attempt(io, io.backend.ops.send(server, bytes("back"), sender)), null)
+          io.perform(io.backend.ops.send(server, bytes("back"), sender))
           val buf = allocate(16)
-          assertEquals(attempt(io, io.backend.ops.receive(client, buf, Slot[IpSocketAddress]())), null)
+          io.perform(io.backend.ops.receive(client, buf, Slot[IpSocketAddress]()))
           assertEquals(StandardCharsets.UTF_8.decode(buf).toString, "back")
         } finally close(io, client)
       } finally close(io, server)
@@ -563,7 +559,7 @@ trait IpDatagramContract extends ContractSuite {
     running { io ?=>
       val bound = Slot[backend.BoundDatagram]()
       val binding = io.backend.ops.bindDatagram(IpSocketAddress(IpAddress.IPv4Loopback, 0), bound)
-      assertEquals(attempt(io, binding), null)
+      io.perform(binding)
       intercept[IllegalStateException](io.perform(binding))
       close(io, bound.clear())
     }
