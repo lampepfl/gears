@@ -178,10 +178,7 @@ trait IpDatagramContract extends ContractSuite {
           val from = Slot[IpSocketAddress]()
           io.perform(backend.ops.receive(server, buf, from))
           assertEquals(packet(buf), "v6")
-          from.clear() match {
-            case IpSocketAddress(address, _) => assertEquals(address, IpAddress.IPv6Loopback)
-            case other                       => fail(s"an IPv6 sender: $other")
-          }
+          assertEquals(from.clear().address, IpAddress.IPv6Loopback)
         } finally close(io, client)
       } finally close(io, server)
     }
