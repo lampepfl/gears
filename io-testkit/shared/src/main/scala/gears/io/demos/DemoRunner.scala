@@ -1,7 +1,6 @@
 package gears.io.demos
 
 import gears.async.Async
-import gears.async.AsyncOperations
 import gears.async.io.Backend
 import gears.async.io.Io
 
@@ -16,7 +15,7 @@ trait DemoRunner[+B <: Backend] {
   val backend: B
 
   /** Runs `program` over the backend, as `Io.run` does. */
-  def run[T](program: Io[B] ?=> (Async.Spawn, AsyncOperations) ?=> T): T
+  def run[T](program: Io[B] ?=> Async.Spawn ?=> T): T
 }
 
 /** The backends a main application offers its demos, each by the name `--backend` chooses it with, and the one chosen

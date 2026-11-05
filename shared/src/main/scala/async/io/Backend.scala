@@ -1,7 +1,6 @@
 package gears.async.io
 
 import _root_.gears.async.Async
-import _root_.gears.async.AsyncOperations
 
 /** A way of doing I/O: the ops it can perform, the handles they name, and the pools its reads fill. Ops of another
   * backend are a different type. Building an op or using a handle performs nothing, so either may be done from any
@@ -58,7 +57,7 @@ trait Backend {
   /** Runs `program` over this backend, giving it an `Io` over it, and returns what it returns, rethrowing its failure:
     * what `Io.run` does, each backend its own way, since where its ops are performed is its own.
     */
-  private[io] def run[T](program: Io[this.type] ?=> (Async.Spawn, AsyncOperations) ?=> T): T
+  private[io] def run[T](program: Io[this.type] ?=> Async.Spawn ?=> T): T
 }
 
 object Backend {

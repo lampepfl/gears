@@ -1,7 +1,6 @@
 package referencedemos
 
 import gears.async.Async
-import gears.async.AsyncOperations
 import gears.async.io.Io
 import gears.async.io.reference.ReferenceBackend
 import gears.io.demos.{DemoBackends, DemoCommands, DemoRunner}
@@ -13,7 +12,7 @@ import gears.io.demos.{DemoBackends, DemoCommands, DemoRunner}
 object ReferenceDemos {
   private object Runner extends DemoRunner[ReferenceBackend.type] {
     val backend: ReferenceBackend.type = ReferenceBackend
-    def run[T](program: Io[ReferenceBackend.type] ?=> (Async.Spawn, AsyncOperations) ?=> T): T =
+    def run[T](program: Io[ReferenceBackend.type] ?=> Async.Spawn ?=> T): T =
       Io.run(using backend)(program)
   }
 
