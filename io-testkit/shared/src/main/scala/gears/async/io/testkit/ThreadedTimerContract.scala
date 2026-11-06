@@ -4,6 +4,8 @@ package testkit
 import gears.async.AsyncOperations.sleep
 import gears.async.Future
 
+import scala.concurrent.duration.*
+
 /** Additional deadline checks for runtimes that support creating host threads. */
 trait ThreadedTimerContract extends ContractSuite {
 
@@ -41,6 +43,27 @@ trait ThreadedTimerContract extends ContractSuite {
       assert(waiting.poll().isEmpty, "it completed at a deadline it had left")
       moveBatch(System.nanoTime() - 1)
       waiting.await
+    }
+  }
+
+  test("concurrent deadline moves preserve the final move after all movers have joined") {
+    running { io ?=>
+      val start = System.nanoTime()
+      val timer = io.backend.ops.deadlineTimer(start + 60.seconds.toNanos)
+      val waiting = Future(io.perform(timer, 5.seconds))
+      val movers = List.tabulate(4) { thread =>
+        new Thread(() => {
+          for i <- 0 until 1000 do timer.moveTo(start + 60.seconds.toNanos + (thread * 1000 + i) % 2000)
+        })
+      }
+      movers.foreach(_.start())
+      movers.foreach(_.join(5000))
+      assert(movers.forall(!_.isAlive))
+      assert(waiting.poll().isEmpty, "a timer completed while every requested deadline was still in the future")
+      val finalDeadline = System.nanoTime() + 10.millis.toNanos
+      timer.moveTo(finalDeadline)
+      waiting.await
+      assert(System.nanoTime() - finalDeadline >= 0, "the timer completed at a superseded deadline")
     }
   }
 }

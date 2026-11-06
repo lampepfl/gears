@@ -34,6 +34,18 @@ trait OpsContract extends ContractSuite {
     assertEquals(fired, List(30, 60, 90))
   }
 
+  test("a repeatable timer starts its full delay at each performance, not at construction") {
+    running { io ?=>
+      val timer = io.backend.ops.timer(10)
+      io.perform(io.backend.ops.timer(20))
+      for _ <- 1 to 2 do {
+        val started = System.nanoTime()
+        io.perform(timer)
+        assert(System.nanoTime() - started >= 10_000_000L, "the timer reused an earlier performance's deadline")
+      }
+    }
+  }
+
   test("a timer of a duration finer than a millisecond completes no earlier than it") {
     running { io ?=>
       val started = System.nanoTime()
@@ -97,6 +109,66 @@ trait OpsContract extends ContractSuite {
       completed.mkString(" ")
     }
     assertEquals(outcome, "true true true")
+  }
+
+  test("a zero-duration timer and an expired deadline complete even with a zero time limit") {
+    running { io ?=>
+      io.perform(io.backend.ops.timer(Duration.Zero), Duration.Zero)
+      io.perform(io.backend.ops.deadlineTimer(System.nanoTime() - 1), Duration.Zero)
+    }
+  }
+
+  test("a timed-out timer can be reused for its full delay without receiving its previous completion") {
+    running { io ?=>
+      val timer = io.backend.ops.timer(30)
+      for _ <- 1 to 3 do {
+        intercept[TimeoutException](io.perform(timer, 1.millis))
+        val started = System.nanoTime()
+        io.perform(timer, 5.seconds)
+        assert(System.nanoTime() - started >= 30.millis.toNanos, "a previous performance completed this one")
+      }
+    }
+  }
+
+  test("separate timers at the same deadline all complete") {
+    running { io ?=>
+      val due = System.nanoTime() + 30.millis.toNanos
+      val waiting = List.tabulate(100) { i =>
+        val timer = io.backend.ops.deadlineTimer(due)
+        Future {
+          io.perform(timer, 5.seconds)
+          assert(System.nanoTime() - due >= 0, "a timer fired early")
+          i
+        }
+      }
+      val completed = waiting.map(_.await).sorted
+      assertEquals(completed, (0 until 100).toList)
+    }
+  }
+
+  test("moving a deadline earlier lets it complete within the performance's unchanged time limit") {
+    running { io ?=>
+      val timer = io.backend.ops.deadlineTimer(System.nanoTime() + 60.seconds.toNanos)
+      val waiting = Future(io.perform(timer, 5.seconds))
+      io.perform(io.backend.ops.timer(10))
+      timer.moveTo(System.nanoTime() - 1)
+      waiting.await
+    }
+  }
+
+  test("a cancelled deadline timer can be moved and performed again without its old cancellation") {
+    running { io ?=>
+      val timer = io.backend.ops.deadlineTimer(System.nanoTime() + 60.seconds.toNanos)
+      val waiting = Future(io.perform(timer))
+      io.perform(io.backend.ops.timer(10))
+      waiting.cancel()
+      val cancelled = waiting.awaitResult.failed.toOption.exists(_.isInstanceOf[CancellationException])
+      assert(cancelled)
+      val next = System.nanoTime() + 30.millis.toNanos
+      timer.moveTo(next)
+      io.perform(timer, 5.seconds)
+      assert(System.nanoTime() - next >= 0, "the old performance completed the new one")
+    }
   }
 
   test("gears' sleep and withTimeout run on the backend's timers: the program's Io is its AsyncOperations") {
