@@ -166,16 +166,20 @@ final class DeadlineOp(initial: Long) extends RefOp with Repeatable with Deadlin
 private[reference] object Timers {
 
   /** Waits until `due()`, read again whenever woken, unless the time limit comes first. */
-  def waitUntil(ctx: Ctx, op: AnyRef, due: () => Long)(using Async): Unit =
-    while {
+  def waitUntil(ctx: Ctx, op: AnyRef, due: () => Long)(using Async): Unit = {
+    while true do {
       ctx.waiter.reset()
-      System.nanoTime() - due() < 0
-    } do {
-      if ctx.expired then throw new TimeoutException(s"$op timed out")
       val at = due()
-      ctx.waiter.park(if ctx.deadline != Long.MaxValue && ctx.deadline - at < 0 then ctx.deadline else at)
+      val timesOut = ctx.deadline != Long.MaxValue && ctx.deadline - at < 0
+      val next = if timesOut then ctx.deadline else at
+      if System.nanoTime() - next >= 0 then {
+        if timesOut then throw new TimeoutException(s"$op timed out")
+        return
+      }
+      ctx.waiter.park(next)
       if ctx.waiter.cancelled then throw new CancellationException()
     }
+  }
 }
 
 // ---- Closing
