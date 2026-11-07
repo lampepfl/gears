@@ -118,3 +118,59 @@ lazy val ioReferenceDemos =
       run / fork := true
     )
     .dependsOn(ioReference, ioTestkit.jvm)
+
+// A high performance native backend for macOS and FreeBSD.
+lazy val ioKqueue =
+  (project in file("io-kqueue"))
+    .enablePlugins(ScalaNativePlugin)
+    .settings(
+      publish / skip := false,
+      scalacOptions += "-release:21",
+      libraryDependencies += munit % Test,
+      testFrameworks += MUnitFramework,
+      Test / fork := false,
+      Test / logBuffered := false,
+      Test / logLevel := Level.Info,
+      Test / testOptions += Tests.Argument(
+        MUnitFramework,
+        "--logger=sbt",
+        "--log=info",
+        "-F"
+      ),
+      // MUnit 1.3.6's JS/Native reporter omits stack traces; the test events still carry them.
+      Test / testListeners += {
+        val log = streams.value.log
+        new TestReportListener {
+          private def printFailure(failure: Throwable): Unit = {
+            val trace = new java.io.StringWriter()
+            failure.printStackTrace(new java.io.PrintWriter(trace))
+            log.error(trace.toString)
+          }
+
+          override def startGroup(name: String): Unit = ()
+
+          override def testEvent(event: TestEvent): Unit =
+            event.detail.foreach { result =>
+              if (result.status() == sbt.testing.Status.Failure || result.status() == sbt.testing.Status.Error)
+                if (result.throwable().isDefined) printFailure(result.throwable().get)
+            }
+
+          override def endGroup(name: String, failure: Throwable): Unit = printFailure(failure)
+
+          override def endGroup(name: String, result: sbt.protocol.testing.TestResult): Unit = ()
+        }
+      }
+    )
+    .dependsOn(root.native, ioTestkit.native % Test)
+
+// The kqueue backend's demo application: the testkit's gears demos over it, as `ioKqueueDemos/run <command>`.
+lazy val ioKqueueDemos =
+  (project in file("io-kqueue/demos"))
+    .enablePlugins(ScalaNativePlugin)
+    .settings(
+      publish / skip := true,
+      scalacOptions += "-release:21",
+      Compile / mainClass := Some("referencedemos.KqueueDemos"),
+      run / fork := true
+    )
+    .dependsOn(ioKqueue, ioTestkit.native)
