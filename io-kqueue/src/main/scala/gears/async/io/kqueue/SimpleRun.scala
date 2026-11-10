@@ -1,9 +1,11 @@
 package gears.async.io.kqueue
 
-import gears.async.io.Io
 import gears.async.Async.Source
+import gears.async.CancellationException
 import gears.async.Listener
+import gears.async.io.Io
 
+import scala.concurrent.TimeoutException
 import scala.concurrent.duration.given
 
 @main def simpleRun(): Unit = {
@@ -12,9 +14,14 @@ import scala.concurrent.duration.given
   Io.run { io ?=>
     // summon[gears.async.Async].scheduler.schedule(500.millis, () => println("scheduled"))
     println("here we go...")
-    io.perform(io.backend.ops.timer(500))
-    println("after timer")
-    io.perform(io.backend.ops.timer(500))
-    println("done")
+    // io.perform(io.backend.ops.timer(500))
+    try
+      io.perform(io.backend.ops.timer(1))
+      println(s"after timer observed in thread: ${Thread.currentThread().getName}")
+    catch
+      case e: CancellationException => println(s"timer cancelled observed in thread: ${Thread.currentThread().getName}")
+      case e: TimeoutException      => println(s"timer timed out observed in thread: ${Thread.currentThread().getName}")
+    // io.perform(io.backend.ops.timer(500))
+    // println("done")
   }
 }

@@ -9,6 +9,9 @@ import scala.collection.mutable
 class TimerHeapSuite extends munit.FunSuite {
   private class FakeTimer(var deadline: Long) extends TimerOp {
     def deadlineNow: Long = deadline
+    var claimable = true
+    def claimAtDeadline(): Boolean = claimable
+    def cancel(): Unit = claimable = false
     def timerWakeup(actAfter: Long): Unit = ()
   }
 
@@ -51,6 +54,18 @@ class TimerHeapSuite extends munit.FunSuite {
     assert(!heap.removeTimer(timer))
     heap.addTimer(timer)
     assert(heap.removeTimer(timer))
+  }
+
+  test("a due timer that can't be claimed is dropped, and what is due after it is still found") {
+    val heap = Heap()
+    val refused = FakeTimer(1)
+    val other = FakeTimer(2)
+    heap.addTimer(refused)
+    heap.addTimer(other)
+    refused.cancel()
+    assertEquals(drain(heap, 5), List(other))
+    assert(!heap.removeTimer(refused))
+    assertEquals(heap.peekNextDeadline(), -1L)
   }
 
   test("a timer moved later, with no call to the heap, waits for its new deadline") {

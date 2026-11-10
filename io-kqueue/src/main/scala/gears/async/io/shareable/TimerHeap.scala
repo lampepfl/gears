@@ -1,7 +1,11 @@
 package gears.async.io.shareable
 
-import TimerHeap.{TimerOp, TimerSource}
+import gears.async.Cancellable
 import gears.async.io.shareable.Poller
+
+import scala.util.Try
+
+import TimerHeap.{TimerOp, TimerSource}
 
 object TimerHeap {
   trait TimerSource[A <: TimerOp] {
@@ -10,31 +14,43 @@ object TimerHeap {
     def notifyDeadlineChange(timerOp: TimerOp): Unit
     def debugTimerState(): String
     def addTimer(timerOp: A): Unit
-    /** Whether `timerOp` was taken out of the heap, and so will not fire. If not, it has already left the heap, to fire
-      * or having fired.
+
+    /** Whether `timerOp` was taken out of the heap, and so is guaranteed to not fire. If false then it was not in the
+      * heap to begin with.
       */
-    def removeTimer(timerOp: A): Boolean
-    /** Takes the next timer due by `now` out of the heap, or gives null if none is. */
+    def removeTimer[A1 >: A <: TimerOp](timerOp: A1): Boolean
+
+    /** Takes the next timer due by `now` out of the heap, or gives null if none is. A non-null result is guaranteed to
+      * have succeeded `claimAtDeadline` before returning. A due timer that could not be claimed is dropped.
+      */
     def nextReadyTimer(now: Long): A | Null
+
     /** When to look at the heap next, which may be before anything is due, or -1 if it is empty. */
     def peekNextDeadline(): Long
   }
 
-  trait TimerOp {
+  trait TimerOp extends Cancellable {
     def deadlineNow: Long
 
-    /** Whether there is a deadline at all. If not, `deadlineNow` means nothing, and the op stays off the heap: only what
-      * completes it can fire it.
+    /** called under the heap's lock when retrieved. If true then the heap now owns the claim for this timer. If false
+      * then the timer will be dropped by the heap.
+      */
+    def claimAtDeadline(): Boolean
+
+    /** Whether there is a deadline at all. If not, `deadlineNow` means nothing, and the op stays off the heap: only
+      * what completes it can fire it.
       */
     def hasDeadline: Boolean = true
 
-    /** Fires the timer. It left the heap for this, under the heap's lock, so `removeTimer` can no longer stop it. */
+    /** Fires the timer. Precondition: claimAtDeadline returned true.
+      */
     def timerWakeup(actAfter: Long): Unit
 
     /** Where the heap holds this timer, or -1. Guarded by the heap's lock, as is `heapKey`. */
     private[shareable] var heapIndex = -1
 
-    /** The deadline the heap orders this timer by: at most `deadlineNow`, unless a `notifyDeadlineChange` is to come. */
+    /** The deadline the heap orders this timer by: at most `deadlineNow`, unless a `notifyDeadlineChange` is to come.
+      */
     private[shareable] var heapKey = 0L
   }
 
@@ -118,12 +134,12 @@ abstract class TimerHeap[A <: TimerOp] extends Poller with TimerSource[A] {
     var next: A | Null = null
     var looking = true
     while looking do
-      if size == 0 || heap(0).heapKey > now then looking = false
+      var head: TimerOp | Null = null
+      if size == 0 || { head = heap(0); head }.heapKey > now then looking = false
+      else if head.deadlineNow > now then rekey(head)
       else
-        val head = heap(0)
-        if head.deadlineNow > now then rekey(head)
-        else
-          takeAt(0)
+        takeAt(0)
+        if head.claimAtDeadline() then
           next = head.asInstanceOf[A]
           looking = false
     next
@@ -151,7 +167,7 @@ abstract class TimerHeap[A <: TimerOp] extends Poller with TimerSource[A] {
   }
 
   /** Doesn't wake the worker, which at worst wakes for a timer no longer there, and finds nothing to do. */
-  final def removeTimer(timerOp: A): Boolean = timerLock.synchronized {
+  final override def removeTimer[A1 >: A <: TimerOp](timerOp: A1): Boolean = timerLock.synchronized {
     val held = holds(timerOp)
     if held then takeAt(timerOp.heapIndex)
     held

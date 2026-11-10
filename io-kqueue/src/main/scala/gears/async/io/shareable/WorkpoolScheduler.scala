@@ -7,23 +7,27 @@ import gears.async.Cancellable
 import gears.async.CompletionGroup
 import gears.async.Listener
 import gears.async.Scheduler
+import gears.async.SuspendSupport
+import gears.async.cancellationScope
 import gears.async.io.Backend
 import gears.async.io.Io
+import gears.async.io.shareable.TimerHeap
+import gears.async.io.shareable.TimerHeap.{TimerOp, TimerSource}
+import gears.async.io.shareable.WorkpoolScheduler.DoAfter
 import gears.async.native.NativeSuspend
 
 import scala.concurrent.duration.FiniteDuration
 import scala.util.Failure
 import scala.util.Success
 import scala.util.Try
+import scala.util.control.NonFatal
 
-import WorkpoolScheduler.{ReentrantOp, AsyncOp, Worker}
-import gears.async.io.shareable.TimerHeap.{TimerOp, TimerSource}
-import gears.async.io.shareable.WorkpoolScheduler.DoAfter
-import gears.async.SuspendSupport
-import gears.async.io.shareable.TimerHeap
+import WorkpoolScheduler.{AsyncOp, ReentrantOp, Worker}
 
-abstract class WorkpoolScheduler[Op1 <: AsyncOp & ReentrantOp, B <: Backend { type Op = Op1 }](val backend: B, workers: Int)
-    extends Scheduler
+abstract class WorkpoolScheduler[Op1 <: AsyncOp & ReentrantOp, B <: Backend { type Op = Op1 }](
+    val backend: B,
+    workers: Int
+) extends Scheduler
     with AsyncSupport
     with AsyncOperations
     with Io[B] {
@@ -33,18 +37,36 @@ abstract class WorkpoolScheduler[Op1 <: AsyncOp & ReentrantOp, B <: Backend { ty
     members.get(Thread.currentThread()) match
       case Some(worker) => worker.resumeNext(() => suspension.resume(arg))
       // A pool that has shut down refuses it: like a timer still pending, that waiter is never resumed.
-      case None         => nextWorker().submit(() => suspension.resume(arg)): Unit
+      case None => nextWorker().submit(() => suspension.resume(arg)): Unit
 
   /** Schedule a computation with the suspension boundary already created. */
   // override private[async] def scheduleBoundary(body: Label[Unit] ?=> Unit)(using s: Scheduler): Unit =
   //   s.execute(() => boundary(body))
-
 
   def makeWorker(id: Int): Worker[Op1, B]
 
   private val workerTicker = new java.util.concurrent.atomic.AtomicInteger(0)
   private val workerGroup: Array[Worker[Op1, B]] = Array.tabulate(workers)(makeWorker)
   private val members = workerGroup.map(w => w.thread -> w).toMap
+
+  /** The group the program runs under (see `Backend.run`), which a fatal error in any worker cancels: the workers go
+    * on, as they must for the program to unwind, but nothing should be built on what a fatal error left behind.
+    */
+  val rootGroup: CompletionGroup = CompletionGroup()
+
+  private val firstFatal = new java.util.concurrent.atomic.AtomicReference[Throwable | Null](null)
+
+  /** The first fatal error a worker met, or null. Whoever runs the program rethrows it once the program has ended. */
+  final def fatalFailure: Throwable | Null = firstFatal.get()
+
+  private def failFatally(failure: Throwable): Unit = {
+    firstFatal.compareAndSet(null, failure): Unit
+    rootGroup.cancel()
+  }
+
+  workerGroup.foreach(_.onFatal = failFatally)
+  // Only now: a worker's thread started as the worker was made would run it before its subclass had its fields.
+  workerGroup.foreach(_.thread.start())
   private def nextWorker(): Worker[Op1, B] = {
     val index = Math.floorMod(workerTicker.getAndIncrement(), workerGroup.length)
     workerGroup(index)
@@ -52,27 +74,25 @@ abstract class WorkpoolScheduler[Op1 <: AsyncOp & ReentrantOp, B <: Backend { ty
   protected final def workerOfCurrentThread(): Worker[Op1, B] =
     members.getOrElse(Thread.currentThread(), throw new IllegalStateException("Current thread is not a worker"))
 
-  /** The worker for an op. It must be the performer's own, or otherwise unable to fire the op before `await` has
-    * registered its listener, as firing takes no listener to mean that the performer was cancelled.
+  /** The worker for an op, whose heap holds its deadline, and which fires it. An op that `tryPerform` completes must
+    * not be firing when it returns, which holds for the performer's own worker: only its thread fires its timers.
     */
   protected def selectWorker(): Worker[Op1, B]
 
   type Scheduler = this.type
 
+  /** An op that `tryPerform` completes is complete, whatever its state says: that state is neither read nor waited
+    * for. Any other is parked on, and its own outcome is the performance's, not what the wait made of it: a performer
+    * cancelled while a worker was already doing the op's work waits for that work and returns its outcome, as the
+    * work was done. Its cancel still holds, at its next `await`.
+    */
   override def performWithin(op: backend.Op, timeoutMillis: Int)(using Async): Unit = {
     op.requestEntry()
     try {
       val worker = selectWorker()
+      op.setTimeout(timeoutMillis, worker)
       try {
-        op.setTimeout(timeoutMillis, worker)
-        if !worker.tryPerform(op) then
-          try {
-            op.await
-          } finally {
-            // Cancelled asynchronously: a firing still under way must finish before the op can be performed again.
-            if !op.settled && !worker.withdraw(op) then
-              summon[Async].withGroup(CompletionGroup.Unlinked).await(op.settling)
-          }
+        if !worker.tryPerform(op) then op.parkUntilSettled()
       } finally {
         op.clearTimeout()
       }
@@ -107,45 +127,55 @@ abstract class WorkpoolScheduler[Op1 <: AsyncOp & ReentrantOp, B <: Backend { ty
   override def schedule(delay: FiniteDuration, body: Runnable): Cancellable = {
     checkRunning()
     val worker = nextWorker()
-    val timerOp = new WorkpoolScheduler.DoAfter(TimerHeap.deadlineAfter(delay.toNanos), body)
+    val timerOp = new WorkpoolScheduler.DoAfter(worker, TimerHeap.deadlineAfter(delay.toNanos), body)
     worker.addTimer(timerOp)
-    new Cancellable {
-      override def cancel(): Unit = {
-        timerOp.timerCancelled()
-        worker.removeTimer(timerOp): Unit
-      }
-    }
+    timerOp
   }
 
 }
 
 object WorkpoolScheduler {
 
-  trait AsyncOp extends TimerOp, Async.Source[Try[Unit]] {
+  trait AsyncOp extends Async.OriginalSource[Try[Unit]] with TimerOp {
     def setTimeout(timeoutMillis: Int, source: TimerSource[?]): Unit
     def clearTimeout(): Unit
-    def settled: Boolean
-    def settling: Async.Source[Unit]
   }
 
   val SuccessUnit: Try[Unit] = Success(())
 
-  trait ReentrantOp {
-    def requestEntry(): Unit
-    def requestExit(): Unit
+  trait ReentrantOp extends Cancellable {
+
+    /** Aquires an entry permit and links cancellation */
+    def requestEntry()(using Async): Unit
+
+    /** Suspends until the op is settled, and returns or throws its outcome. If the wait is cancelled, or fails in any
+      * other way, the op is settled before this returns: at once as cancelled if no worker has claimed it, and
+      * otherwise by waiting again, uncancellably, for the worker that claimed it, which should test for cancellation
+      * as soon as possible or resolve with a complete outcome. A cancelled wait gives the op's outcome; any other
+      * failure of the wait is rethrown.
+      */
+    def parkUntilSettled()(using Async): Unit
+
+    /** Potentially resets the entry permit and unlinks cancellation */
+    def requestExit()(using Async): Unit
   }
 
-  class DoAfter(val deadlineNow: Long, body: Runnable) extends TimerOp {
+  final class DoAfter(val owner: Worker[?, ?], val deadlineNow: Long, body: Runnable) extends TimerOp {
     @volatile private var cancelled = false
     def timerWakeup(actAfter: Long): Unit = {
       if !cancelled then body.run()
     }
-    def timerCancelled(): Unit = {
+    def cancel(): Unit = {
       cancelled = true
+      owner.removeTimer(this): Unit
     }
+
+    /** called under the heap's lock when retrieved. If true then the heap now owns the claim for this timer. */
+    def claimAtDeadline(): Boolean = !cancelled
   }
 
-  abstract class Worker[Op1 <: TimerOp & ReentrantOp, B <: Backend { type Op = Op1 }](val id: Int, val backend: B) extends TimerHeap[Op1 | DoAfter] {
+  abstract class Worker[Op1 <: TimerOp & ReentrantOp, B <: Backend { type Op = Op1 }](val id: Int, val backend: B)
+      extends TimerHeap[Op1 | DoAfter] {
     // private[kqueue] val inbox: java.util.concurrent.ArrayBlockingQueue[Runnable] =
     //   new java.util.concurrent.ArrayBlockingQueue[Runnable](1024)
     private val inbox: java.util.concurrent.ConcurrentLinkedQueue[Runnable] =
@@ -153,6 +183,9 @@ object WorkpoolScheduler {
 
     /** Whether the worker has taken `task`, which it refuses once it has left `loop`. */
     def submit(task: Runnable): Boolean = {
+      println(
+        s"submit called on worker $id on thread ${Thread.currentThread().getName()}"
+      )
       inbox.add(task)
       wake()
       !exited || !inbox.remove(task)
@@ -174,34 +207,48 @@ object WorkpoolScheduler {
       */
     private val ready = new java.util.ArrayDeque[Runnable]
 
-    private[WorkpoolScheduler] def resumeNext(continuation: Runnable): Unit = ready.addLast(continuation)
+    private[WorkpoolScheduler] def resumeNext(continuation: Runnable): Unit =
+      println(
+        s"resumeNext called on worker $id on thread ${Thread.currentThread().getName()}"
+      )
+      ready.addLast(continuation)
 
     private[WorkpoolScheduler] val thread = {
       val t = new Thread(() => loop())
+      t.setName(s"WorkpoolSchedulerWorker-$id")
       t.setDaemon(true)
-      t.start()
       t
     }
 
-    /**
-     * Attempt to perform the given operation, putting it on the heap only if it `hasDeadline`.
-     * @return true if the operation is already completed, otherwise false which requires a subsequent await
-     */
-    def tryPerform(op: Op1): Boolean
-
-    /** Takes back an op whose performer was cancelled, from any thread, as that performer can resume on another worker.
-      *
+    /** Attempt to perform the given operation, putting it on the heap only if it `hasDeadline`.
       * @return
-      *   true if nothing will fire the op now, false if it has left the heap to fire, which will settle it.
+      *   true if the operation is already completed, otherwise false which requires a subsequent await
       */
-    def withdraw(op: Op1): Boolean = !op.hasDeadline || removeTimer(op)
+    def tryPerform(op: Op1): Boolean
 
     def isEmpty(): Boolean = inbox.isEmpty() && ready.isEmpty()
 
-    /** A worker outlives what it runs: its timers and inbox would otherwise be lost, with nothing to say so. */
+    /** A worker outlives what it runs, as event loops do: it can't be replaced, and its timers and inbox would be lost
+      * with it. What a task throws, of any kind, is reported to the thread's uncaught exception handler, as it would be
+      * had it ended the thread, so that a program can install its own; by default that prints it. A fatal error
+      * also cancels the program (see `rootGroup`).
+      */
     private inline def guarded(inline body: Unit): Unit =
       try body
-      catch case ex: Throwable => ex.printStackTrace()
+      catch
+        case failure: Throwable =>
+          reportFailure(failure)
+          if !NonFatal(failure) then onFatal(failure)
+
+    /** Set by the scheduler before the worker's thread starts: what a fatal error does beyond being reported. */
+    private[WorkpoolScheduler] var onFatal: Throwable => Unit = _ => ()
+
+    private def reportFailure(failure: Throwable): Unit = {
+      val current = Thread.currentThread()
+      // A handler that throws must not take the worker with it either.
+      try current.getUncaughtExceptionHandler().uncaughtException(current, failure)
+      catch case _: Throwable => failure.printStackTrace()
+    }
 
     /** Has a budget so that tasks resuming each other can't keep the worker from its timers and inbox. */
     private def runReady(): Unit = {

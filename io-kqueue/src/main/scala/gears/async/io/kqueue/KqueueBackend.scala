@@ -42,13 +42,24 @@ object KqueueBackend
 
   def pool(bufferSize: Int, buffers: Int): BufferPool = new NativePool(bufferSize, buffers)
 
-  /** Runs `program` on a pool of one worker for each processor, shutting it down afterwards. */
+  /** Runs `program` on a pool of one worker for each processor, shutting it down afterwards. The program runs under
+    * the pool's group: a fatal error in a worker cancels it, and is thrown from here once it has unwound.
+    */
   private[io] def run[T](program: Io[this.type] ?=> Async.Spawn ?=> T): T = {
     val pool = KqueueScheduler(Runtime.getRuntime.availableProcessors)
     given poolSupport: (AsyncSupport { type Scheduler = pool.Scheduler }) = pool
     given poolScheduler: pool.Scheduler = pool
     // `Async.blocking` runs its body on the calling thread.
-    try Async.blocking(Future(program(using pool)).await)
-    finally pool.shutdown()
+    try
+      val outcome = Async.blocking({
+        Async.withNewCompletionGroup(pool.rootGroup)(Future(program(using pool)).awaitResult)
+      })
+      println("Finished program")
+      val fatal = pool.fatalFailure
+      if fatal != null then throw fatal
+      outcome.get
+    finally
+      println("Shutting down pool")
+      pool.shutdown()
   }
 }

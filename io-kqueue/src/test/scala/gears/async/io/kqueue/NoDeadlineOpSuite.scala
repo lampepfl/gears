@@ -60,7 +60,7 @@ class NoDeadlineOpSuite extends munit.FunSuite {
     case _                                 => false
   }
 
-  test("cancelling the performer of an op with no deadline doesn't wait for it to settle") {
+  test("cancelling the performer of an op with no deadline settles the op as cancelled, with nothing to fire it") {
     onPool { io ?=>
       val op = WaitingOp()
       val started = Promise[Unit]()
@@ -72,7 +72,9 @@ class NoDeadlineOpSuite extends munit.FunSuite {
       performer.cancel()
       val outcome = performer.awaitResult
       assert(isCancelled(outcome), outcome.toString)
-      assert(!op.settled)
+      assert(op.settled)
+      assert(isCancelled(op.poll().get), op.poll().toString)
+      assert(!op.claimAtDeadline())
     }
   }
 
@@ -102,7 +104,7 @@ class NoDeadlineOpSuite extends munit.FunSuite {
       cancelled.awaitResult: Unit
 
       val performer = Future(io.perform(op))
-      summon[Async].scheduler.execute(() => op.timerWakeup(System.nanoTime()))
+      summon[Async].scheduler.execute(() => if op.claimAtDeadline() then op.timerWakeup(System.nanoTime()))
       assertEquals(performer.awaitResult, Success(()))
     }
   }

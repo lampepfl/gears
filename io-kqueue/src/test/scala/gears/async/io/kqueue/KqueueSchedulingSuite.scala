@@ -113,6 +113,61 @@ class KqueueSchedulingSuite extends munit.FunSuite {
     }
   }
 
+  test("what a task throws is reported to the uncaught exception handler, on its worker's thread") {
+    val reported = new java.util.concurrent.ConcurrentLinkedQueue[(String, Throwable)]
+    val previous = Thread.getDefaultUncaughtExceptionHandler()
+    Thread.setDefaultUncaughtExceptionHandler((thread, failure) => reported.add((thread.getName(), failure)): Unit)
+    try {
+      val thrown = new RuntimeException("expected: a throwing task")
+      val fatal = new LinkageError("expected: a task throwing a fatal error")
+      onPool(2) {
+        val scheduler = summon[Async].scheduler
+        scheduler.execute(() => throw thrown)
+        scheduler.schedule(1.milli, () => throw fatal): Unit
+        AsyncOperations.sleep(50)
+        assertEquals((1 to 8).map(i => Future(i)).map(_.await).sum, 36) // both workers are still there
+      }
+      val failures = reported.toArray(Array.empty[(String, Throwable)]).toList
+      assertEquals(failures.map(_._2).toSet, Set[Throwable](thrown, fatal))
+      assert(failures.forall(_._1.startsWith("WorkpoolSchedulerWorker-")), failures.map(_._1).toString)
+    } finally Thread.setDefaultUncaughtExceptionHandler(previous)
+  }
+
+  test("a fatal error in a task cancels the program, and the run throws it once the program has unwound") {
+    val previous = Thread.getDefaultUncaughtExceptionHandler()
+    Thread.setDefaultUncaughtExceptionHandler((_, _) => ()) // reported there too, which is not what is tested here
+    try {
+      given KqueueBackend.type = KqueueBackend
+      val fatal = new LinkageError("expected: a task throwing a fatal error")
+      @volatile var unwound = false
+      val thrown =
+        try {
+          Io.run { io ?=>
+            summon[Async].scheduler.schedule(10.millis, () => throw fatal): Unit
+            try io.perform(io.backend.ops.timer(30.seconds))
+            finally unwound = true
+          }
+          None
+        } catch { case error: LinkageError => Some(error) }
+      assertEquals(thrown, Some(fatal))
+      assert(unwound, "the program was not cancelled")
+    } finally Thread.setDefaultUncaughtExceptionHandler(previous)
+  }
+
+  test("a task that throws a plain exception does not cancel the program") {
+    val previous = Thread.getDefaultUncaughtExceptionHandler()
+    Thread.setDefaultUncaughtExceptionHandler((_, _) => ())
+    try {
+      given KqueueBackend.type = KqueueBackend
+      val result = Io.run { io ?=>
+        summon[Async].scheduler.execute(() => throw new RuntimeException("expected: a throwing task"))
+        io.perform(io.backend.ops.timer(20.millis))
+        1
+      }
+      assertEquals(result, 1)
+    } finally Thread.setDefaultUncaughtExceptionHandler(previous)
+  }
+
   test("a waiter resumed by one timer can move the next timer due") {
     onPool(1) { io ?=>
       val due = System.nanoTime() + 20_000_000L
