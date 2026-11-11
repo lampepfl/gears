@@ -6,7 +6,9 @@ import gears.async.AsyncSupport
 import gears.async.CompletionGroup
 import gears.async.Future
 import gears.async.Future.Promise
+import gears.async.cancellationScope
 import gears.async.io.shareable.AbstractMakeTimerOp
+import gears.async.io.shareable.MonitorPoller
 import gears.async.io.shareable.WorkpoolScheduler
 import gears.async.native.NativeSuspend
 
@@ -43,10 +45,10 @@ private[kqueue] final class SlowScheduler
     with NativeSuspend {
   override protected def selectWorker() = workerOfCurrentThread()
   def heapOfCurrentWorker(): String = workerOfCurrentThread().debugTimerState()
-  override def makeWorker(id: Int) = new WorkpoolScheduler.Worker[SlowOp, SlowBackend.type](id, SlowBackend) {
-    override def tryPerform(op: SlowOp): Boolean = {
+  override def makeWorker(id: Int) = new WorkpoolScheduler.Worker[SlowOp, SlowBackend.type](id, SlowBackend) with MonitorPoller {
+    override def performOp(op: SlowOp)(using Async): Unit = {
       addTimer(op)
-      false
+      op.parkUntilSettled()
     }
   }
 }
@@ -130,20 +132,26 @@ class OpPerformanceSuite extends munit.FunSuite {
     }
   }
 
-  test("a performer cancelled before its op is claimed settles it as cancelled, so that nothing fires it afterwards") {
+  test("a performer whose group is cancelled waits only on its op, which settles as cancelled once the cancel reaches it") {
     onPool { io =>
       val op = SlowOp(10.seconds, 0)
-      // The performer's group is cancelled, but the cancel has yet to reach the op, which a live group holds.
       val group = CompletionGroup()
+      val parked = Promise[Unit]()
+      @volatile var outcome: Try[Unit] | Null = null
+      val performer = Future {
+        given Async = summon[Async].withGroup(group)
+        op.performWith {
+          parked.complete(Success(()))
+          outcome = Try(op.parkUntilSettled())
+        }
+      }
+      parked.asFuture.await
       group.cancel()
-      op.requestEntry()
-      try {
-        val outcome = Try(op.parkUntilSettled()(using summon[Async].withGroup(group)))
-        assert(outcome.failed.toOption.exists(_.isInstanceOf[CancellationException]), outcome.toString)
-        assert(op.settled)
-        assert(!op.claimAtDeadline())
-        assertEquals(op.started.get(), 0)
-      } finally op.requestExit()
+      performer.await
+      assert(outcome.nn.failed.toOption.exists(_.isInstanceOf[CancellationException]), outcome.toString)
+      assert(op.settled)
+      assert(!op.claimAtDeadline())
+      assertEquals(op.started.get(), 0)
     }
   }
 }

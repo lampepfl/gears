@@ -1,6 +1,13 @@
 package gears.async.io.shareable
 
-abstract class Poller {
+trait Poller extends AutoCloseable {
+  protected def id: Int
+  protected def wake(): Unit
+  protected def isEmpty(): Boolean
+  protected def waitForDeadline(deadlineTask: Long): Unit
+}
+
+trait MonitorPoller extends Poller {
   private val notifier = new Object
 
   protected def wake(): Unit = notifier.synchronized {
@@ -10,7 +17,7 @@ abstract class Poller {
 
   protected def isEmpty(): Boolean
 
-  def waitForDeadline(deadlineTask: Long): Unit = notifier.synchronized {
+  protected def waitForDeadline(deadlineTask: Long): Unit = notifier.synchronized {
     // Anything that arrived after the reads above has set `signalled`; the inbox may also be over budget.
     if !signalled && isEmpty() then
       if deadlineTask >= 0 then
@@ -24,4 +31,6 @@ abstract class Poller {
     * if the worker is not yet waiting.
     */
   private var signalled = false
+
+  def close(): Unit = () // nothing to cleanup
 }

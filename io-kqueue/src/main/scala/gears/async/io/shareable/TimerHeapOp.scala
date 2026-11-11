@@ -6,6 +6,7 @@ import gears.async.Listener
 import gears.async.io.Deadline
 import gears.async.io.Repeatable
 import gears.async.io.shareable.TimerHeapOp.CancelledSentinel
+import gears.async.io.shareable.TimerHeapOp.Outcome
 
 import java.sql.Time
 import java.util.concurrent.CancellationException
@@ -27,63 +28,36 @@ object TimerHeapOp {
   case object CancelledSentinel
   case object TimerFired
   type State = Try[Unit] | TimerFired.type | CancelledSentinel.type | Null
+  type Outcome = Try[Unit] | CancelledSentinel.type
 }
 
 trait TimerHeapOp extends WorkpoolScheduler.AsyncOp, WorkpoolScheduler.ReentrantOp
 
 sealed abstract class AbstractTimerHeapOp
-    extends Async.OriginalSource[Try[Unit]]
+    extends Async.OriginalSource[Outcome]
     with TimerHeapOp
     with TimerHeapOp.Hooks {
 
   /** Perform work after a timer has woken and there was no timeout. Result will be used to complete the operation.
     */
-  def wakeup(resumedAt: Long): Try[Unit]
+  def wakeup(resumedAt: Long): Outcome
 
-  /** Waits for the op's outcome, and returns or throws it. The outcome is the op's own, not what the `await` made of
-    * it: if the wait is cancelled, or fails in any other way, the op is settled first, so that the performer never
-    * leaves with a worker still firing it. A cancelled wait then gives whatever the op settled as, which is its work's
-    * outcome if a worker had already claimed it, and the wait's own cancellation if not; any other failure of the wait
-    * is rethrown once the op has settled, carrying as suppressed the op's own failure, if it settled as one, or a
-    * failure to settle it.
+  /** Waits for the op's outcome, and returns or throws it. The wait is under no group, so that only the op can end it:
+    * a cancel reaches the performer through the op, which `performWith` links to the performer's group, and which
+    * settles as cancelled if no worker has claimed it, and otherwise leaves the performer waiting for that worker's
+    * outcome, as the work was done. That cancel is not lost: the group stays cancelled.
+    *
+    * Nothing here recovers from a wait that throws, as there is nothing to recover to: what a fibre's `await` throws
+    * while registering its listener leaves through the fibre's boundary, not through this call.
     */
   def parkUntilSettled()(using Async): Unit = {
-    val outcome =
-      try summon[Async].await(this)
-      catch
-        case cancel: CancellationException =>
-          ensureSettled() match
-            // Cancelled in time: the wait's own exception says so, with the trace of where it was waiting.
-            case Failure(_: CancellationException) => throw cancel
-            // Claimed before the cancel: the op's outcome stands. The cancel is not lost, as the group stays cancelled.
-            case settled => settled
-        case NonFatal(failure) =>
-          try
-            ensureSettled() match
-              // The op's own failure goes with the wait's. A cancellation is no news: settling an unclaimed op makes one.
-              case Failure(outcome) if !outcome.isInstanceOf[CancellationException] && (outcome ne failure) =>
-                failure.addSuppressed(outcome)
-              case _ => ()
-          catch
-            case NonFatal(unsettled) if (unsettled ne failure) =>
-              failure.addSuppressed(unsettled)
-          throw failure
-    outcome.get
+    val out = state.get() match
+      case out: Outcome => out
+      case _            => summon[Async].withGroup(CompletionGroup.Unlinked).await(this)
+    out match
+      case result: Try[Unit]             => result.get
+      case TimerHeapOp.CancelledSentinel => throw new CancellationException()
   }
-
-  /** Settles the op if nothing has claimed it, and otherwise waits for whoever claimed it to settle it. The op may
-    * still be on its heap: settling it as cancelled here is what keeps the heap from claiming it, as both go for the
-    * same state, and only one can win.
-    */
-  private final def ensureSettled()(using Async): Try[Unit] =
-    println(
-      s"ensureSettled called on ${this.getClass.getSimpleName}@${System.identityHashCode(this)} on thread ${Thread.currentThread().getName()}"
-    )
-    if !tryCancel() && (state.get() eq TimerHeapOp.TimerFired) then
-      val _ = removeListener() // the performer's own cancelled listener may still be there
-      // Not under the performer's group, which may be cancelled, and would not wait.
-      val _ = summon[Async].withGroup(CompletionGroup.Unlinked).await(this)
-    settledResult() // settled by now, one way or another
 
   // async state management
 
@@ -114,8 +88,8 @@ sealed abstract class AbstractTimerHeapOp
     _cancelLater
   }
 
-  protected inline def checkCancellationBeforeWork(inline body: Try[Unit]): Try[Unit] = {
-    if cancelledDuringWork then Failure(new CancellationException("Operation cancelled"))
+  protected inline def checkCancellationBeforeWork(inline body: Try[Unit]): Try[Unit] | CancelledSentinel.type = {
+    if cancelledDuringWork then TimerHeapOp.CancelledSentinel
     else body
   }
 
@@ -134,19 +108,18 @@ sealed abstract class AbstractTimerHeapOp
         _cancelLater = true
         null
     }
-    if waiting != null then completeListener(TimerHeapOp.CancelledSentinel, waiting): Unit
+    if waiting != null then waiting.completeNow(TimerHeapOp.CancelledSentinel, this): Unit
 
-  def cancelledImmediately: Boolean = state.get() == TimerHeapOp.CancelledSentinel
+  def isCancelled: Boolean = state.get() == TimerHeapOp.CancelledSentinel
 
-  /** Settles the op with the given result. Throws if not completed from the timer state. */
-  private def completeFromTimer(result: Try[Unit]): Unit = {
+  private def completeFromTimer(result: Outcome): Unit = {
     // Settled and its listener taken as one step, which `requestExit` waits for: a performer that sees the outcome and
     // leaves can't have its next performance's listener taken for this one.
     val waiting = synchronized {
       if !state.compareAndSet(TimerHeapOp.TimerFired, result) then throw new IllegalStateException("Did not claim work")
       removeListener()
     }
-    if waiting != null then completeListener(result, waiting): Unit
+    if waiting != null then waiting.completeNow(result, this): Unit
   }
 
   private final def tryCancel(): Boolean = {
@@ -155,44 +128,37 @@ sealed abstract class AbstractTimerHeapOp
 
   // gears.async.Source implementation
 
-  @volatile private var listener: Listener[Try[Unit]] | Null = null
+  @volatile private var listener: Listener[Outcome] | Null = null
 
-  final protected def removeListener(): Listener[Try[Unit]] | Null = synchronized {
+  final protected def removeListener(): Listener[Outcome] | Null = synchronized {
     val l = listener
     listener = null
     l
   }
 
-  final override def poll(k: Listener[Try[Unit]]): Boolean =
-    completeListener(state.get(), k)
+  final override def poll(k: Listener[Outcome]): Boolean =
+    pollListener(state.get(), k)
 
-  final override def poll(): Option[Try[Unit]] =
+  final override def poll(): Option[Outcome] =
     state.get() match
       case null                   => None
       case data: Try[Unit]        => Some(data)
-      case CancelledSentinel      => Some(Failure(new CancellationException()))
+      case CancelledSentinel      => Some(CancelledSentinel)
       case TimerHeapOp.TimerFired => None
 
-  final def settledResult(): Try[Unit] =
-    state.get() match
-      case null                   => Failure(new IllegalStateException("Op not settled"))
-      case data: Try[Unit]        => data
-      case CancelledSentinel      => Failure(new CancellationException())
-      case TimerHeapOp.TimerFired => Failure(new IllegalStateException("Op not settled"))
-
-  private final def completeListener(state: TimerHeapOp.State, k: Listener[Try[Unit]]): Boolean =
+  private final def pollListener(state: TimerHeapOp.State, k: Listener[Outcome]): Boolean =
     state match
       case null                   => false
       case data: Try[Unit]        => k.completeNow(data, this)
-      case CancelledSentinel      => k.completeNow(Failure(new CancellationException()), this)
+      case CancelledSentinel      => k.completeNow(CancelledSentinel, this)
       case TimerHeapOp.TimerFired => false
 
-  final override protected def addListener(k: Listener[Try[Unit]]): Unit = synchronized:
+  final override protected def addListener(k: Listener[Outcome]): Unit = synchronized:
     if listener != null then throw new IllegalStateException("Listener already registered")
     listener = k
 
   /** Best effort, as `Source` has it: `settle` may already have taken the listener. */
-  final override def dropListener(k: Listener[Try[Unit]]): Unit = synchronized:
+  final override def dropListener(k: Listener[Outcome]): Unit = synchronized:
     if listener eq k then listener = null
 
   // end gears.async.Source implementation
@@ -261,7 +227,7 @@ sealed abstract class AbstractTimerHeapOp
         then Failure(new TimeoutException("operation timed out"))
         else wakeup(resumedAt)
       catch
-        case NonFatal(ex) => Failure(ex)
+        case NonFatal(ex)     => Failure(ex)
         case fatal: Throwable =>
           // Not handled here, and thrown on: but an op left claimed would keep its performer waiting for ever, with
           // no cancel able to release it.
@@ -282,19 +248,14 @@ abstract class SingleUseAbstractTimerHeapOp extends AbstractTimerHeapOp {
         // Not entered after all, so not linked either: `requestExit` will not be called to undo it.
         spentState.set(0)
         throw failure
-    link()
   }
   final def requestExit()(using Async): Unit = {
-    try {
-      val entered = spentState.compareAndSet(1, 2) // Attempt to mark as exited
-      if !entered then
-        val v = spentState.get()
-        if v == 0 then throw new IllegalStateException("Not entered")
-        else throw new IllegalStateException("Already exited")
-      val _ = removeListener()
-    } finally {
-      unlink()
-    }
+    val entered = spentState.compareAndSet(1, 2) // Attempt to mark as exited
+    if !entered then
+      val v = spentState.get()
+      if v == 0 then throw new IllegalStateException("Not entered")
+      else throw new IllegalStateException("Already exited")
+    val _ = removeListener()
   }
 }
 
@@ -314,7 +275,6 @@ abstract class RepeatableAbstractTimerHeapOp extends AbstractTimerHeapOp with Re
         entered.set(false)
         throw failure
     }
-    link()
   }
   final def requestExit()(using Async): Unit = {
     if !entered.get() then throw new IllegalStateException("Not entered")
@@ -324,7 +284,6 @@ abstract class RepeatableAbstractTimerHeapOp extends AbstractTimerHeapOp with Re
       )
       val _ = removeListener()
     } finally {
-      unlink()
       // Last: a performer let in any sooner would have its listener and its link taken by the lines above.
       entered.set(false)
     }
@@ -351,7 +310,7 @@ abstract class AbstractMakeTimerOp(duration: FiniteDuration) extends RepeatableA
 
   override protected def hasOwnDeadline: Boolean = true
 
-  def wakeup(resumedAt: Long): Try[Unit] =
+  def wakeup(resumedAt: Long): Try[Unit] | CancelledSentinel.type =
     checkCancellationBeforeWork(WorkpoolScheduler.SuccessUnit)
 }
 
@@ -379,6 +338,6 @@ abstract class AbstractMakeDeadlineOp(initial: Long) extends RepeatableAbstractT
 
   override protected def hasOwnDeadline: Boolean = true
 
-  def wakeup(resumedAt: Long): Try[Unit] =
+  def wakeup(resumedAt: Long): Try[Unit] | CancelledSentinel.type =
     checkCancellationBeforeWork(WorkpoolScheduler.SuccessUnit)
 }

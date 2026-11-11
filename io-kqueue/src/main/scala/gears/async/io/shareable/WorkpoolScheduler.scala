@@ -8,6 +8,7 @@ import gears.async.CompletionGroup
 import gears.async.Listener
 import gears.async.Scheduler
 import gears.async.SuspendSupport
+import gears.async.Suspension
 import gears.async.cancellationScope
 import gears.async.io.Backend
 import gears.async.io.Io
@@ -35,7 +36,7 @@ abstract class WorkpoolScheduler[Op1 <: AsyncOp & ReentrantOp, B <: Backend { ty
   override private[async] def resumeAsync[T, R](suspension: Suspension[T, R])(arg: T)(using s: Scheduler): Unit =
     // Not here and now: the caller holds the listener's lock, and may hold a source's, partway through changing it.
     members.get(Thread.currentThread()) match
-      case Some(worker) => worker.resumeNext(() => suspension.resume(arg))
+      case Some(worker) => worker.resumeNext(suspension, arg)
       // A pool that has shut down refuses it: like a timer still pending, that waiter is never resumed.
       case None => nextWorker().submit(() => suspension.resume(arg)): Unit
 
@@ -81,23 +82,20 @@ abstract class WorkpoolScheduler[Op1 <: AsyncOp & ReentrantOp, B <: Backend { ty
 
   type Scheduler = this.type
 
-  /** An op that `tryPerform` completes is complete, whatever its state says: that state is neither read nor waited
-    * for. Any other is parked on, and its own outcome is the performance's, not what the wait made of it: a performer
-    * cancelled while a worker was already doing the op's work waits for that work and returns its outcome, as the
-    * work was done. Its cancel still holds, at its next `await`.
+  /** An op that `tryPerform` completes is complete, whatever its state says: that state is neither read nor waited for.
+    * Any other is parked on, and its own outcome is the performance's, not what the wait made of it: a performer
+    * cancelled while a worker was already doing the op's work waits for that work and returns its outcome, as the work
+    * was done. Its cancel still holds, at its next `await`.
     */
   override def performWithin(op: backend.Op, timeoutMillis: Int)(using Async): Unit = {
-    op.requestEntry()
-    try {
+    op.performWith {
       val worker = selectWorker()
       op.setTimeout(timeoutMillis, worker)
       try {
-        if !worker.tryPerform(op) then op.parkUntilSettled()
+        worker.performOp(op)
       } finally {
         op.clearTimeout()
       }
-    } finally {
-      op.requestExit()
     }
   }
 
@@ -136,8 +134,16 @@ abstract class WorkpoolScheduler[Op1 <: AsyncOp & ReentrantOp, B <: Backend { ty
 
 object WorkpoolScheduler {
 
-  trait AsyncOp extends Async.OriginalSource[Try[Unit]] with TimerOp {
+  trait AsyncOp extends TimerOp {
     def setTimeout(timeoutMillis: Int, source: TimerSource[?]): Unit
+
+    /** Suspends until the op is settled, and returns or throws its outcome. Only the op ends the wait: cancelled
+      * through the group it is linked to, it settles at once as cancelled if no worker has claimed it, and otherwise
+      * keeps the performer waiting for the worker that claimed it, which should test for cancellation as soon as
+      * possible or resolve with a complete outcome.
+      */
+    def parkUntilSettled()(using Async): Unit
+
     def clearTimeout(): Unit
   }
 
@@ -145,18 +151,18 @@ object WorkpoolScheduler {
 
   trait ReentrantOp extends Cancellable {
 
-    /** Aquires an entry permit and links cancellation */
+    inline final def performWith(inline fn: Async ?=> Unit)(using Async): Unit =
+      requestEntry()
+      try
+        link()
+        try fn
+        finally unlink()
+      finally requestExit()
+
+    /** Aquires an entry permit, on success then caller may proceed to link. */
     def requestEntry()(using Async): Unit
 
-    /** Suspends until the op is settled, and returns or throws its outcome. If the wait is cancelled, or fails in any
-      * other way, the op is settled before this returns: at once as cancelled if no worker has claimed it, and
-      * otherwise by waiting again, uncancellably, for the worker that claimed it, which should test for cancellation
-      * as soon as possible or resolve with a complete outcome. A cancelled wait gives the op's outcome; any other
-      * failure of the wait is rethrown.
-      */
-    def parkUntilSettled()(using Async): Unit
-
-    /** Potentially resets the entry permit and unlinks cancellation */
+    /** Potentially resets the entry permit. Caller should unlink first */
     def requestExit()(using Async): Unit
   }
 
@@ -174,7 +180,7 @@ object WorkpoolScheduler {
     def claimAtDeadline(): Boolean = !cancelled
   }
 
-  abstract class Worker[Op1 <: TimerOp & ReentrantOp, B <: Backend { type Op = Op1 }](val id: Int, val backend: B)
+  abstract class Worker[Op1 <: TimerOp, B <: Backend { type Op = Op1 }](val id: Int, val backend: B)
       extends TimerHeap[Op1 | DoAfter] {
     // private[kqueue] val inbox: java.util.concurrent.ArrayBlockingQueue[Runnable] =
     //   new java.util.concurrent.ArrayBlockingQueue[Runnable](1024)
@@ -202,16 +208,21 @@ object WorkpoolScheduler {
       wake()
     }
 
+    private class Continuation[T, R](val suspension: Suspension[T, R], val value: T):
+      def run(): Unit = {
+        val _ = suspension.resume(value)
+      }
+
     /** Worker thread only: continuations to run as soon as the listener resuming them has returned, ahead of the rest
       * of the timers and the inbox. Declared before `thread`, which reads it from the moment it starts.
       */
-    private val ready = new java.util.ArrayDeque[Runnable]
+    private val ready = new java.util.ArrayDeque[Continuation[?, ?]]
 
-    private[WorkpoolScheduler] def resumeNext(continuation: Runnable): Unit =
+    private[WorkpoolScheduler] def resumeNext[T, R](suspension: Suspension[T, R], value: T): Unit =
       println(
         s"resumeNext called on worker $id on thread ${Thread.currentThread().getName()}"
       )
-      ready.addLast(continuation)
+      ready.addLast(Continuation(suspension, value))
 
     private[WorkpoolScheduler] val thread = {
       val t = new Thread(() => loop())
@@ -220,18 +231,17 @@ object WorkpoolScheduler {
       t
     }
 
-    /** Attempt to perform the given operation, putting it on the heap only if it `hasDeadline`.
-      * @return
-      *   true if the operation is already completed, otherwise false which requires a subsequent await
+    /** Does the core work of performing an operation, when it returns the operation is guaranteed to have been
+      * processed.
       */
-    def tryPerform(op: Op1): Boolean
+    def performOp(op: Op1)(using Async): Unit
 
     def isEmpty(): Boolean = inbox.isEmpty() && ready.isEmpty()
 
     /** A worker outlives what it runs, as event loops do: it can't be replaced, and its timers and inbox would be lost
       * with it. What a task throws, of any kind, is reported to the thread's uncaught exception handler, as it would be
-      * had it ended the thread, so that a program can install its own; by default that prints it. A fatal error
-      * also cancels the program (see `rootGroup`).
+      * had it ended the thread, so that a program can install its own; by default that prints it. A fatal error also
+      * cancels the program (see `rootGroup`).
       */
     private inline def guarded(inline body: Unit): Unit =
       try body
@@ -297,6 +307,7 @@ object WorkpoolScheduler {
       while !isEmpty() do
         drainInbox()
         runReady()
+      close()
     }
   }
 }

@@ -12,11 +12,9 @@ import scala.concurrent.duration.given
   given KqueueBackend.type = KqueueBackend
 
   Io.run { io ?=>
-    // summon[gears.async.Async].scheduler.schedule(500.millis, () => println("scheduled"))
     println("here we go...")
-    // io.perform(io.backend.ops.timer(500))
     try
-      io.perform(io.backend.ops.timer(1))
+      io.perform(io.backend.ops.timer(500))
       println(s"after timer observed in thread: ${Thread.currentThread().getName}")
     catch
       case e: CancellationException => println(s"timer cancelled observed in thread: ${Thread.currentThread().getName}")
