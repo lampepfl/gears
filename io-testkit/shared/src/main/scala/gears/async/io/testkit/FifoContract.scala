@@ -9,15 +9,15 @@ import java.nio.file.Files
 
 /** FIFO operations, requiring only Fifos and host filesystem setup. */
 trait FifoContract extends FileSystemFixture {
-  val backend: Backend & Fifos
+  val backend: Backend { val ops: Fifos }
 
   /** A FIFO's read end from the `openFifoForReading` op, whose failure is thrown. */
-  protected def openFifoForReading(io: Io[backend.type], path: String)(using Async): Readable = {
+  protected def openFifoForReading(io: Io[backend.ops.type], path: String)(using Async): Readable = {
     opening(io)(slot => backend.ops.openFifoForReading(path, slot))
   }
 
   /** A FIFO's write end from the `openFifoForWriting` op, whose failure is thrown. */
-  protected def openFifoForWriting(io: Io[backend.type], path: String)(using Async): Writable = {
+  protected def openFifoForWriting(io: Io[backend.ops.type], path: String)(using Async): Writable = {
     opening(io)(slot => backend.ops.openFifoForWriting(path, slot))
   }
 

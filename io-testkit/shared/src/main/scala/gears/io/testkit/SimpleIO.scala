@@ -4,9 +4,9 @@ import gears.async.Async
 import gears.async.BufferedChannel
 import gears.async.Channel
 import gears.async.Future
-import gears.async.io.Backend
 import gears.async.io.BufferPool
 import gears.async.io.Fifos
+import gears.async.io.Interface
 import gears.async.io.Io
 import gears.async.io.IpAddress
 import gears.async.io.IpDatagrams
@@ -38,7 +38,7 @@ object SimpleIO {
   val Linger: scala.concurrent.duration.FiniteDuration = scala.concurrent.duration.FiniteDuration(2, "s")
 
   /** Performs the op `open` builds, which opens a handle into the slot it is given, and returns the handle. */
-  private def opened[K <: AnyRef](using io: Io[Backend], async: Async)(open: Slot[K] => io.Op): K = {
+  private def opened[K <: AnyRef](using io: Io[Interface], async: Async)(open: Slot[K] => io.Op): K = {
     val into = Slot[K]()
     io.perform(open(into))
     into.clear()
@@ -83,36 +83,36 @@ object SimpleIO {
     opened[io.backend.ops.UnixConnectedDatagram](io.backend.ops.connectDatagram(local, remote, _))
 
   /** Opens a pipe and returns its read end and its write end. */
-  def pipe()(using io: Io[Pipes], async: Async): (io.Readable, io.Writable) = {
-    val read = Slot[io.Readable]()
-    val write = Slot[io.Writable]()
+  def pipe()(using io: Io[Pipes], async: Async): (io.backend.ops.Readable, io.backend.ops.Writable) = {
+    val read = Slot[io.backend.ops.Readable]()
+    val write = Slot[io.backend.ops.Writable]()
     io.perform(io.backend.ops.pipe(read, write))
     (read.clear(), write.clear())
   }
 
   /** Opens the FIFO at `path` for reading and returns it. */
-  def openFifoForReading(path: String)(using io: Io[Fifos], async: Async): io.Readable =
-    opened[io.Readable](io.backend.ops.openFifoForReading(path, _))
+  def openFifoForReading(path: String)(using io: Io[Fifos], async: Async): io.backend.ops.Readable =
+    opened[io.backend.ops.Readable](io.backend.ops.openFifoForReading(path, _))
 
   /** Opens the FIFO at `path` for writing and returns it. */
-  def openFifoForWriting(path: String)(using io: Io[Fifos], async: Async): io.Writable =
-    opened[io.Writable](io.backend.ops.openFifoForWriting(path, _))
+  def openFifoForWriting(path: String)(using io: Io[Fifos], async: Async): io.backend.ops.Writable =
+    opened[io.backend.ops.Writable](io.backend.ops.openFifoForWriting(path, _))
 
   /** Reads into `buf` once and returns how many bytes arrived, 0 at the end of the stream. */
-  def read(using io: Io[Backend])(handle: io.Readable, buf: ByteBuffer)(using Async): Int = {
+  def read(using io: Io[Interface])(handle: io.backend.ops.Readable, buf: ByteBuffer)(using Async): Int = {
     val before = buf.position()
     io.perform(io.backend.ops.read(handle, buf))
     buf.position() - before
   }
 
   /** Writes all of `buf`, however many writes it takes. */
-  def writeAll(using io: Io[Backend])(handle: io.Writable, buf: ByteBuffer)(using Async): Unit = {
+  def writeAll(using io: Io[Interface])(handle: io.backend.ops.Writable, buf: ByteBuffer)(using Async): Unit = {
     val write = io.backend.ops.write(handle, buf)
     while buf.hasRemaining do io.perform(write)
   }
 
   /** Shuts a connected stream down for writing: the peer reads what was written, then the end of the stream, and this
-    * side may still read (see `StreamSocketOps.shutdownOutput`).
+    * side may still read (see `StreamSockets.shutdownOutput`).
     */
   def shutdownOutput(using io: Io[StreamSockets])(handle: io.backend.ops.Connection)(using Async): Unit =
     io.perform(io.backend.ops.shutdownOutput(handle))
@@ -146,7 +146,9 @@ object SimpleIO {
     } finally io.perform(io.backend.ops.close(handle))
 
   /** Accepts one connection and returns it. */
-  def accept(using io: Io[StreamSockets])(listener: io.backend.ops.Listener)(using Async): io.backend.ops.Connection = {
+  def accept(using
+      io: Io[StreamSockets]
+  )(listener: io.backend.ops.Listener)(using Async): io.backend.ops.Connection = {
     val into = Slot[io.backend.ops.Connection]()
     io.perform(io.backend.ops.accept(listener, into))
     into.clear()
@@ -193,7 +195,9 @@ object SimpleIO {
     * op; a chunk in the reader's hands when it is cancelled, one a `send` did not deliver, is released by the reader
     * itself.
     */
-  def chunks(using io: Io[Backend])(handle: io.Readable, pool: BufferPool, backlog: Int)(using Async.Spawn): Chunks = {
+  def chunks(using
+      io: Io[Interface]
+  )(handle: io.backend.ops.Readable, pool: BufferPool, backlog: Int)(using Async.Spawn): Chunks = {
     require(pool.buffers >= backlog + 2, s"a backlog of $backlog needs a pool of ${backlog + 2} buffers")
     val channel = BufferedChannel[Option[Received]](backlog)
     val reader = Future {

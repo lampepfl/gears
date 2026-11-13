@@ -8,19 +8,19 @@ import gears.async.Async
   * owns any extra setup resources and releases them before returning the pair.
   */
 trait StreamFixture extends ContractSuite {
-  protected def stream(io: Io[backend.type])(using Async.Spawn): (Readable, Writable)
+  protected def stream(io: Io[backend.ops.type])(using Async.Spawn): (Readable, Writable)
 }
 
 /** Supplies the stream fixture using only the Pipes capability. */
 trait PipeFixture extends StreamFixture {
-  val backend: Backend & Pipes
+  val backend: Backend { val ops: Pipes }
 
-  protected def pipe(io: Io[backend.type])(using Async): (Readable, Writable) = {
+  protected def pipe(io: Io[backend.ops.type])(using Async): (Readable, Writable) = {
     val read = Slot[Readable]()
     val write = Slot[Writable]()
     io.perform(io.backend.ops.pipe(read, write))
     (read.clear(), write.clear())
   }
 
-  protected def stream(io: Io[backend.type])(using Async.Spawn): (Readable, Writable) = pipe(io)
+  protected def stream(io: Io[backend.ops.type])(using Async.Spawn): (Readable, Writable) = pipe(io)
 }

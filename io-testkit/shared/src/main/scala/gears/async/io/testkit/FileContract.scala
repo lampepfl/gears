@@ -18,10 +18,10 @@ import scala.util.Success
   * at offsets; checked through `perform`, as programs over the backend (see `ContractSuite`).
   */
 trait FileContract extends FileSystemFixture {
-  val backend: Backend & RegularFiles
+  val backend: Backend { val ops: RegularFiles }
 
   /** Opens the file at `path` with the `open` op, throwing its failure. */
-  protected def openFile(io: Io[backend.type], path: Path, write: Boolean)(using Async): backend.ops.File = {
+  protected def openFile(io: Io[backend.ops.type], path: Path, write: Boolean)(using Async): backend.ops.File = {
     opening(io)(slot => backend.ops.open(path.toString, write, slot))
   }
 

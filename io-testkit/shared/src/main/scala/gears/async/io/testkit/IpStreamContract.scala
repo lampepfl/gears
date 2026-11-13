@@ -14,27 +14,29 @@ import scala.concurrent.duration.*
 
 /** What a backend with IP stream sockets must do, with or without IP datagram sockets. */
 trait IpStreamContract extends IpStreamFixture {
-  val backend: Backend & IpStreams
+  val backend: Backend { val ops: IpStreams }
 
   /** A listener on `address`, listening, from the `listen` op, whose failure is thrown. */
-  private def tcpListen(io: Io[backend.type], address: IpSocketAddress)(using Async): backend.ops.Listener = {
+  private def tcpListen(io: Io[backend.ops.type], address: IpSocketAddress)(using Async): backend.ops.Listener = {
     opening(io)(slot => io.backend.ops.listen(address, slot))
   }
 
   /** A connection to `address`, from the `connect` op, whose failure is thrown. */
-  private def tcpConnect(io: Io[backend.type], address: IpSocketAddress)(using Async): backend.ops.Connection = {
+  private def tcpConnect(io: Io[backend.ops.type], address: IpSocketAddress)(using Async): backend.ops.Connection = {
     opening(io)(slot => io.backend.ops.connect(address, slot))
   }
 
   /** A connection to the listener on the loopback at `port`: its client's end and the one `listener` accepted. */
-  private def tcpPair(io: Io[backend.type], listener: backend.ops.Listener, port: Int)(using
+  private def tcpPair(io: Io[backend.ops.type], listener: backend.ops.Listener, port: Int)(using
       Async.Spawn
   ): (backend.ops.Connection, backend.ops.Connection) = {
     pair(io, listener)(tcpConnect(io, IpSocketAddress(IpAddress.IPv4Loopback, port)))
   }
 
   /** Performs `op` with a time limit, and returns its failure, or null if it completed. */
-  private def tcpAttemptWithin(io: Io[backend.type], op: io.Op, limit: FiniteDuration)(using Async): Throwable | Null =
+  private def tcpAttemptWithin(io: Io[backend.ops.type], op: io.Op, limit: FiniteDuration)(using
+      Async
+  ): Throwable | Null =
     try {
       io.perform(op, limit)
       null
@@ -121,7 +123,7 @@ trait IpStreamContract extends IpStreamFixture {
   }
 
   /** Runs `body` with `count` connections over loopback, each as its client and server ends, closed afterwards. */
-  private def withConnections(io: Io[backend.type], count: Int)(
+  private def withConnections(io: Io[backend.ops.type], count: Int)(
       body: Seq[(backend.ops.Connection, backend.ops.Connection)] => Unit
   )(using Async.Spawn): Unit = {
     val listener = tcpListen(io, IpSocketAddress(IpAddress.IPv4Loopback, 0))
@@ -140,7 +142,7 @@ trait IpStreamContract extends IpStreamFixture {
   }
 
   /** A pooled read of `handle` performed to its end: what it received, which the caller releases, or its failure. */
-  private def readPooled(io: Io[backend.type], handle: Readable, pool: BufferPool)(using
+  private def readPooled(io: Io[backend.ops.type], handle: Readable, pool: BufferPool)(using
       Async
   ): Received | Throwable = {
     val into = Slot[Received]()
@@ -405,7 +407,7 @@ trait IpStreamContract extends IpStreamFixture {
   /** A connection to a listener opened with `listening`, the client opening with `connecting`: the client's and the
     * server's ends, closed after `body`.
     */
-  private def connected(io: Io[backend.type], listening: SocketOptions, connecting: SocketOptions)(
+  private def connected(io: Io[backend.ops.type], listening: SocketOptions, connecting: SocketOptions)(
       body: (backend.ops.Connection, backend.ops.Connection) => Unit
   )(using Async.Spawn): Unit = {
     val listener =

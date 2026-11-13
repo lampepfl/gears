@@ -2,7 +2,7 @@ package referencedemos
 
 import gears.async.Async
 import gears.async.io.Io
-import gears.async.io.reference.ReferenceBackend
+import gears.async.io.reference.{ReferenceBackend, ReferenceOps}
 import gears.io.demos.{DemoBackends, DemoCommands, DemoRunner}
 
 /** The gears demos over the reference backend: the testkit's demo command line (`DemoCommands`), run as
@@ -10,9 +10,9 @@ import gears.io.demos.{DemoBackends, DemoCommands, DemoRunner}
   * backend lacks, fail saying so.
   */
 object ReferenceDemos {
-  private object Runner extends DemoRunner[ReferenceBackend.type] {
+  private object Runner extends DemoRunner[ReferenceOps.type] {
     val backend: ReferenceBackend.type = ReferenceBackend
-    def run[T](program: Io[ReferenceBackend.type] ?=> Async.Spawn ?=> T): T =
+    def run[T](program: Io[ReferenceOps.type] ?=> Async.Spawn ?=> T): T =
       Io.run(using backend)(program)
   }
 

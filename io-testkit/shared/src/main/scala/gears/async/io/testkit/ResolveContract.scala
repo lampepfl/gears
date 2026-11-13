@@ -5,7 +5,7 @@ package testkit
   * `ContractSuite`).
   */
 trait ResolveContract extends ContractSuite {
-  val backend: Backend & Resolving
+  val backend: Backend { val ops: Resolving }
 
   /** Named-zone literals and their expected addresses, supplied using the platform's interface discovery. Empty when
     * named zones are unsupported or no suitable interface is available.

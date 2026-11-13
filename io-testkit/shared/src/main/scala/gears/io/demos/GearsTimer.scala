@@ -2,12 +2,12 @@ package gears.io.demos
 
 import gears.async.Async
 import gears.async.Future
-import gears.async.io.Backend
+import gears.async.io.Interface
 import gears.async.io.Io
 
 /** A five-second one-shot timer, with a one-second ticker running alongside. */
 object GearsTimer {
-  def run()(using io: Io[Backend], async: Async.Spawn): Unit = {
+  def run()(using io: Io[Interface], async: Async.Spawn): Unit = {
     println("Creating and registering timer event...")
     val fired = Future(io.perform(io.backend.ops.timer(5000)))
     println("Event registered successfully. Waiting for it to trigger...")

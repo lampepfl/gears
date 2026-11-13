@@ -10,20 +10,20 @@ import java.nio.file.Files
 
 /** What a backend with Unix stream sockets must do, with or without IP sockets. */
 trait UnixStreamContract extends FileSystemFixture {
-  val backend: Backend & UnixStreams
+  val backend: Backend { val ops: UnixStreams }
 
   /** A listener on a Unix socket path, listening, from the `listen` op, whose failure is thrown. */
-  private def unixListen(io: Io[backend.type], address: UnixAddress)(using Async): backend.ops.Listener = {
+  private def unixListen(io: Io[backend.ops.type], address: UnixAddress)(using Async): backend.ops.Listener = {
     opening(io)(slot => io.backend.ops.listen(address, slot))
   }
 
   /** A connection to a Unix socket path, from the `connect` op, whose failure is thrown. */
-  private def unixConnect(io: Io[backend.type], address: UnixAddress)(using Async): backend.ops.Connection = {
+  private def unixConnect(io: Io[backend.ops.type], address: UnixAddress)(using Async): backend.ops.Connection = {
     opening(io)(slot => io.backend.ops.connect(address, slot))
   }
 
   /** A connection to `listener`, at `address`: its client's end and the one `listener` accepted. */
-  private def unixPair(io: Io[backend.type], listener: backend.ops.Listener, address: UnixAddress)(using
+  private def unixPair(io: Io[backend.ops.type], listener: backend.ops.Listener, address: UnixAddress)(using
       Async.Spawn
   ): (backend.ops.Connection, backend.ops.Connection) = {
     val accepting = Future(opening(io)(slot => io.backend.ops.accept(listener, slot)))

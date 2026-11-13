@@ -11,18 +11,18 @@ import java.nio.file.Files
   * programs over the backend (see `ContractSuite`).
   */
 trait UnixDatagramContract extends FileSystemFixture {
-  val backend: Backend & UnixDatagrams
+  val backend: Backend { val ops: UnixDatagrams }
 
   /** A Unix datagram socket bound to `local`, from the `bindDatagram` op, whose failure is thrown. */
   protected def bindUnixDatagram(
-      io: Io[backend.type],
+      io: Io[backend.ops.type],
       local: UnixAddress
   )(using Async): backend.ops.UnixBoundDatagram = {
     opening(io)(slot => backend.ops.bindDatagram(local, slot))
   }
 
   /** A Unix datagram socket connected to `remote`, from the `connectDatagram` op, whose failure is thrown. */
-  protected def connectUnixDatagram(io: Io[backend.type], local: UnixAddress | Null, remote: UnixAddress)(using
+  protected def connectUnixDatagram(io: Io[backend.ops.type], local: UnixAddress | Null, remote: UnixAddress)(using
       Async
   ): backend.ops.UnixConnectedDatagram = {
     opening(io)(slot => backend.ops.connectDatagram(local, remote, slot))

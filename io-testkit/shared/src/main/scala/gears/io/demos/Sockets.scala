@@ -20,7 +20,9 @@ type StreamAddress = IpSocketAddress | UnixAddress
 object Sockets {
 
   /** A stream socket connected to `address`, of either family, on a backend with both. */
-  def connect(address: StreamAddress)(using io: Io[IpStreams & UnixStreams], async: Async): io.backend.ops.Connection =
+  def connect(
+      address: StreamAddress
+  )(using io: Io[IpStreams & UnixStreams], async: Async): io.backend.ops.Connection =
     address match {
       case unix: UnixAddress   => SimpleIO.connect(unix)
       case ip: IpSocketAddress => SimpleIO.connect(ip)

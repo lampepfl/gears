@@ -12,7 +12,7 @@ import scala.concurrent.duration.*
 
 /** Blocking operations, requiring only the Blocking capability. */
 trait BlockingContract extends ContractSuite {
-  val backend: Backend & Blocking
+  val backend: Backend { val ops: Blocking }
 
   test("a blocking op past its time limit is interrupted, and fails once it has returned") {
     running { io ?=>
