@@ -60,15 +60,16 @@ object ReferenceBackend
 
 /** The reference backend's ops, each checked as it is built. */
 object ReferenceOps
-    extends IpStreamOps[RefOp]
-    with UnixStreamOps[RefOp]
-    with IpDatagramOps[RefOp]
-    with FileOps[RefOp]
-    with PipeOps[RefOp]
-    with ResolveOps[RefOp]
-    with BlockingOps[RefOp] {
+    extends IpStreamOps
+    with UnixStreamOps
+    with IpDatagramOps
+    with FileOps
+    with PipeOps
+    with ResolveOps
+    with BlockingOps {
   import SocketOption.Kind
 
+  type Op = RefOp
   type Handle = RefHandle
   type Readable = ReadEnd
   type Writable = WriteEnd
