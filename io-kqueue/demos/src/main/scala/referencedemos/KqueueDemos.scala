@@ -11,9 +11,9 @@ import gears.io.demos.{DemoBackends, DemoCommands, DemoRunner}
   * lacks, fail saying so.
   */
 object KqueueDemos {
-  private object Runner extends DemoRunner[KqueueBackend.type] {
+  private object Runner extends DemoRunner[KqueueBackend.Interface] {
     val backend: KqueueBackend.type = KqueueBackend
-    def run[T](program: Io[KqueueBackend.type] ?=> Async.Spawn ?=> T): T =
+    def run[T](program: Io[KqueueBackend.Interface] ?=> Async.Spawn ?=> T): T =
       Io.run(using backend)(program)
   }
 

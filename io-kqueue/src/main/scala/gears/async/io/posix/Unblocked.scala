@@ -45,16 +45,4 @@ private[io] object Unblocked {
 
   def ioctl(fd: CInt, request: CUnsignedLong, args: Any*): CInt = extern
 
-  @extern
-  object kqueue {
-    def kevent(
-        kq: CInt,
-        changelist: CVoidPtr,
-        nchanges: CInt,
-        eventlist: CVoidPtr,
-        nevents: CInt,
-        timeout: Ptr[time.timespec]
-    ): CInt = extern
-  }
-
 }

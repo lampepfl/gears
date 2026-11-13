@@ -5,20 +5,13 @@ import gears.async.io.shareable.Poller
 
 import scala.util.Try
 
-import TimerHeap.{TimerOp, TimerSource}
+import TimerHeap.{TimerHeap, TimerOp, TimerSource}
 
 object TimerHeap {
-  trait TimerSource[A <: TimerOp] {
 
-    /** `timerOp` has a deadline earlier than the heap knows of. A later one needs no call: see `nextReadyTimer`. */
-    def notifyDeadlineChange(timerOp: TimerOp): Unit
+  trait TimerHeap[A <: TimerOp] extends TimerSource[A] {
+
     def debugTimerState(): String
-    def addTimer(timerOp: A): Unit
-
-    /** Whether `timerOp` was taken out of the heap, and so is guaranteed to not fire. If false then it was not in the
-      * heap to begin with.
-      */
-    def removeTimer[A1 >: A <: TimerOp](timerOp: A1): Boolean
 
     /** Takes the next timer due by `now` out of the heap, or gives null if none is. A non-null result is guaranteed to
       * have succeeded `claimAtDeadline` before returning. A due timer that could not be claimed is dropped.
@@ -27,6 +20,18 @@ object TimerHeap {
 
     /** When to look at the heap next, which may be before anything is due, or -1 if it is empty. */
     def peekNextDeadline(): Long
+  }
+
+  trait TimerSource[A <: TimerOp] {
+
+    /** `timerOp` has a deadline earlier than the heap knows of. A later one needs no call: see `nextReadyTimer`. */
+    def notifyDeadlineChange(timerOp: TimerOp): Unit
+    def addTimer(timerOp: A): Unit
+
+    /** Whether `timerOp` was taken out of the heap, and so is guaranteed to not fire. If false then it was not in the
+      * heap to begin with.
+      */
+    def removeTimer[A1 >: A <: TimerOp](timerOp: A1): Boolean
   }
 
   trait TimerOp extends Cancellable {
@@ -67,7 +72,7 @@ object TimerHeap {
 /** A binary heap of timers, each knowing its place, so that removing a timer or bringing it forward takes logarithmic
   * time. Its order is by `heapKey` and never by a deadline read afresh, as a deadline can move at any moment.
   */
-abstract class TimerHeap[A <: TimerOp] extends Poller with TimerSource[A] {
+abstract class TimerHeapImpl[A <: TimerOp] extends Poller with TimerHeap[A] {
   private object timerLock
 
   private var heap = new Array[TimerOp](16)
@@ -164,6 +169,12 @@ abstract class TimerHeap[A <: TimerOp] extends Poller with TimerSource[A] {
       heap(0) eq timerOp
     }
     if isNext then wake()
+  }
+
+  /** `EventSource.holdTimer`, for a heap that is one: the op is one of this heap's own kind, as its performer has it. */
+  final def holdTimer(timerOp: TimerOp): TimerSource[?] = {
+    addTimer(timerOp.asInstanceOf[A])
+    this
   }
 
   /** Doesn't wake the worker, which at worst wakes for a timer no longer there, and finds nothing to do. */

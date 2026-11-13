@@ -18,34 +18,15 @@ import scala.concurrent.duration.FiniteDuration
   * performed on the worker of the thread performing it, whose heap holds its deadline, and which resumes the performer
   * once it completes. So far only timers are implemented, and a worker waits on a monitor rather than on kqueue.
   */
-object KqueueBackend
-    extends Backend
-    // with IpStreams
-    // with IpDatagrams
-    // with UnixStreams
-    // with RegularFiles
-    with Pipes
-    // with Resolving
-    // with Blocking
-    {
-  type Op = KqueueOp
-  type Handle = KqueueHandle
-  type Readable = KqueueReadable
-  type Writable = KqueueWritable
-  // type Connection = ConnectionHandle
-  // type Listener = ListenerHandle
-  // type BoundDatagram = BoundDatagramHandle
-  // type ConnectedDatagram = ConnectedDatagramHandle
-  // type File = FileHandle
-
-  val ops: KqueueOps.type = KqueueOps
+object KqueueBackend extends Backend {
+  type Interface = KqueueOps.type
 
   def pool(bufferSize: Int, buffers: Int): BufferPool = new NativePool(bufferSize, buffers)
 
   /** Runs `program` on a pool of one worker for each processor, shutting it down afterwards. The program runs under
     * the pool's group: a fatal error in a worker cancels it, and is thrown from here once it has unwound.
     */
-  private[io] def run[T](program: Io[this.type] ?=> Async.Spawn ?=> T): T = {
+  private[io] def run[T](program: Io[Interface] ?=> Async.Spawn ?=> T): T = {
     val pool = KqueueScheduler(Runtime.getRuntime.availableProcessors)
     given poolSupport: (AsyncSupport { type Scheduler = pool.Scheduler }) = pool
     given poolScheduler: pool.Scheduler = pool

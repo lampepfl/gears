@@ -230,7 +230,7 @@ object KqueueLoop {
     var deleted = true
     pollQueue(1) { events =>
       deleteFile(eventAt(events, 0), fd, read)
-      if (Unblocked.kqueue.kevent(kq, events, 1, null, 0, null) < 0) { // registers only, so it cannot block
+      if (KqueueUnblocked.kevent(kq, events, 1, null, 0, null) < 0) { // registers only, so it cannot block
         val code = posixErrno.errno
         deleted = code == posixErrno.ENOENT || code == posixErrno.EBADF
       }
@@ -243,7 +243,7 @@ object KqueueLoop {
       events: EventQueue,
       nEvents: Int
   ): Unit = {
-    if (Unblocked.kqueue.kevent(kq, events, nEvents, null, 0, null) < 0) { // registers only, so it cannot block
+    if (KqueueUnblocked.kevent(kq, events, nEvents, null, 0, null) < 0) { // registers only, so it cannot block
       throw new IOException(
         s"Failed to register events: ${cError()}"
       )
@@ -268,7 +268,7 @@ object KqueueLoop {
       events: EventQueue,
       nEvents: Int
   ): Int = {
-    val polledEvents = Unblocked.kqueue.kevent(kq, null, 0, events, nEvents, zeroTimeout)
+    val polledEvents = KqueueUnblocked.kevent(kq, null, 0, events, nEvents, zeroTimeout)
     polled(polledEvents)
   }
 

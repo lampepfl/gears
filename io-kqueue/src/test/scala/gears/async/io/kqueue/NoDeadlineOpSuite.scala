@@ -23,22 +23,24 @@ private[kqueue] final class WaitingOp extends RepeatableAbstractTimerHeapOp {
   def wakeup(resumedAt: Long): Try[Unit] = WorkpoolScheduler.SuccessUnit
 }
 
-private[kqueue] object WaitingBackend extends Backend {
+private[kqueue] object WaitingOps extends Interface {
   type Op = WaitingOp
-  type Handle = AnyRef
-  type Readable = AnyRef
-  type Writable = AnyRef
-  def ops: Kinded[Ops[Op, Handle]] = ???
+  def timer(duration: FiniteDuration): Op & Repeatable = ???
+  def deadlineTimer(nanoTime: Long): Op & Repeatable & gears.async.io.Deadline = ???
+}
+
+private[kqueue] object WaitingBackend extends Backend {
+  type Interface = WaitingOps.type
   def pool(bufferSize: Int, buffers: Int): BufferPool = ???
-  private[io] def run[T](program: Io[this.type] ?=> Async.Spawn ?=> T): T = ???
+  private[io] def run[T](program: Io[Interface] ?=> Async.Spawn ?=> T): T = ???
 }
 
 /** One worker, so that a task runs until it suspends, and in the order it was submitted. */
 private[kqueue] final class WaitingScheduler
-    extends WorkpoolScheduler[WaitingOp, WaitingBackend.type](WaitingBackend, 1)
+    extends WorkpoolScheduler[WaitingOp, WaitingOps.type](WaitingBackend, WaitingOps, 1)
     with NativeSuspend {
   override protected def selectWorker() = workerOfCurrentThread()
-  override def makeWorker(id: Int) = new WorkpoolScheduler.Worker[WaitingOp, WaitingBackend.type](id, WaitingBackend) with MonitorPoller {
+  override def makeWorker(id: Int) = new WorkpoolScheduler.Worker[WaitingOp](id) with MonitorPoller {
     override def performOp(op: WaitingOp)(using Async): Unit = {
       if op.hasDeadline then addTimer(op)
       op.parkUntilSettled()
@@ -49,7 +51,7 @@ private[kqueue] final class WaitingScheduler
 class NoDeadlineOpSuite extends munit.FunSuite {
   override def munitTimeout: Duration = 60.seconds
 
-  private def onPool[T](program: Io[WaitingBackend.type] ?=> Async.Spawn ?=> T): T = {
+  private def onPool[T](program: Io[WaitingOps.type] ?=> Async.Spawn ?=> T): T = {
     val pool = WaitingScheduler()
     given poolSupport: (AsyncSupport { type Scheduler = pool.Scheduler }) = pool
     given poolScheduler: pool.Scheduler = pool
@@ -138,7 +140,7 @@ class NoDeadlineOpSuite extends munit.FunSuite {
   test("a deadline already passed, even a negative one, is on the heap and fires") {
     given KqueueBackend.type = KqueueBackend
     Io.run { io ?=>
-      io.perform(io.backend.ops.deadlineTimer(-5L))
+      io.perform(io.ops.deadlineTimer(-5L))
     }
   }
 }

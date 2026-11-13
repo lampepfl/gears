@@ -30,22 +30,24 @@ private[kqueue] final class SlowOp(time: FiniteDuration, work: Long) extends Abs
   }
 }
 
-private[kqueue] object SlowBackend extends Backend {
+private[kqueue] object SlowOps extends Interface {
   type Op = SlowOp
-  type Handle = AnyRef
-  type Readable = AnyRef
-  type Writable = AnyRef
-  def ops: Kinded[Ops[Op, Handle]] = ???
+  def timer(duration: FiniteDuration): Op & Repeatable = ???
+  def deadlineTimer(nanoTime: Long): Op & Repeatable & gears.async.io.Deadline = ???
+}
+
+private[kqueue] object SlowBackend extends Backend {
+  type Interface = SlowOps.type
   def pool(bufferSize: Int, buffers: Int): BufferPool = ???
-  private[io] def run[T](program: Io[this.type] ?=> Async.Spawn ?=> T): T = ???
+  private[io] def run[T](program: Io[Interface] ?=> Async.Spawn ?=> T): T = ???
 }
 
 private[kqueue] final class SlowScheduler
-    extends WorkpoolScheduler[SlowOp, SlowBackend.type](SlowBackend, 2)
+    extends WorkpoolScheduler[SlowOp, SlowOps.type](SlowBackend, SlowOps, 2)
     with NativeSuspend {
   override protected def selectWorker() = workerOfCurrentThread()
   def heapOfCurrentWorker(): String = workerOfCurrentThread().debugTimerState()
-  override def makeWorker(id: Int) = new WorkpoolScheduler.Worker[SlowOp, SlowBackend.type](id, SlowBackend) with MonitorPoller {
+  override def makeWorker(id: Int) = new WorkpoolScheduler.Worker[SlowOp](id) with MonitorPoller {
     override def performOp(op: SlowOp)(using Async): Unit = {
       addTimer(op)
       op.parkUntilSettled()

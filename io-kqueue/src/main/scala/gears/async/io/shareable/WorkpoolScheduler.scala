@@ -11,12 +11,14 @@ import gears.async.SuspendSupport
 import gears.async.Suspension
 import gears.async.cancellationScope
 import gears.async.io.Backend
+import gears.async.io.Interface
 import gears.async.io.Io
 import gears.async.io.shareable.TimerHeap
 import gears.async.io.shareable.TimerHeap.{TimerOp, TimerSource}
 import gears.async.io.shareable.WorkpoolScheduler.DoAfter
 import gears.async.native.NativeSuspend
 
+import java.io.IOException
 import scala.concurrent.duration.FiniteDuration
 import scala.util.Failure
 import scala.util.Success
@@ -25,13 +27,14 @@ import scala.util.control.NonFatal
 
 import WorkpoolScheduler.{AsyncOp, ReentrantOp, Worker}
 
-abstract class WorkpoolScheduler[Op1 <: AsyncOp & ReentrantOp, B <: Backend { type Op = Op1 }](
-    val backend: B,
+abstract class WorkpoolScheduler[Op1 <: AsyncOp & ReentrantOp, I <: Interface { type Op = Op1 }](
+    val backend: Backend { type Interface <: I },
+    val ops: I,
     workers: Int
 ) extends Scheduler
     with AsyncSupport
     with AsyncOperations
-    with Io[B] {
+    with Io[I] {
 
   override private[async] def resumeAsync[T, R](suspension: Suspension[T, R])(arg: T)(using s: Scheduler): Unit =
     // Not here and now: the caller holds the listener's lock, and may hold a source's, partway through changing it.
@@ -44,10 +47,10 @@ abstract class WorkpoolScheduler[Op1 <: AsyncOp & ReentrantOp, B <: Backend { ty
   // override private[async] def scheduleBoundary(body: Label[Unit] ?=> Unit)(using s: Scheduler): Unit =
   //   s.execute(() => boundary(body))
 
-  def makeWorker(id: Int): Worker[Op1, B]
+  def makeWorker(id: Int): Worker[Op1]
 
   private val workerTicker = new java.util.concurrent.atomic.AtomicInteger(0)
-  private val workerGroup: Array[Worker[Op1, B]] = Array.tabulate(workers)(makeWorker)
+  private val workerGroup: Array[Worker[Op1]] = Array.tabulate(workers)(makeWorker)
   private val members = workerGroup.map(w => w.thread -> w).toMap
 
   /** The group the program runs under (see `Backend.run`), which a fatal error in any worker cancels: the workers go
@@ -68,17 +71,17 @@ abstract class WorkpoolScheduler[Op1 <: AsyncOp & ReentrantOp, B <: Backend { ty
   workerGroup.foreach(_.onFatal = failFatally)
   // Only now: a worker's thread started as the worker was made would run it before its subclass had its fields.
   workerGroup.foreach(_.thread.start())
-  private def nextWorker(): Worker[Op1, B] = {
+  private def nextWorker(): Worker[Op1] = {
     val index = Math.floorMod(workerTicker.getAndIncrement(), workerGroup.length)
     workerGroup(index)
   }
-  protected final def workerOfCurrentThread(): Worker[Op1, B] =
+  protected final def workerOfCurrentThread(): Worker[Op1] =
     members.getOrElse(Thread.currentThread(), throw new IllegalStateException("Current thread is not a worker"))
 
   /** The worker for an op, whose heap holds its deadline, and which fires it. An op that `tryPerform` completes must
     * not be firing when it returns, which holds for the performer's own worker: only its thread fires its timers.
     */
-  protected def selectWorker(): Worker[Op1, B]
+  protected def selectWorker(): Worker[Op1]
 
   type Scheduler = this.type
 
@@ -87,7 +90,7 @@ abstract class WorkpoolScheduler[Op1 <: AsyncOp & ReentrantOp, B <: Backend { ty
     * cancelled while a worker was already doing the op's work waits for that work and returns its outcome, as the work
     * was done. Its cancel still holds, at its next `await`.
     */
-  override def performWithin(op: backend.Op, timeoutMillis: Int)(using Async): Unit = {
+  override def performWithin(op: Op, timeoutMillis: Long)(using Async): Unit = {
     op.performWith {
       val worker = selectWorker()
       op.setTimeout(timeoutMillis, worker)
@@ -135,7 +138,7 @@ abstract class WorkpoolScheduler[Op1 <: AsyncOp & ReentrantOp, B <: Backend { ty
 object WorkpoolScheduler {
 
   trait AsyncOp extends TimerOp {
-    def setTimeout(timeoutMillis: Int, source: TimerSource[?]): Unit
+    def setTimeout(timeoutMillis: Long, source: TimerSource[?]): Unit
 
     /** Suspends until the op is settled, and returns or throws its outcome. Only the op ends the wait: cancelled
       * through the group it is linked to, it settles at once as cancelled if no worker has claimed it, and otherwise
@@ -166,7 +169,7 @@ object WorkpoolScheduler {
     def requestExit()(using Async): Unit
   }
 
-  final class DoAfter(val owner: Worker[?, ?], val deadlineNow: Long, body: Runnable) extends TimerOp {
+  final class DoAfter(val owner: Worker[?], val deadlineNow: Long, body: Runnable) extends TimerOp {
     @volatile private var cancelled = false
     def timerWakeup(actAfter: Long): Unit = {
       if !cancelled then body.run()
@@ -180,8 +183,13 @@ object WorkpoolScheduler {
     def claimAtDeadline(): Boolean = !cancelled
   }
 
-  abstract class Worker[Op1 <: TimerOp, B <: Backend { type Op = Op1 }](val id: Int, val backend: B)
-      extends TimerHeap[Op1 | DoAfter] {
+  abstract class Worker[Op1 <: TimerOp](val id: Int)
+      extends TimerHeapImpl[Op1 | DoAfter],
+        EventSource {
+
+    type ThisWorkerSource <: EventSource
+    def asThisWorkerSource: this.type & ThisWorkerSource
+
     // private[kqueue] val inbox: java.util.concurrent.ArrayBlockingQueue[Runnable] =
     //   new java.util.concurrent.ArrayBlockingQueue[Runnable](1024)
     private val inbox: java.util.concurrent.ConcurrentLinkedQueue[Runnable] =
@@ -235,6 +243,25 @@ object WorkpoolScheduler {
       * processed.
       */
     def performOp(op: Op1)(using Async): Unit
+
+    def performClose(op: Op1 & AbstractCloseOp)(using Async): Unit =
+      var shouldWait = false
+      if op.hasDeadline then
+        addTimer(op)
+        shouldWait = true
+      if !op.pollClose() then shouldWait = true
+      if shouldWait then op.parkUntilSettled()
+
+    def performRead(
+        op: Op1 & AbstractReadOp[?, ThisWorkerSource]
+    )(using Async): Unit = performWhenReady(op)
+
+    def performWrite(
+        op: Op1 & AbstractWriteOp[?, ThisWorkerSource]
+    )(using Async): Unit = performWhenReady(op)
+
+    private def performWhenReady(op: Op1 & AbstractReadinessOp[?, ThisWorkerSource])(using Async): Unit =
+      op.performWhenReady(asThisWorkerSource)
 
     def isEmpty(): Boolean = inbox.isEmpty() && ready.isEmpty()
 
@@ -301,7 +328,7 @@ object WorkpoolScheduler {
         runReady()
         drainInbox()
         // `stop`'s wake-up may have been spent while the inbox was still draining.
-        if !stopped then waitForDeadline(peekNextDeadline())
+        if !stopped then guarded(waitForDeadline(peekNextDeadline()))
       exited = true
       // A task added before `exited` showed is either run here or taken back by `submit`, never lost.
       while !isEmpty() do

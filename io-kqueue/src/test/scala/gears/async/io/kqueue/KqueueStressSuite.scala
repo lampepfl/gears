@@ -16,7 +16,7 @@ class KqueueStressSuite extends munit.FunSuite {
   test("a run stops its workers before it returns") {
     given KqueueBackend.type = KqueueBackend
     val worker = Io.run { io ?=>
-      io.perform(io.backend.ops.timer(1))
+      io.perform(io.ops.timer(1))
       Thread.currentThread()
     }
     assert(!worker.isAlive, "a worker outlived its run")
@@ -41,9 +41,9 @@ class KqueueStressSuite extends munit.FunSuite {
       summon[Async].scheduler.schedule(60.seconds, () => scheduledRan.set(true)): Unit
       val waiters = for _ <- 1 to 1000 yield Future {
         workers.add(Thread.currentThread())
-        io.perform(io.backend.ops.timer(60_000))
+        io.perform(io.ops.timer(60_000))
       }
-      io.perform(io.backend.ops.timer(50)) // so that they are waiting
+      io.perform(io.ops.timer(50)) // so that they are waiting
       waiters
     }
     val elapsed = System.nanoTime() - started
@@ -66,7 +66,7 @@ class KqueueStressSuite extends munit.FunSuite {
     given KqueueBackend.type = KqueueBackend
     Io.run { io ?=>
       for round <- 1 to 3000 do {
-        val futures = for _ <- 1 to 16 yield Future(io.perform(io.backend.ops.timer(0)))
+        val futures = for _ <- 1 to 16 yield Future(io.perform(io.ops.timer(0)))
         futures.foreach(_.await)
       }
     }
@@ -76,7 +76,7 @@ class KqueueStressSuite extends munit.FunSuite {
     given KqueueBackend.type = KqueueBackend
     Io.run { io ?=>
       val delay = 300.micros
-      val timer = io.backend.ops.timer(delay)
+      val timer = io.ops.timer(delay)
       for round <- 1 to 2000 do {
         val waiting = Future(io.perform(timer))
         val cancelAt = System.nanoTime() + delay.toNanos - 100_000L + (round % 20) * 10_000L // either side of it firing
@@ -99,7 +99,7 @@ class KqueueStressSuite extends munit.FunSuite {
         val waiters = new Array[Future[Unit]](4 * Runtime.getRuntime.availableProcessors)
         for i <- waiters.indices do
           waiters(i) = Future {
-            io.perform(io.backend.ops.deadlineTimer(deadline))
+            io.perform(io.ops.deadlineTimer(deadline))
             for j <- waiters.indices if j != i && waiters(j) != null do waiters(j).cancel()
           }
         waiters.foreach(_.awaitResult)
@@ -111,7 +111,7 @@ class KqueueStressSuite extends munit.FunSuite {
     given KqueueBackend.type = KqueueBackend
     Io.run { io ?=>
       for round <- 1 to 300 do {
-        val futures = for _ <- 1 to 4 yield Future(io.perform(io.backend.ops.timer(300.micros)))
+        val futures = for _ <- 1 to 4 yield Future(io.perform(io.ops.timer(300.micros)))
         futures.foreach(_.await)
       }
     }
