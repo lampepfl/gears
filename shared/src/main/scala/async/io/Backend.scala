@@ -42,5 +42,5 @@ trait Backend {
 object Backend {
 
   /** No time limit, for the time limits in milliseconds within: any negative value means the same. */
-  private[io] inline val NoTimeout = -1
+  private[io] inline val NoTimeout = -1L
 }

@@ -43,10 +43,17 @@ trait Interface {
     */
   type Op
 
-  /** Completes once `milliseconds` have passed (see the other `timer`). */
-  final def timer(milliseconds: Int): Op & Repeatable = {
+  /** Completes once `milliseconds` have passed (see the other `timer`): not negative, and no more than a
+    * `FiniteDuration` holds, `Interface.MaxTimerMillis`, some 292 years, else an `IllegalArgumentException` as the op
+    * is built.
+    */
+  final def timer(milliseconds: Long): Op & Repeatable = {
     require(milliseconds >= 0, s"A timer's time is not negative: $milliseconds ms")
-    timer(scala.concurrent.duration.Duration(milliseconds.toLong, java.util.concurrent.TimeUnit.MILLISECONDS))
+    require(
+      milliseconds <= Interface.MaxTimerMillis,
+      s"A timer's time is at most ${Interface.MaxTimerMillis} ms: $milliseconds ms"
+    )
+    timer(scala.concurrent.duration.Duration(milliseconds, java.util.concurrent.TimeUnit.MILLISECONDS))
   }
 
   /** Completes once `duration` has passed since each submission, never before: to the nanosecond the backend can wait,
@@ -63,6 +70,12 @@ trait Interface {
     * is as `timer`'s.
     */
   def deadlineTimer(nanoTime: Long): Op & Repeatable & Deadline
+}
+
+object Interface {
+
+  /** The longest time a timer takes in milliseconds: the most a `FiniteDuration` holds, 2^63 - 1 nanoseconds. */
+  inline val MaxTimerMillis = 9223372036854L
 }
 
 /** The handles of a backend's I/O objects, and closing them: what every capability that opens something extends, each

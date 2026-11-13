@@ -111,6 +111,33 @@ trait OpsContract extends ContractSuite {
     assertEquals(outcome, "true true true")
   }
 
+  test("a timer's milliseconds and a time limit go beyond an Int's range, as far as a duration holds") {
+    running { io ?=>
+      val beyondInt = Int.MaxValue.toLong + 1
+      val longest = Interface.MaxTimerMillis
+      // Long timers wait, rather than wrapping to a short or a negative time: a short limit ends them.
+      intercept[TimeoutException](io.perform(io.ops.timer(beyondInt), 20.millis))
+      intercept[TimeoutException](io.perform(io.ops.timer(longest), 20.millis))
+      intercept[TimeoutException](io.perform(io.ops.timer(Duration(Long.MaxValue, NANOSECONDS)), 20.millis))
+      // Long limits leave a short timer to complete, rather than timing it out at once.
+      io.perform(io.ops.timer(1), FiniteDuration(beyondInt, MILLISECONDS))
+      io.perform(io.ops.timer(1), FiniteDuration(longest, MILLISECONDS))
+      io.perform(io.ops.timer(1), Duration(Long.MaxValue, NANOSECONDS))
+      // A limit as long as the timer does not end it early: both are still waiting when a shorter one is up.
+      val both = Future(io.perform(io.ops.timer(longest), FiniteDuration(longest, MILLISECONDS)))
+      io.perform(io.ops.timer(20))
+      assert(both.poll().isEmpty, "a timer and its limit, both the longest, ended at once")
+      both.cancel()
+      both.awaitResult
+      // Out of range is refused as the op is built.
+      intercept[IllegalArgumentException](io.ops.timer(longest + 1))
+      intercept[IllegalArgumentException](io.ops.timer(Long.MaxValue))
+      intercept[IllegalArgumentException](io.ops.timer(-1L))
+      intercept[IllegalArgumentException](io.sleep(longest + 1))
+      intercept[IllegalArgumentException](io.sleep(-1L))
+    }
+  }
+
   test("a zero-duration timer and an expired deadline complete even with a zero time limit") {
     running { io ?=>
       io.perform(io.ops.timer(Duration.Zero), Duration.Zero)

@@ -44,17 +44,20 @@ trait Io[+I <: Interface] extends AsyncOperations {
   final def perform(op: Op, timeout: scala.concurrent.duration.FiniteDuration)(using Async): Unit = {
     require(timeout.length >= 0, s"A time limit is not negative: $timeout")
     val nanos = timeout.toNanos
-    val millis = math.min((nanos + 999_999L) / 1_000_000L, Int.MaxValue.toLong).toInt // rounded up, never sooner
+    val millis = nanos / 1_000_000L + (if nanos % 1_000_000L == 0 then 0 else 1) // rounded up, never sooner
     performWithin(op, millis)
   }
 
   /** Performs `op` with a time limit of `timeoutMillis`, none if it is negative: what each backend's `Io` does. */
-  private[io] def performWithin(op: Op, timeoutMillis: Int)(using Async): Unit
+  private[io] def performWithin(op: Op, timeoutMillis: Long)(using Async): Unit
 
   /** Sleeps on a timer op of the backend's. */
   override def sleep(millis: Long)(using Async): Unit = {
-    require(millis >= 0 && millis <= Int.MaxValue, s"A sleep of $millis ms is out of a timer's range")
-    perform(ops.timer(millis.toInt))
+    require(
+      millis >= 0 && millis <= Interface.MaxTimerMillis,
+      s"A sleep of $millis ms is out of a timer's range"
+    )
+    perform(ops.timer(millis))
   }
 }
 
