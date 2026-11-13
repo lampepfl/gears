@@ -22,15 +22,10 @@ trait ContractSuite extends FunSuite {
   /** The backend under test. */
   val backend: Backend
 
-  /** The backend's handles, and the kinds every backend has. */
-  protected type Handle = backend.ops.Handle
-  protected type Readable = backend.ops.Readable
-  protected type Writable = backend.ops.Writable
-
   /** Runs `body` as a program over `backend`, given the backend's `Io`, and returns its result: `Io.run`, unless a
     * backend's suite runs its programs another way.
     */
-  protected def running[T](body: Io[backend.ops.type] ?=> Async.Spawn ?=> T): T =
+  protected def running[T](body: Io[backend.Interface] ?=> Async.Spawn ?=> T): T =
     Io.run(using backend)(body)
 
   /** Checks this backend is known to fail, by name: they are expected to fail, so one that starts passing is reported,
@@ -58,33 +53,33 @@ trait ContractSuite extends FunSuite {
   }
 
   /** Performs `op` and returns its failure, or null if it completed. */
-  protected def attempt(io: Io[backend.ops.type], op: io.Op)(using Async): Throwable | Null =
+  protected def attempt(io: Io[backend.Interface], op: io.Op)(using Async): Throwable | Null =
     try {
       io.perform(op)
       null
     } catch case e: Exception => e
 
   /** Allocates the output slot, builds and performs its opening op, and returns the opened handle. */
-  protected def opening[K <: Handle](io: Io[backend.ops.type])(build: Slot[K] => io.Op)(using Async): K = {
+  protected def opening[K <: AnyRef](io: Io[backend.Interface])(build: Slot[K] => io.Op)(using Async): K = {
     val into = Slot[K]()
     io.perform(build(into))
     into.clear()
   }
 
   /** Closes `handle`, as the interface has it. */
-  protected def close(io: Io[backend.ops.type], handle: Handle)(using Async): Unit =
-    io.perform(io.backend.ops.close(handle))
+  protected def close(io: Io[backend.Interface], handle: io.ops.Handle)(using Async): Unit =
+    io.perform(io.ops.close(handle))
 
   /** Gives a future just started the time to perform its op and wait in it. */
-  protected def settle(io: Io[backend.ops.type])(using Async): Unit = io.perform(io.backend.ops.timer(30))
+  protected def settle(io: Io[backend.Interface])(using Async): Unit = io.perform(io.ops.timer(30))
 
   /** The failure `future` ended with, or null if it completed. */
   protected def failureOf(future: Future[?])(using Async): Throwable | Null =
     future.awaitResult.failed.toOption.orNull
 
   /** Drains every buffer, allowing each performance to make only partial progress. */
-  protected def writeAll(io: Io[backend.ops.type], out: Writable, buf: ByteBuffer)(using Async): Unit = {
-    val write = io.backend.ops.write(out, buf)
+  protected def writeAll(io: Io[backend.Interface], out: io.ops.Writable, buf: ByteBuffer)(using Async): Unit = {
+    val write = io.ops.write(out, buf)
     while buf.hasRemaining() do {
       val before = buf.position()
       io.perform(write)
@@ -92,8 +87,12 @@ trait ContractSuite extends FunSuite {
     }
   }
 
-  protected def writeAll(io: Io[backend.ops.type], out: Writable, bufs: Array[ByteBuffer])(using Async): Unit = {
-    val write = io.backend.ops.write(out, bufs)
+  protected def writeAll(
+      io: Io[backend.Interface],
+      out: io.ops.Writable,
+      bufs: Array[ByteBuffer]
+  )(using Async): Unit = {
+    val write = io.ops.write(out, bufs)
     while bufs.exists(_.hasRemaining()) do {
       val before = bufs.map(_.remaining().toLong).sum
       io.perform(write)
@@ -102,7 +101,7 @@ trait ContractSuite extends FunSuite {
   }
 
   /** Reads up to an absolute position without consuming bytes beyond it. EOF before that position is a failure. */
-  protected def readExactly(io: Io[backend.ops.type], read: io.Op, buf: ByteBuffer, until: Int)(using Async): Unit = {
+  protected def readExactly(io: Io[backend.Interface], read: io.Op, buf: ByteBuffer, until: Int)(using Async): Unit = {
     require(until >= buf.position() && until <= buf.limit())
     val limit = buf.limit()
     buf.limit(until)
@@ -116,7 +115,7 @@ trait ContractSuite extends FunSuite {
   }
 
   /** Reads a known byte count across pooled chunks, including a result already waiting in `into`. */
-  protected def readPooledExactly(io: Io[backend.ops.type], read: io.Op, into: Slot[Received], size: Int)(using
+  protected def readPooledExactly(io: Io[backend.Interface], read: io.Op, into: Slot[Received], size: Int)(using
       Async
   ): String = {
     val bytes = new ByteArrayOutputStream()
@@ -139,7 +138,7 @@ trait ContractSuite extends FunSuite {
   protected def textOf(received: Received): String = StandardCharsets.UTF_8.decode(received.buffer.duplicate()).toString
 
   /** Performs `read` until it completes without adding bytes, returning what `buf` then holds. */
-  protected def readToEnd(io: Io[backend.ops.type], read: io.Op, buf: ByteBuffer)(using Async): String = {
+  protected def readToEnd(io: Io[backend.Interface], read: io.Op, buf: ByteBuffer)(using Async): String = {
     var atEnd = false
     while !atEnd do {
       val before = buf.position()

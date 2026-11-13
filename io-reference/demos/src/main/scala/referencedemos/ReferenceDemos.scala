@@ -11,9 +11,8 @@ import gears.io.demos.{DemoBackends, DemoCommands, DemoRunner}
   */
 object ReferenceDemos {
   private object Runner extends DemoRunner[ReferenceOps.type] {
-    val backend: ReferenceBackend.type = ReferenceBackend
     def run[T](program: Io[ReferenceOps.type] ?=> Async.Spawn ?=> T): T =
-      Io.run(using backend)(program)
+      Io.run(using ReferenceBackend)(program)
   }
 
   val backends: DemoBackends = DemoBackends(Seq("reference" -> Runner), default = "reference")

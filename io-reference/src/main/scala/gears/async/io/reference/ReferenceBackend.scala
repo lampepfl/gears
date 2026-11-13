@@ -24,16 +24,17 @@ import scala.concurrent.duration.FiniteDuration
   * what the JDK has, which has no Unix datagram sockets and no way to open a FIFO without blocking.
   */
 object ReferenceBackend extends Backend {
-  val ops: ReferenceOps.type = ReferenceOps
+  type Interface = ReferenceOps.type
 
   def pool(bufferSize: Int, buffers: Int): BufferPool = new RefPool(bufferSize, buffers)
 
   /** Runs `program` on gears' virtual threads, each op performed by the future performing it. */
-  private[io] def run[T](program: Io[ops.type] ?=> Async.Spawn ?=> T): T = {
+  private[io] def run[T](program: Io[Interface] ?=> Async.Spawn ?=> T): T = {
     given VThreadSupport.type = VThreadSupport
     given VThreadScheduler.type = VThreadScheduler
-    val io: Io[ops.type] = new Io[ops.type] {
+    val io: Io[Interface] = new Io[Interface] {
       val backend: ReferenceBackend.type = ReferenceBackend
+      val ops: ReferenceOps.type = ReferenceOps
       private[io] def performWithin(op: RefOp, timeoutMillis: Int)(using Async): Unit = op.perform(timeoutMillis)
     }
     // `Async.blocking` runs its body on the calling thread, which may be a platform thread; a future's is virtual.

@@ -76,7 +76,7 @@ object GearsQuicTimers {
       async: Async.Spawn
   ): Unit = {
     val socket = SimpleIO.bindDatagram(IpSocketAddress(IpAddress.IPv4Loopback, 0))
-    val address = io.backend.ops.localAddress(socket)
+    val address = io.ops.localAddress(socket)
     val counts = new Counts
     val closed = UnboundedChannel[Long]()
     val start = System.nanoTime()
@@ -101,7 +101,7 @@ object GearsQuicTimers {
       )
       check(counts.packets == connections.toLong * packets, s"the server heard ${counts.packets} packets")
       check(counts.closedIdle == connections, s"${counts.closedIdle} connections closed idle")
-    } finally io.perform(io.backend.ops.close(socket))
+    } finally io.perform(io.ops.close(socket))
   }
 
   private def check(ok: Boolean, what: => String): Unit =
@@ -111,7 +111,7 @@ object GearsQuicTimers {
     */
   private def serve(
       io: Io[IpDatagrams],
-      socket: io.backend.ops.BoundDatagram,
+      socket: io.ops.BoundDatagram,
       counts: Counts,
       closed: UnboundedChannel[Long],
       buffer: Int => ByteBuffer
@@ -119,7 +119,7 @@ object GearsQuicTimers {
     val drivers = mutable.HashMap.empty[Long, UnboundedChannel[Event]]
     val packet = buffer(64)
     val from = Slot[IpSocketAddress]()
-    val receive = io.backend.ops.receive(socket, packet, from)
+    val receive = io.ops.receive(socket, packet, from)
     while true do {
       packet.clear()
       io.perform(receive)
@@ -148,7 +148,7 @@ object GearsQuicTimers {
     */
   private def drive(
       io: Io[IpDatagrams],
-      socket: io.backend.ops.BoundDatagram,
+      socket: io.ops.BoundDatagram,
       id: Long,
       peer: IpSocketAddress,
       inbox: UnboundedChannel[Event],
@@ -160,7 +160,7 @@ object GearsQuicTimers {
     var ackAt = Never
     var unacknowledged = 0
     var largest = -1
-    val timer = io.backend.ops.deadlineTimer(idleAt)
+    val timer = io.ops.deadlineTimer(idleAt)
     val rearmed = UnboundedChannel[Unit]()
     // Performs the timer, again and again, ticking the driver each time it fires, then waiting for it to be moved.
     val ticker = Future {
@@ -174,7 +174,7 @@ object GearsQuicTimers {
     def acknowledge(onTimer: Boolean): Unit = {
       ack.clear()
       ack.putLong(id).putInt(largest).flip()
-      io.perform(io.backend.ops.send(socket, ack, peer))
+      io.perform(io.ops.send(socket, ack, peer))
       counts.synchronized(if onTimer then counts.acksOnTimer += 1 else counts.acksAtOnce += 1)
       unacknowledged = 0
       ackAt = Never
@@ -225,13 +225,13 @@ object GearsQuicTimers {
   )(using Async.Spawn): Unit = {
     val socket = SimpleIO.connectDatagram(null, server)(using io, summon[Async])
     val silence = 1.second.toNanos
-    val limit = io.backend.ops.deadlineTimer(System.nanoTime() + silence)
+    val limit = io.ops.deadlineTimer(System.nanoTime() + silence)
     try {
       val acks = UnboundedChannel[Int]()
       val exchange = Future {
         val receiving = Future {
           val ack = buffer(64)
-          val receive = io.backend.ops.receive(socket, ack)
+          val receive = io.ops.receive(socket, ack)
           var largest = -1
           while largest < packets - 1 do {
             ack.clear()
@@ -243,13 +243,13 @@ object GearsQuicTimers {
           }
         }
         val packet = buffer(PacketSize)
-        val pause = io.backend.ops.timer(interval)
+        val pause = io.ops.timer(interval)
         var acknowledged = -1
         for number <- 0 until packets do {
           while number - acknowledged > Window do acknowledged = math.max(acknowledged, acks.read().toOption.get)
           packet.clear()
           packet.putLong(id).putInt(number).flip()
-          io.perform(io.backend.ops.send(socket, packet))
+          io.perform(io.ops.send(socket, packet))
           if number < packets - 1 then io.perform(pause)
         }
         receiving.await
@@ -260,6 +260,6 @@ object GearsQuicTimers {
         silent.handle(_ => check(false, s"connection $id: no acknowledgement for a second"))
       )
       silent.cancel()
-    } finally io.perform(io.backend.ops.close(socket))
+    } finally io.perform(io.ops.close(socket))
   }
 }

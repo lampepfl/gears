@@ -81,18 +81,18 @@ object GearsCancel {
       try {
         val sleeperInterrupted = new AtomicBoolean()
         // A read with nothing written: cancelled before bytes come, it has taken none of them.
-        val read = io.backend.ops.read(readFd, arena.allocate(64))
-        val blocking = io.backend.ops.blocking(sleeper(1000, sleeperInterrupted))
+        val read = io.ops.read(readFd, arena.allocate(64))
+        val blocking = io.ops.blocking(sleeper(1000, sleeperInterrupted))
         val pending = Seq(
           "read" -> Future(io.perform(read)), // nothing has been written yet
           "blocking" -> Future(io.perform(blocking)),
-          "timer" -> Future(io.perform(io.backend.ops.timer(300)))
+          "timer" -> Future(io.perform(io.ops.timer(300)))
         )
         // Left running, never awaited: the program's end cancels the future, as it cancels every future still
         // running, and with it the op, and waits for it; `perform` throws once the task has stopped.
         Future {
           try {
-            io.perform(io.backend.ops.blocking(sleeper(10000, leftover.interrupted)))
+            io.perform(io.ops.blocking(sleeper(10000, leftover.interrupted)))
             println("unexpected completion of the leftover task")
           } catch {
             case cancelled: CancellationException =>
@@ -106,10 +106,10 @@ object GearsCancel {
         val stubbornFinished = new AtomicBoolean()
         val stubbornResult = Slot[String]()
         val stubbornTask =
-          Future(io.perform(io.backend.ops.blocking(stubborn(300, stubbornFinished), stubbornResult)))
+          Future(io.perform(io.ops.blocking(stubborn(300, stubbornFinished), stubbornResult)))
         println("submitted a read, a blocking task, and a timer")
 
-        io.perform(io.backend.ops.timer(100))
+        io.perform(io.ops.timer(100))
         stubbornTask.cancel()
         for (name, future) <- pending do {
           future.cancel()
@@ -131,13 +131,13 @@ object GearsCancel {
         val reading = Promise[Unit]()
         val orphan = Future {
           reading.complete(scala.util.Success(()))
-          io.perform(io.backend.ops.read(orphanRead, arena.allocate(16)))
+          io.perform(io.ops.read(orphanRead, arena.allocate(16)))
         }
         // Lets the future start and perform its read before the pipe is closed, which the timer gives time for.
         reading.await
-        io.perform(io.backend.ops.timer(20))
-        io.perform(io.backend.ops.close(orphanRead))
-        io.perform(io.backend.ops.close(orphanWrite))
+        io.perform(io.ops.timer(20))
+        io.perform(io.ops.close(orphanRead))
+        io.perform(io.ops.close(orphanWrite))
         val closedFailed = orphan.awaitResult.failed.toOption.exists(_.isInstanceOf[java.io.IOException])
         orphan.cancel() // nothing left to cancel
         println(s"closing fails a pending read: $closedFailed")
@@ -147,22 +147,22 @@ object GearsCancel {
         println(s"the cancelled task left its slot empty: ${DemoIO.isEmpty(stubbornResult)}")
 
         // Data arrives only now; the cancelled read must not see it, and its slot takes a fresh read.
-        io.perform(io.backend.ops.write(writeFd, arena.of("hello".getBytes(StandardCharsets.UTF_8))))
+        io.perform(io.ops.write(writeFd, arena.of("hello".getBytes(StandardCharsets.UTF_8))))
         buf.clear()
-        io.perform(io.backend.ops.read(readFd, buf))
+        io.perform(io.ops.read(readFd, buf))
         buf.flip()
         println(s"read after cancel: `${text(buf)}`")
 
         // Past the cancelled timer's deadline, with the interrupted sleeper long stopped.
-        io.perform(io.backend.ops.timer(500))
+        io.perform(io.ops.timer(500))
         val late = pending.count((_, future) => !isCancelled(future))
         println(s"blocking interrupted: ${sleeperInterrupted.get()}")
         println(s"cancelled completions run: $late")
         // Each future can only have been rejected by its op's cancel.
         println(s"cancel notifications: ${pending.count((_, future) => isCancelled(future))}")
       } finally {
-        io.perform(io.backend.ops.close(readFd))
-        io.perform(io.backend.ops.close(writeFd))
+        io.perform(io.ops.close(readFd))
+        io.perform(io.ops.close(writeFd))
       }
     }
     leftover

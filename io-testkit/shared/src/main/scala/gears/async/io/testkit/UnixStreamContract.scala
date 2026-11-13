@@ -10,23 +10,23 @@ import java.nio.file.Files
 
 /** What a backend with Unix stream sockets must do, with or without IP sockets. */
 trait UnixStreamContract extends FileSystemFixture {
-  val backend: Backend { val ops: UnixStreams }
+  val backend: Backend { type Interface <: UnixStreams }
 
   /** A listener on a Unix socket path, listening, from the `listen` op, whose failure is thrown. */
-  private def unixListen(io: Io[backend.ops.type], address: UnixAddress)(using Async): backend.ops.Listener = {
-    opening(io)(slot => io.backend.ops.listen(address, slot))
+  private def unixListen(io: Io[backend.Interface], address: UnixAddress)(using Async): io.ops.Listener = {
+    opening(io)(slot => io.ops.listen(address, slot))
   }
 
   /** A connection to a Unix socket path, from the `connect` op, whose failure is thrown. */
-  private def unixConnect(io: Io[backend.ops.type], address: UnixAddress)(using Async): backend.ops.Connection = {
-    opening(io)(slot => io.backend.ops.connect(address, slot))
+  private def unixConnect(io: Io[backend.Interface], address: UnixAddress)(using Async): io.ops.Connection = {
+    opening(io)(slot => io.ops.connect(address, slot))
   }
 
   /** A connection to `listener`, at `address`: its client's end and the one `listener` accepted. */
-  private def unixPair(io: Io[backend.ops.type], listener: backend.ops.Listener, address: UnixAddress)(using
+  private def unixPair(io: Io[backend.Interface], listener: io.ops.Listener, address: UnixAddress)(using
       Async.Spawn
-  ): (backend.ops.Connection, backend.ops.Connection) = {
-    val accepting = Future(opening(io)(slot => io.backend.ops.accept(listener, slot)))
+  ): (io.ops.Connection, io.ops.Connection) = {
+    val accepting = Future(opening(io)(slot => io.ops.accept(listener, slot)))
     val client = unixConnect(io, address)
     (client, accepting.await)
   }
@@ -42,7 +42,7 @@ trait UnixStreamContract extends FileSystemFixture {
             writeAll(io, client, bytes("last words"))
             close(io, client)
             val buf = allocate(64)
-            assertEquals(readToEnd(io, io.backend.ops.read(server, buf), buf), "last words")
+            assertEquals(readToEnd(io, io.ops.read(server, buf), buf), "last words")
           } finally close(io, server)
         } finally close(io, listener)
       }
@@ -59,14 +59,14 @@ trait UnixStreamContract extends FileSystemFixture {
           try {
             writeAll(io, client, bytes("ping"))
             val serverBuf = allocate(16)
-            io.perform(io.backend.ops.read(server, serverBuf))
-            readExactly(io, io.backend.ops.read(server, serverBuf), serverBuf, 4)
+            io.perform(io.ops.read(server, serverBuf))
+            readExactly(io, io.ops.read(server, serverBuf), serverBuf, 4)
             assertEquals(text(serverBuf), "ping")
             serverBuf.flip()
             writeAll(io, server, serverBuf)
             val clientBuf = allocate(16)
-            io.perform(io.backend.ops.read(client, clientBuf))
-            readExactly(io, io.backend.ops.read(client, clientBuf), clientBuf, 4)
+            io.perform(io.ops.read(client, clientBuf))
+            readExactly(io, io.ops.read(client, clientBuf), clientBuf, 4)
             assertEquals(text(clientBuf), "ping")
           } finally {
             close(io, server)
@@ -85,8 +85,8 @@ trait UnixStreamContract extends FileSystemFixture {
         val second = unixListen(io, path) // replaces the first's socket file
         try {
           close(io, first)
-          val into = Slot[backend.ops.Connection]()
-          val failure = attempt(io, io.backend.ops.connect(path, into))
+          val into = Slot[io.ops.Connection]()
+          val failure = attempt(io, io.ops.connect(path, into))
           assertEquals(failure, null, s"the second listener's file was removed: $failure")
           close(io, into.clear())
         } finally close(io, second)
@@ -99,8 +99,8 @@ trait UnixStreamContract extends FileSystemFixture {
       running { io ?=>
         val path = dir.resolve("data.txt")
         Files.write(path, "data".getBytes(StandardCharsets.UTF_8))
-        val into = Slot[backend.ops.Listener]()
-        val failure = attempt(io, io.backend.ops.listen(UnixAddress(path.toString), into))
+        val into = Slot[io.ops.Listener]()
+        val failure = attempt(io, io.ops.listen(UnixAddress(path.toString), into))
         assert(failure.isInstanceOf[java.io.IOException], String.valueOf(failure))
         assertEquals(Files.readString(path), "data")
       }
@@ -108,9 +108,11 @@ trait UnixStreamContract extends FileSystemFixture {
   }
 
   test("an empty Unix path, or one with a NUL, is refused as the op is built") {
-    for path <- List("", "a\u0000b") do {
-      intercept[IllegalArgumentException](backend.ops.listen(UnixAddress(path), Slot[backend.ops.Listener]()))
-      intercept[IllegalArgumentException](backend.ops.connect(UnixAddress(path), Slot[backend.ops.Connection]()))
+    running { io ?=>
+      for path <- List("", "a\u0000b") do {
+        intercept[IllegalArgumentException](io.ops.listen(UnixAddress(path), Slot[io.ops.Listener]()))
+        intercept[IllegalArgumentException](io.ops.connect(UnixAddress(path), Slot[io.ops.Connection]()))
+      }
     }
   }
 
@@ -132,13 +134,13 @@ trait UnixStreamContract extends FileSystemFixture {
         val address = UnixAddress(dir.resolve("named.sock").toString)
         val listener = unixListen(io, address)
         try {
-          assertEquals(io.backend.ops.localAddress(listener), address)
+          assertEquals(io.ops.localAddress(listener), address)
           val (client, server) = unixPair(io, listener, address)
           try {
-            assertEquals(io.backend.ops.peerAddress(client), address)
-            assertEquals(io.backend.ops.localAddress(client), UnixAddress(""), "a client with no path of its own")
-            assertEquals(io.backend.ops.peerAddress(server), UnixAddress(""))
-            assertEquals(io.backend.ops.localAddress(server), address)
+            assertEquals(io.ops.peerAddress(client), address)
+            assertEquals(io.ops.localAddress(client), UnixAddress(""), "a client with no path of its own")
+            assertEquals(io.ops.peerAddress(server), UnixAddress(""))
+            assertEquals(io.ops.localAddress(server), address)
           } finally {
             close(io, client)
             close(io, server)
@@ -149,53 +151,59 @@ trait UnixStreamContract extends FileSystemFixture {
   }
 
   test("a Unix stream socket takes the buffer sizes where the backend has them, and refuses TCP's options") {
-    import SocketOption.Kind.{UnixConnection, UnixListener}
-    for option <- List(SocketOption.NoDelay, SocketOption.KeepAlive, SocketOption.DontFragment, SocketOption.ReusePort)
-    do {
-      assert(!backend.ops.supports(option, UnixConnection) && !backend.ops.supports(option, UnixListener), s"$option")
-      assert(!backend.ops.canChange(option, UnixConnection), s"$option")
-    }
-    intercept[IllegalArgumentException](
-      backend.ops.connect(UnixAddress("/nowhere.sock"), SocketOptions.default.set(SocketOption.NoDelay, true), Slot())
-    )
-    intercept[IllegalArgumentException](
-      backend.ops.listen(UnixAddress("/nowhere.sock"), SocketOptions.default.set(SocketOption.NoDelay, true), Slot())
-    )
-    assume(
-      backend.ops.supports(SocketOption.ReceiveBuffer, UnixListener) &&
-        backend.ops.supports(SocketOption.SendBuffer, UnixListener) &&
-        backend.ops.supports(SocketOption.ReceiveBuffer, UnixConnection),
-      "this backend has no buffer sizes for Unix sockets"
-    )
-    withTempDir { dir =>
-      running { io ?=>
-        val address = UnixAddress(dir.resolve("buffers.sock").toString)
-        val listenerOptions =
-          SocketOptions.default.set(SocketOption.ReceiveBuffer, 65536).set(SocketOption.SendBuffer, 65536)
-        val listener = opening(io)(slot => io.backend.ops.listen(address, listenerOptions, slot))
-        try {
-          val accepting = Future(opening(io)(slot => io.backend.ops.accept(listener, slot)))
-          val client = opening(io)(slot =>
-            io.backend.ops.connect(address, SocketOptions.default.set(SocketOption.ReceiveBuffer, 65536), slot)
-          )
-          val server = accepting.await
+    running { io ?=>
+      import SocketOption.Kind.{UnixConnection, UnixListener}
+      for option <- List(
+          SocketOption.NoDelay,
+          SocketOption.KeepAlive,
+          SocketOption.DontFragment,
+          SocketOption.ReusePort
+        )
+      do {
+        assert(!io.ops.supports(option, UnixConnection) && !io.ops.supports(option, UnixListener), s"$option")
+        assert(!io.ops.canChange(option, UnixConnection), s"$option")
+      }
+      intercept[IllegalArgumentException](
+        io.ops.connect(UnixAddress("/nowhere.sock"), SocketOptions.default.set(SocketOption.NoDelay, true), Slot())
+      )
+      intercept[IllegalArgumentException](
+        io.ops.listen(UnixAddress("/nowhere.sock"), SocketOptions.default.set(SocketOption.NoDelay, true), Slot())
+      )
+      assume(
+        io.ops.supports(SocketOption.ReceiveBuffer, UnixListener) &&
+          io.ops.supports(SocketOption.SendBuffer, UnixListener) &&
+          io.ops.supports(SocketOption.ReceiveBuffer, UnixConnection),
+        "this backend has no buffer sizes for Unix sockets"
+      )
+      withTempDir { dir =>
+        locally {
+          val address = UnixAddress(dir.resolve("buffers.sock").toString)
+          val listenerOptions =
+            SocketOptions.default.set(SocketOption.ReceiveBuffer, 65536).set(SocketOption.SendBuffer, 65536)
+          val listener = opening(io)(slot => io.ops.listen(address, listenerOptions, slot))
           try {
-            assert(io.backend.ops.option(client, SocketOption.ReceiveBuffer) >= 65536, "the client's receive buffer")
-            assert(
-              io.backend.ops.option(server, SocketOption.SendBuffer) >= 65536,
-              "the listener's, on what it accepts"
+            val accepting = Future(opening(io)(slot => io.ops.accept(listener, slot)))
+            val client = opening(io)(slot =>
+              io.ops.connect(address, SocketOptions.default.set(SocketOption.ReceiveBuffer, 65536), slot)
             )
-            intercept[IllegalArgumentException](io.backend.ops.option(client, SocketOption.NoDelay))
-            if io.backend.ops.canChange(SocketOption.SendBuffer, UnixConnection) then {
-              io.backend.ops.setOption(client, SocketOption.SendBuffer, 131072)
-              assert(io.backend.ops.option(client, SocketOption.SendBuffer) >= 131072, "changed")
-            } else
-              intercept[IllegalArgumentException](io.backend.ops.setOption(client, SocketOption.SendBuffer, 131072))
-          } finally {
-            close(io, client)
-            close(io, server)
-          }
-        } finally close(io, listener)
+            val server = accepting.await
+            try {
+              assert(io.ops.option(client, SocketOption.ReceiveBuffer) >= 65536, "the client's receive buffer")
+              assert(
+                io.ops.option(server, SocketOption.SendBuffer) >= 65536,
+                "the listener's, on what it accepts"
+              )
+              intercept[IllegalArgumentException](io.ops.option(client, SocketOption.NoDelay))
+              if io.ops.canChange(SocketOption.SendBuffer, UnixConnection) then {
+                io.ops.setOption(client, SocketOption.SendBuffer, 131072)
+                assert(io.ops.option(client, SocketOption.SendBuffer) >= 131072, "changed")
+              } else intercept[IllegalArgumentException](io.ops.setOption(client, SocketOption.SendBuffer, 131072))
+            } finally {
+              close(io, client)
+              close(io, server)
+            }
+          } finally close(io, listener)
+        }
       }
     }
   }

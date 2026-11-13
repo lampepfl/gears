@@ -27,7 +27,7 @@ object GearsSocket {
       val socket = Sockets.connect(address)
       try {
         // One repeatable op, resubmitted until the request is out.
-        val write = io.backend.ops.write(socket, buf)
+        val write = io.ops.write(socket, buf)
         StreamProtocol.frame("Hello from the gears socket demo!\n", buf)
         while buf.hasRemaining() do {
           val before = buf.position()
@@ -36,7 +36,7 @@ object GearsSocket {
         }
         SimpleIO.shutdownOutput(socket) // the request ends here, and the server's reply follows to its end
         // The response, read exactly: its header, then its body, through the same buffer.
-        val read = io.backend.ops.read(socket, buf)
+        val read = io.ops.read(socket, buf)
         val reader = new FrameReader(buf)
         var reply: String | Null = null
         while reply == null do {
@@ -48,7 +48,7 @@ object GearsSocket {
           reply = reader.advance()
         }
         println(s"Received message: `$reply`")
-      } finally io.perform(io.backend.ops.close(socket))
+      } finally io.perform(io.ops.close(socket))
     }
   }
 }

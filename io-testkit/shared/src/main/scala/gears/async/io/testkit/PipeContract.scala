@@ -10,11 +10,11 @@ trait PipeContract extends StreamContract with PipeFixture {
 
   test("a pipe refuses an occupied output slot without opening either end") {
     running { io ?=>
-      val read = Slot[Readable]()
-      val write = Slot[Writable]()
-      io.perform(io.backend.ops.pipe(read, write))
+      val read = Slot[io.ops.Readable]()
+      val write = Slot[io.ops.Writable]()
+      io.perform(io.ops.pipe(read, write))
       val in = read.clear()
-      val refused = attempt(io, io.backend.ops.pipe(read, write)) // `write` still holds the first pipe's end
+      val refused = attempt(io, io.ops.pipe(read, write)) // `write` still holds the first pipe's end
       assert(refused.isInstanceOf[IllegalArgumentException], String.valueOf(refused))
       intercept[IllegalStateException](read.clear()) // nothing opened
       close(io, in)
@@ -27,7 +27,7 @@ trait PipeContract extends StreamContract with PipeFixture {
       val (in, out) = pipe(io)
       close(io, in)
       try {
-        val failure = attempt(io, io.backend.ops.write(out, bytes("nobody reads this")))
+        val failure = attempt(io, io.ops.write(out, bytes("nobody reads this")))
         assert(failure.isInstanceOf[IOException], String.valueOf(failure))
       } finally close(io, out)
     }
@@ -40,20 +40,20 @@ trait PipeContract extends StreamContract with PipeFixture {
         writeAll(io, out, bytes("then the end"))
         close(io, out)
         val buf = allocate(64)
-        assertEquals(readToEnd(io, io.backend.ops.read(in, buf), buf), "then the end")
+        assertEquals(readToEnd(io, io.ops.read(in, buf), buf), "then the end")
       } finally close(io, in)
     }
   }
 
   test("an op that opens or closes is one-shot: performed again, it throws IllegalStateException") {
     running { io ?=>
-      val read = Slot[Readable]()
-      val write = Slot[Writable]()
-      val opening = io.backend.ops.pipe(read, write)
+      val read = Slot[io.ops.Readable]()
+      val write = Slot[io.ops.Writable]()
+      val opening = io.ops.pipe(read, write)
       io.perform(opening)
       val (in, out) = (read.clear(), write.clear())
       intercept[IllegalStateException](io.perform(opening))
-      val closing = io.backend.ops.close(in)
+      val closing = io.ops.close(in)
       io.perform(closing)
       intercept[IllegalStateException](io.perform(closing))
       close(io, out)
@@ -63,9 +63,9 @@ trait PipeContract extends StreamContract with PipeFixture {
   test("a one-shot op performed by two futures at once opens once, the other refused") {
     running { io ?=>
       for _ <- 1 to 100 do {
-        val read = Slot[Readable]()
-        val write = Slot[Writable]()
-        val opening = io.backend.ops.pipe(read, write)
+        val read = Slot[io.ops.Readable]()
+        val write = Slot[io.ops.Writable]()
+        val opening = io.ops.pipe(read, write)
         val start = Future.Promise[Unit]()
         val both = List.fill(2)(Future {
           start.await
@@ -92,7 +92,7 @@ trait PipeContract extends StreamContract with PipeFixture {
         val result = writing.poll()
         result.foreach(_.get) // a failed write is a failure, not an unsupported workload
         assume(result.isEmpty, "the pipe accepted the whole payload; there is no pending write to test")
-        val secondWrite = attempt(io, io.backend.ops.write(out, bytes("z")))
+        val secondWrite = attempt(io, io.ops.write(out, bytes("z")))
         assert(secondWrite.isInstanceOf[IllegalArgumentException], s"a second write: $secondWrite")
         writing.cancel()
         writing.awaitResult

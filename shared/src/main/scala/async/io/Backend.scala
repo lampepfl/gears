@@ -15,17 +15,17 @@ import _root_.gears.async.Async
   * `IpSockets`), regular files (`RegularFiles`), pipes (`Pipes`), name resolution (`Resolving`), blocking ops
   * (`Blocking`), `UnixStreams`, `UnixDatagrams` and `Fifos`. Code that needs a capability asks for an `Io` over ops
   * that have it, by the capability (`Io[IpSockets]`, or `Io[IpStreams & RegularFiles]` for more), or for a backend
-  * whose ops do (`Backend { val ops: IpSockets }`), so a backend without it, such as one in a browser, which has no
-  * sockets or files of these kinds, is refused when compiling, not when running.
+  * whose ops do (`Backend { type Interface <: IpSockets }`), so a backend without it, such as one in a browser, which
+  * has no sockets or files of these kinds, is refused when compiling, not when running.
   */
 trait Backend {
 
-  /** This backend's interface: what builds its ops, with the types of its ops and of its handles, each kind of handle a
-    * type of its own (see `Interface`). A backend with a capability has ops of the interface that declares its ops and
-    * its kinds, so a program names a kind through the backend it asked for, `backend.ops.Connection`, and a backend
-    * without the capability has no such kind.
+  /** The interface of this backend's ops: what builds its ops, with the types of its ops and of its handles, each kind
+    * of handle a type of its own (see `Interface`), and the capabilities the backend has. A program has the ops
+    * themselves from its `Io` (`Io.ops`), which `Io.run` gives it, so it names a kind through that,
+    * `io.ops.Connection`, and a backend without a capability has no such kind.
     */
-  val ops: Interface
+  type Interface <: gears.async.io.Interface
 
   /** Opens a pool of `buffers` buffers of up to `bufferSize` bytes each, for the reads into buffers of the backend's
     * (`Interface.read` with a pool). Close it once nothing of it is held.
@@ -35,7 +35,7 @@ trait Backend {
   /** Runs `program` over this backend, giving it an `Io` over it, and returns what it returns, rethrowing its failure:
     * what `Io.run` does, each backend its own way, since where its ops are performed is its own.
     */
-  private[io] def run[T](program: Io[ops.type] ?=> Async.Spawn ?=> T): T
+  private[io] def run[T](program: Io[Interface] ?=> Async.Spawn ?=> T): T
 }
 
 object Backend {

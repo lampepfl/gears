@@ -20,36 +20,36 @@ class ReferenceThreadedTimerSuite extends ThreadedTimerContract {
 }
 
 class ReferenceBlockingSuite extends BlockingContract {
-  val backend: Backend { val ops: Blocking } = ReferenceBackend
+  val backend: Backend { type Interface <: Blocking } = ReferenceBackend
 }
 
 class ReferencePipeSuite extends PipeContract {
-  val backend: Backend { val ops: Pipes } = ReferenceBackend
+  val backend: Backend { type Interface <: Pipes } = ReferenceBackend
 }
 
 /** Runs the same stream contracts using TCP, without exposing Pipes to the suite. */
 class ReferenceSocketStreamSuite extends StreamContract with IpStreamFixture {
-  val backend: Backend { val ops: IpStreams } = ReferenceBackend
+  val backend: Backend { type Interface <: IpStreams } = ReferenceBackend
 }
 
 class ReferenceIpStreamSuite extends IpStreamContract {
-  val backend: Backend { val ops: IpStreams } = ReferenceBackend
+  val backend: Backend { type Interface <: IpStreams } = ReferenceBackend
 }
 
 class ReferenceIpDatagramSuite extends IpDatagramContract {
-  val backend: Backend { val ops: IpDatagrams } = ReferenceBackend
+  val backend: Backend { type Interface <: IpDatagrams } = ReferenceBackend
 }
 
 class ReferenceUnixStreamSuite extends UnixStreamContract {
-  val backend: Backend { val ops: UnixStreams } = ReferenceBackend
+  val backend: Backend { type Interface <: UnixStreams } = ReferenceBackend
 }
 
 class ReferenceFileSuite extends FileContract {
-  val backend: Backend { val ops: RegularFiles } = ReferenceBackend
+  val backend: Backend { type Interface <: RegularFiles } = ReferenceBackend
 }
 
 class ReferenceResolveSuite extends ResolveContract {
-  val backend: Backend { val ops: Resolving } = ReferenceBackend
+  val backend: Backend { type Interface <: Resolving } = ReferenceBackend
 
   override protected def namedScopedAddresses: List[(String, IpAddress)] =
     NetworkInterface
@@ -72,17 +72,17 @@ class ReferenceResolveSuite extends ResolveContract {
 }
 
 class ReferenceSimpleIOSuite extends SimpleIOChecks with PipeFixture {
-  val backend: Backend { val ops: Pipes } = ReferenceBackend
+  val backend: Backend { type Interface <: Pipes } = ReferenceBackend
 }
 
 class ReferenceSimpleIOSocketSuite extends SimpleIOChecks with IpStreamFixture {
-  val backend: Backend { val ops: IpStreams } = ReferenceBackend
+  val backend: Backend { type Interface <: IpStreams } = ReferenceBackend
 }
 
 class ReferenceSimpleIOIpStreamSuite extends SimpleIOIpStreamChecks {
-  val backend: Backend { val ops: IpStreams } = ReferenceBackend
+  val backend: Backend { type Interface <: IpStreams } = ReferenceBackend
 }
 
 class ReferenceSimpleIOResolveSuite extends SimpleIOResolveChecks {
-  val backend: Backend { val ops: Resolving } = ReferenceBackend
+  val backend: Backend { type Interface <: Resolving } = ReferenceBackend
 }

@@ -16,10 +16,14 @@ import _root_.gears.async.AsyncOperations
 trait Io[+I <: Interface] extends AsyncOperations {
 
   /** The backend whose ops this performs. */
-  val backend: Backend { val ops: I }
+  val backend: Backend { type Interface <: I }
 
-  /** What this performs: its backend's ops. */
-  type Op = backend.ops.Op
+  /** The backend's ops, which build what this performs and name its kinds of handle: `io.ops.read(handle, buf)`, an
+    * `io.ops.Connection`.
+    */
+  val ops: I
+
+  type Op = ops.Op
 
   /** Performs `op` and suspends the caller until it is done: it returns when the op finishes, throws its failure, or
     * throws `CancellationException` when the caller is cancelled first. Whichever way it ends, once it returns or
@@ -50,7 +54,7 @@ trait Io[+I <: Interface] extends AsyncOperations {
   /** Sleeps on a timer op of the backend's. */
   override def sleep(millis: Long)(using Async): Unit = {
     require(millis >= 0 && millis <= Int.MaxValue, s"A sleep of $millis ms is out of a timer's range")
-    perform(backend.ops.timer(millis.toInt))
+    perform(ops.timer(millis.toInt))
   }
 }
 
@@ -61,6 +65,6 @@ object Io {
     * beside its `Async`, where the backend runs it (`Backend.run`). A program's `Io` is not a `Backend`, so starting a
     * run over one is refused when compiling.
     */
-  def run[T](using backend: Backend)(program: Io[backend.ops.type] ?=> Async.Spawn ?=> T): T =
+  def run[T](using backend: Backend)(program: Io[backend.Interface] ?=> Async.Spawn ?=> T): T =
     backend.run(program)
 }

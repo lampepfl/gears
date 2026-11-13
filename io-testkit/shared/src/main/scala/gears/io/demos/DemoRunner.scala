@@ -1,7 +1,6 @@
 package gears.io.demos
 
 import gears.async.Async
-import gears.async.io.Backend
 import gears.async.io.Interface
 import gears.async.io.Io
 
@@ -11,11 +10,9 @@ import gears.async.io.Io
   */
 trait DemoRunner[+I <: Interface] {
 
-  /** The backend the programs run over, whose capabilities the commands check before running a demo that needs them.
+  /** Runs `program` over the backend, as `Io.run` does: its `Io` has the backend's ops, whose capabilities the commands
+    * check before running a demo that needs them.
     */
-  val backend: Backend { val ops: I }
-
-  /** Runs `program` over the backend, as `Io.run` does. */
   def run[T](program: Io[I] ?=> Async.Spawn ?=> T): T
 }
 
@@ -45,8 +42,8 @@ final class DemoBackends(val offered: Seq[(String, DemoRunner[Interface])], val 
       needs: String
   )(has: PartialFunction[Interface, C]): DemoRunner[C] = {
     val (chosen, runner) = named(name)
-    if has.isDefinedAt(runner.backend.ops) then
-      // The runner runs its programs over `runner.backend`, whose ops are a `C`: so is every `Io` it gives them.
+    if runner.run(io ?=> has.isDefinedAt(io.ops)) then
+      // The ops of the `Io` the runner gives its programs are a `C`: so is every `Io` it gives them.
       runner.asInstanceOf[DemoRunner[C]]
     else throw new IllegalArgumentException(s"The backend `$chosen` has no $needs, which this demo needs")
   }

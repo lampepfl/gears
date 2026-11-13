@@ -24,7 +24,7 @@ object GearsFileRead {
       try {
         println(s"opened file: $file")
         // One repeatable op, performed again for each chunk; a read that adds nothing is the writer's end.
-        val read = io.backend.ops.read(file, chunk)
+        val read = io.ops.read(file, chunk)
         println("Event registered for file read.") // the plain demo's words, for which its checks wait
         println("starting to poll...")
         var heard = false // bytes came since the last end reported: a writer has been
@@ -47,7 +47,7 @@ object GearsFileRead {
             drainTo(chunk, contents)
           }
         }
-      } finally io.perform(io.backend.ops.close(file))
+      } finally io.perform(io.ops.close(file))
     }
   }
 }

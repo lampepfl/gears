@@ -45,77 +45,77 @@ object SimpleIO {
   }
 
   /** Connects a stream socket to `address` and returns it. */
-  def connect(address: IpSocketAddress)(using io: Io[IpStreams], async: Async): io.backend.ops.Connection =
-    opened[io.backend.ops.Connection](io.backend.ops.connect(address, _))
+  def connect(address: IpSocketAddress)(using io: Io[IpStreams], async: Async): io.ops.Connection =
+    opened[io.ops.Connection](io.ops.connect(address, _))
 
   /** Connects a stream socket to a Unix socket path and returns it. */
-  def connect(address: UnixAddress)(using io: Io[UnixStreams], async: Async): io.backend.ops.Connection =
-    opened[io.backend.ops.Connection](io.backend.ops.connect(address, _))
+  def connect(address: UnixAddress)(using io: Io[UnixStreams], async: Async): io.ops.Connection =
+    opened[io.ops.Connection](io.ops.connect(address, _))
 
   /** Listens on `address` and returns the listener. */
-  def listen(address: IpSocketAddress)(using io: Io[IpStreams], async: Async): io.backend.ops.Listener =
-    opened[io.backend.ops.Listener](io.backend.ops.listen(address, _))
+  def listen(address: IpSocketAddress)(using io: Io[IpStreams], async: Async): io.ops.Listener =
+    opened[io.ops.Listener](io.ops.listen(address, _))
 
   /** Listens on a Unix socket path and returns the listener. */
-  def listen(address: UnixAddress)(using io: Io[UnixStreams], async: Async): io.backend.ops.Listener =
-    opened[io.backend.ops.Listener](io.backend.ops.listen(address, _))
+  def listen(address: UnixAddress)(using io: Io[UnixStreams], async: Async): io.ops.Listener =
+    opened[io.ops.Listener](io.ops.listen(address, _))
 
   /** Opens a datagram socket bound to `local` and returns it. */
-  def bindDatagram(local: IpSocketAddress)(using io: Io[IpDatagrams], async: Async): io.backend.ops.BoundDatagram =
-    opened[io.backend.ops.BoundDatagram](io.backend.ops.bindDatagram(local, _))
+  def bindDatagram(local: IpSocketAddress)(using io: Io[IpDatagrams], async: Async): io.ops.BoundDatagram =
+    opened[io.ops.BoundDatagram](io.ops.bindDatagram(local, _))
 
   /** Opens a datagram socket connected to `remote`, bound to `local` if given, and returns it. */
   def connectDatagram(local: IpSocketAddress | Null, remote: IpSocketAddress)(using
       io: Io[IpDatagrams],
       async: Async
-  ): io.backend.ops.ConnectedDatagram =
-    opened[io.backend.ops.ConnectedDatagram](io.backend.ops.connectDatagram(local, remote, _))
+  ): io.ops.ConnectedDatagram =
+    opened[io.ops.ConnectedDatagram](io.ops.connectDatagram(local, remote, _))
 
   /** Opens a Unix datagram socket bound to `local` and returns it. */
-  def bindDatagram(local: UnixAddress)(using io: Io[UnixDatagrams], async: Async): io.backend.ops.UnixBoundDatagram =
-    opened[io.backend.ops.UnixBoundDatagram](io.backend.ops.bindDatagram(local, _))
+  def bindDatagram(local: UnixAddress)(using io: Io[UnixDatagrams], async: Async): io.ops.UnixBoundDatagram =
+    opened[io.ops.UnixBoundDatagram](io.ops.bindDatagram(local, _))
 
   /** Opens a Unix datagram socket connected to `remote`, bound to `local` if given, and returns it. */
   def connectDatagram(local: UnixAddress | Null, remote: UnixAddress)(using
       io: Io[UnixDatagrams],
       async: Async
-  ): io.backend.ops.UnixConnectedDatagram =
-    opened[io.backend.ops.UnixConnectedDatagram](io.backend.ops.connectDatagram(local, remote, _))
+  ): io.ops.UnixConnectedDatagram =
+    opened[io.ops.UnixConnectedDatagram](io.ops.connectDatagram(local, remote, _))
 
   /** Opens a pipe and returns its read end and its write end. */
-  def pipe()(using io: Io[Pipes], async: Async): (io.backend.ops.Readable, io.backend.ops.Writable) = {
-    val read = Slot[io.backend.ops.Readable]()
-    val write = Slot[io.backend.ops.Writable]()
-    io.perform(io.backend.ops.pipe(read, write))
+  def pipe()(using io: Io[Pipes], async: Async): (io.ops.Readable, io.ops.Writable) = {
+    val read = Slot[io.ops.Readable]()
+    val write = Slot[io.ops.Writable]()
+    io.perform(io.ops.pipe(read, write))
     (read.clear(), write.clear())
   }
 
   /** Opens the FIFO at `path` for reading and returns it. */
-  def openFifoForReading(path: String)(using io: Io[Fifos], async: Async): io.backend.ops.Readable =
-    opened[io.backend.ops.Readable](io.backend.ops.openFifoForReading(path, _))
+  def openFifoForReading(path: String)(using io: Io[Fifos], async: Async): io.ops.Readable =
+    opened[io.ops.Readable](io.ops.openFifoForReading(path, _))
 
   /** Opens the FIFO at `path` for writing and returns it. */
-  def openFifoForWriting(path: String)(using io: Io[Fifos], async: Async): io.backend.ops.Writable =
-    opened[io.backend.ops.Writable](io.backend.ops.openFifoForWriting(path, _))
+  def openFifoForWriting(path: String)(using io: Io[Fifos], async: Async): io.ops.Writable =
+    opened[io.ops.Writable](io.ops.openFifoForWriting(path, _))
 
   /** Reads into `buf` once and returns how many bytes arrived, 0 at the end of the stream. */
-  def read(using io: Io[Interface])(handle: io.backend.ops.Readable, buf: ByteBuffer)(using Async): Int = {
+  def read(using io: Io[Interface])(handle: io.ops.Readable, buf: ByteBuffer)(using Async): Int = {
     val before = buf.position()
-    io.perform(io.backend.ops.read(handle, buf))
+    io.perform(io.ops.read(handle, buf))
     buf.position() - before
   }
 
   /** Writes all of `buf`, however many writes it takes. */
-  def writeAll(using io: Io[Interface])(handle: io.backend.ops.Writable, buf: ByteBuffer)(using Async): Unit = {
-    val write = io.backend.ops.write(handle, buf)
+  def writeAll(using io: Io[Interface])(handle: io.ops.Writable, buf: ByteBuffer)(using Async): Unit = {
+    val write = io.ops.write(handle, buf)
     while buf.hasRemaining do io.perform(write)
   }
 
   /** Shuts a connected stream down for writing: the peer reads what was written, then the end of the stream, and this
     * side may still read (see `StreamSockets.shutdownOutput`).
     */
-  def shutdownOutput(using io: Io[StreamSockets])(handle: io.backend.ops.Connection)(using Async): Unit =
-    io.perform(io.backend.ops.shutdownOutput(handle))
+  def shutdownOutput(using io: Io[StreamSockets])(handle: io.ops.Connection)(using Async): Unit =
+    io.perform(io.ops.shutdownOutput(handle))
 
   /** Closes a connected stream without resetting it: shuts it down for writing, so that the peer reads all that was
     * written and then the end, reads into `scratch` and discards until the peer's end, at most `timeout`, and closes.
@@ -124,12 +124,12 @@ object SimpleIO {
     */
   def closeGracefully(using
       io: Io[StreamSockets]
-  )(handle: io.backend.ops.Connection, scratch: ByteBuffer, timeout: scala.concurrent.duration.FiniteDuration = Linger)(
-      using Async
+  )(handle: io.ops.Connection, scratch: ByteBuffer, timeout: scala.concurrent.duration.FiniteDuration = Linger)(using
+      Async
   ): Unit =
     try {
       shutdownOutput(handle)
-      val read = io.backend.ops.read(handle, scratch)
+      val read = io.ops.read(handle, scratch)
       val deadline = System.nanoTime() + timeout.toNanos
       var open = true
       while open do {
@@ -143,21 +143,21 @@ object SimpleIO {
       }
     } catch {
       case _: IOException | _: TimeoutException => () // reset, or never ended: closed on all the same
-    } finally io.perform(io.backend.ops.close(handle))
+    } finally io.perform(io.ops.close(handle))
 
   /** Accepts one connection and returns it. */
   def accept(using
       io: Io[StreamSockets]
-  )(listener: io.backend.ops.Listener)(using Async): io.backend.ops.Connection = {
-    val into = Slot[io.backend.ops.Connection]()
-    io.perform(io.backend.ops.accept(listener, into))
+  )(listener: io.ops.Listener)(using Async): io.ops.Connection = {
+    val into = Slot[io.ops.Connection]()
+    io.perform(io.ops.accept(listener, into))
     into.clear()
   }
 
   /** Resolves `host` and returns its addresses. */
   def resolve(host: String)(using io: Io[Resolving], async: Async): List[IpAddress] = {
     val into = Slot[List[IpAddress]]()
-    io.perform(io.backend.ops.resolve(host, into))
+    io.perform(io.ops.resolve(host, into))
     into.clear()
   }
 
@@ -197,12 +197,12 @@ object SimpleIO {
     */
   def chunks(using
       io: Io[Interface]
-  )(handle: io.backend.ops.Readable, pool: BufferPool, backlog: Int)(using Async.Spawn): Chunks = {
+  )(handle: io.ops.Readable, pool: BufferPool, backlog: Int)(using Async.Spawn): Chunks = {
     require(pool.buffers >= backlog + 2, s"a backlog of $backlog needs a pool of ${backlog + 2} buffers")
     val channel = BufferedChannel[Option[Received]](backlog)
     val reader = Future {
       val into = Slot[Received]()
-      val read = io.backend.ops.read(handle, pool, into)
+      val read = io.ops.read(handle, pool, into)
       var inHand: Received | Null = null
       try {
         var atEnd = false

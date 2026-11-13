@@ -12,12 +12,12 @@ import scala.concurrent.duration.*
 
 /** Blocking operations, requiring only the Blocking capability. */
 trait BlockingContract extends ContractSuite {
-  val backend: Backend { val ops: Blocking }
+  val backend: Backend { type Interface <: Blocking }
 
   test("a blocking op past its time limit is interrupted, and fails once it has returned") {
     running { io ?=>
       val returned = new AtomicBoolean
-      val op = io.backend.ops.blocking { () =>
+      val op = io.ops.blocking { () =>
         try Thread.sleep(10_000)
         catch case _: InterruptedException => ()
         returned.set(true)
@@ -29,7 +29,7 @@ trait BlockingContract extends ContractSuite {
 
   test("an op that is not Repeatable cannot be performed twice") {
     running { io ?=>
-      val op = io.backend.ops.blocking(() => ())
+      val op = io.ops.blocking(() => ())
       io.perform(op)
       intercept[IllegalStateException](io.perform(op))
     }
@@ -38,14 +38,14 @@ trait BlockingContract extends ContractSuite {
   test("a blocking op writes its value into its slot") {
     running { io ?=>
       val into = Slot[String]()
-      io.perform(io.backend.ops.blocking(() => "value", into))
+      io.perform(io.ops.blocking(() => "value", into))
       assertEquals(into.clear(), "value")
     }
   }
 
   test("a blocking op's failure fails the op") {
     running { io ?=>
-      val failure = attempt(io, io.backend.ops.blocking(() => throw new IllegalArgumentException("boom")))
+      val failure = attempt(io, io.ops.blocking(() => throw new IllegalArgumentException("boom")))
       assert(failure.isInstanceOf[IllegalArgumentException], String.valueOf(failure))
     }
   }
@@ -54,7 +54,7 @@ trait BlockingContract extends ContractSuite {
     running { io ?=>
       val started = new CountDownLatch(1)
       val returned = new AtomicBoolean
-      val op = io.backend.ops.blocking { () =>
+      val op = io.ops.blocking { () =>
         started.countDown()
         try Thread.sleep(10_000)
         catch case _: InterruptedException => ()
@@ -73,7 +73,7 @@ trait BlockingContract extends ContractSuite {
     running { io ?=>
       val returning = new CountDownLatch(1)
       val into = Slot[String]()
-      val op = io.backend.ops.blocking(
+      val op = io.ops.blocking(
         () => {
           returning.countDown()
           "value"
@@ -92,8 +92,8 @@ trait BlockingContract extends ContractSuite {
   test("a blocking op with a time limit that finishes in time completes, and nothing of its limit fires later") {
     running { io ?=>
       val ran = new java.util.concurrent.atomic.AtomicInteger
-      for _ <- 1 to 3 do io.perform(io.backend.ops.blocking(() => ran.incrementAndGet(): Unit), 50.millis)
-      io.perform(io.backend.ops.timer(80)) // past every limit
+      for _ <- 1 to 3 do io.perform(io.ops.blocking(() => ran.incrementAndGet(): Unit), 50.millis)
+      io.perform(io.ops.timer(80)) // past every limit
       assertEquals(ran.get(), 3)
     }
   }
@@ -101,11 +101,11 @@ trait BlockingContract extends ContractSuite {
   test("an op performed with a slot not yet cleared fails with IllegalArgumentException, doing nothing") {
     running { io ?=>
       val into = Slot[String]()
-      io.perform(io.backend.ops.blocking(() => "first", into))
+      io.perform(io.ops.blocking(() => "first", into))
       val ran = new AtomicBoolean
       val failure = attempt(
         io,
-        io.backend.ops.blocking(
+        io.ops.blocking(
           () => {
             ran.set(true)
             "second"
@@ -126,7 +126,7 @@ trait BlockingContract extends ContractSuite {
       val stopped = new java.util.concurrent.atomic.AtomicBoolean
       val release = new java.util.concurrent.CountDownLatch(1)
       val waiting = Future {
-        io.perform(io.backend.ops.blocking { () =>
+        io.perform(io.ops.blocking { () =>
           entered.set(true)
           var released = false
           while !released do

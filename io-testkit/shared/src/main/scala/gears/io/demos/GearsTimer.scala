@@ -9,12 +9,12 @@ import gears.async.io.Io
 object GearsTimer {
   def run()(using io: Io[Interface], async: Async.Spawn): Unit = {
     println("Creating and registering timer event...")
-    val fired = Future(io.perform(io.backend.ops.timer(5000)))
+    val fired = Future(io.perform(io.ops.timer(5000)))
     println("Event registered successfully. Waiting for it to trigger...")
     println("calling kevent to wait for events...")
     val ticker = Future {
       var seconds = 0
-      val timer = io.backend.ops.timer(1000)
+      val timer = io.ops.timer(1000)
       while true do {
         io.perform(timer)
         seconds += 1

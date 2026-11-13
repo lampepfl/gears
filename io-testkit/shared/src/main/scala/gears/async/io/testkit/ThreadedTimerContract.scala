@@ -11,7 +11,7 @@ trait ThreadedTimerContract extends ContractSuite {
 
   test("a deadline timer moved earlier from another thread releases the future waiting on it") {
     running { io ?=>
-      val timer = io.backend.ops.deadlineTimer(System.nanoTime() + 60_000_000_000L)
+      val timer = io.ops.deadlineTimer(System.nanoTime() + 60_000_000_000L)
       val mover = new Thread(() => {
         Thread.sleep(50)
         timer.moveTo(System.nanoTime())
@@ -27,7 +27,7 @@ trait ThreadedTimerContract extends ContractSuite {
   test("coalesced earlier moves observe the latest deadline and can release the timer again later") {
     running { io ?=>
       val start = System.nanoTime()
-      val timer = io.backend.ops.deadlineTimer(start + 60_000_000_000L)
+      val timer = io.ops.deadlineTimer(start + 60_000_000_000L)
       val waiting = Future(io.perform(timer))
       def moveBatch(finalDeadline: Long): Unit = {
         val mover = new Thread(() => {
@@ -49,7 +49,7 @@ trait ThreadedTimerContract extends ContractSuite {
   test("concurrent deadline moves preserve the final move after all movers have joined") {
     running { io ?=>
       val start = System.nanoTime()
-      val timer = io.backend.ops.deadlineTimer(start + 60.seconds.toNanos)
+      val timer = io.ops.deadlineTimer(start + 60.seconds.toNanos)
       val waiting = Future(io.perform(timer, 5.seconds))
       val movers = List.tabulate(4) { thread =>
         new Thread(() => {

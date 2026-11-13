@@ -9,16 +9,16 @@ import java.nio.file.Files
 
 /** FIFO operations, requiring only Fifos and host filesystem setup. */
 trait FifoContract extends FileSystemFixture {
-  val backend: Backend { val ops: Fifos }
+  val backend: Backend { type Interface <: Fifos }
 
   /** A FIFO's read end from the `openFifoForReading` op, whose failure is thrown. */
-  protected def openFifoForReading(io: Io[backend.ops.type], path: String)(using Async): Readable = {
-    opening(io)(slot => backend.ops.openFifoForReading(path, slot))
+  protected def openFifoForReading(io: Io[backend.Interface], path: String)(using Async): io.ops.Readable = {
+    opening(io)(slot => io.ops.openFifoForReading(path, slot))
   }
 
   /** A FIFO's write end from the `openFifoForWriting` op, whose failure is thrown. */
-  protected def openFifoForWriting(io: Io[backend.ops.type], path: String)(using Async): Writable = {
-    opening(io)(slot => backend.ops.openFifoForWriting(path, slot))
+  protected def openFifoForWriting(io: Io[backend.Interface], path: String)(using Async): io.ops.Writable = {
+    opening(io)(slot => io.ops.openFifoForWriting(path, slot))
   }
 
   test("a FIFO carries what its writer writes, then ends when the writer closes") {
@@ -32,7 +32,7 @@ trait FifoContract extends FileSystemFixture {
           writeAll(io, writer, bytes("through the fifo"))
           close(io, writer)
           val buf = allocate(64)
-          assertEquals(readToEnd(io, backend.ops.read(reader, buf), buf), "through the fifo")
+          assertEquals(readToEnd(io, io.ops.read(reader, buf), buf), "through the fifo")
         } finally close(io, reader)
       }
     }
@@ -47,8 +47,8 @@ trait FifoContract extends FileSystemFixture {
         try {
           val writer = openFifoForWriting(io, fifo.toString)
           val buf = allocate(16)
-          val read = Future(io.perform(backend.ops.read(reader, buf)))
-          io.perform(backend.ops.timer(50))
+          val read = Future(io.perform(io.ops.read(reader, buf)))
+          io.perform(io.ops.timer(50))
           assert(read.poll().isEmpty, "the read finished with the writer open and nothing written")
           close(io, writer)
           read.await

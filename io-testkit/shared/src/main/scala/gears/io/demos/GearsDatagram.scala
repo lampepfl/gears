@@ -31,7 +31,7 @@ object GearsDatagram {
       val request = arena.of(message.getBytes(StandardCharsets.UTF_8))
       val response = arena.allocate(65536)
       val socket = SimpleIO.connectDatagram(UnixAddress(localSock), UnixAddress(sock))
-      val ops: io.backend.ops.type = io.backend.ops
+      val ops: io.ops.type = io.ops
       val receive = ops.receive(socket, response)
       try exchange(io, sock, ops.send(socket, request), receive, request, response)
       finally io.perform(ops.close(socket))
@@ -44,7 +44,7 @@ object GearsDatagram {
       val request = arena.of(message.getBytes(StandardCharsets.UTF_8))
       val response = arena.allocate(65536)
       val socket = SimpleIO.connectDatagram(null, address)
-      val ops: io.backend.ops.type = io.backend.ops
+      val ops: io.ops.type = io.ops
       val receive = ops.receive(socket, response)
       try exchange(io, address, ops.send(socket, request), receive, request, response)
       finally io.perform(ops.close(socket))
@@ -71,7 +71,7 @@ object GearsDatagram {
         println(s"Received datagram of ${response.remaining()} bytes: `${text(response)}`")
       }
       // UDP has no delivery guarantee; make a missing reply visible in the demo.
-      val deadline = Future(io.perform(io.backend.ops.timer(5000)))
+      val deadline = Future(io.perform(io.ops.timer(5000)))
       Async.select(
         ping.handle(_.get),
         deadline.handle(_ => throw new IOException("Timed out waiting for datagram socket readiness or a reply"))
@@ -87,7 +87,7 @@ object GearsDatagram {
       val packet = arena.allocate(65536)
       val socket = SimpleIO.bindDatagram(address)
       val sender = Slot[UnixAddress]() // each packet's sender, written alongside the packet itself
-      val ops: io.backend.ops.type = io.backend.ops
+      val ops: io.ops.type = io.ops
       try echo(io, ops.receive(socket, packet, sender), packet, () => ops.send(socket, packet, sender.clear()))
       finally io.perform(ops.close(socket))
     }
@@ -98,7 +98,7 @@ object GearsDatagram {
       val packet = arena.allocate(65536)
       val socket = SimpleIO.bindDatagram(address)
       val sender = Slot[IpSocketAddress]()
-      val ops: io.backend.ops.type = io.backend.ops
+      val ops: io.ops.type = io.ops
       try echo(io, ops.receive(socket, packet, sender), packet, () => ops.send(socket, packet, sender.clear()))
       finally io.perform(ops.close(socket))
     }
