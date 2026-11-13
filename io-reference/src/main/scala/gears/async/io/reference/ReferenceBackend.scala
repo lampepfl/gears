@@ -35,7 +35,7 @@ object ReferenceBackend extends Backend {
     val io: Io[Interface] = new Io[Interface] {
       val backend: ReferenceBackend.type = ReferenceBackend
       val ops: ReferenceOps.type = ReferenceOps
-      private[io] def performWithin(op: RefOp, timeoutMillis: Int)(using Async): Unit = op.perform(timeoutMillis)
+      private[io] def performWithin(op: RefOp, timeoutMillis: Long)(using Async): Unit = op.perform(timeoutMillis)
     }
     // `Async.blocking` runs its body on the calling thread, which may be a platform thread; a future's is virtual.
     Async.blocking(Future(program(using io)).await)

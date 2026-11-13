@@ -56,7 +56,7 @@ abstract class RefOp {
 
   protected def body(ctx: Ctx)(using Async): Unit
 
-  final def perform(timeoutMillis: Int)(using ac: Async): Unit = {
+  final def perform(timeoutMillis: Long)(using ac: Async): Unit = {
     if ac.group.isCancelled then throw new CancellationException()
     if !this.isInstanceOf[Repeatable] && !used.compareAndSet(false, true) then
       throw new IllegalStateException(s"$this is not Repeatable, and has been performed already")
@@ -69,7 +69,12 @@ abstract class RefOp {
         )
       check()
       val start = System.nanoTime()
-      val deadline = if timeoutMillis < 0 then Long.MaxValue else start + timeoutMillis * 1_000_000L
+      // No limit if negative, or beyond what nanoseconds hold, some 292 years. Else the sum may wrap, as
+      // `System.nanoTime` itself may: deadlines are only ever compared by their difference, which does not.
+      val unlimited = timeoutMillis < 0 || timeoutMillis > Long.MaxValue / 1_000_000L
+      val limit = start + timeoutMillis * 1_000_000L
+      // `Long.MaxValue` means none: a limit that lands on it is a nanosecond later, never sooner.
+      val deadline = if unlimited then Long.MaxValue else if limit == Long.MaxValue then limit + 1 else limit
       val ctx = Ctx(wait, start, deadline)
       val h = handle
       cancellationScope(wait) {
