@@ -20,7 +20,7 @@ trait SimpleIOChecks extends StreamFixture {
         val buf = arena.allocate(16)
         val writer = Future {
           SimpleIO.writeAll(out, arena.of("wrapped".getBytes(StandardCharsets.UTF_8)))
-          io.perform(io.backend.ops.close(out))
+          io.perform(io.ops.close(out))
         }
         var got = 0
         var read = SimpleIO.read(in, buf)
@@ -31,7 +31,7 @@ trait SimpleIOChecks extends StreamFixture {
         writer.await
         val atEnd = read
         s"$got ${text(buf)} $atEnd"
-      } finally io.perform(io.backend.ops.close(in))
+      } finally io.perform(io.ops.close(in))
     }
     assertEquals(outcome, "7 wrapped 0")
   }
@@ -50,13 +50,13 @@ trait SimpleIOChecks extends StreamFixture {
             SimpleIO.writeAll(out, buf)
             sent += buf.limit()
           }
-          io.perform(io.backend.ops.close(out))
+          io.perform(io.ops.close(out))
         }
         val received = SimpleIO.drain(SimpleIO.chunks(in, pool, backlog = 2))
         writer.await
         received
       } finally {
-        io.perform(io.backend.ops.close(in))
+        io.perform(io.ops.close(in))
         pool.close()
       }
     }
@@ -75,12 +75,12 @@ trait SimpleIOChecks extends StreamFixture {
           chunk.release()
           n
         }
-        io.perform(io.backend.ops.timer(20)) // lets the reader fill the window and the backlog
+        io.perform(io.ops.timer(20)) // lets the reader fill the window and the backlog
         stream.close() // releases what was read ahead
         writer.cancel()
         writer.awaitResult
         val freed = pool.available == pool.buffers
-        io.perform(io.backend.ops.close(in)) // the next stream's read fails on the closed handle
+        io.perform(io.ops.close(in)) // the next stream's read fails on the closed handle
         val failed =
           try {
             SimpleIO.drain(SimpleIO.chunks(in, pool, backlog = 2))
@@ -88,7 +88,7 @@ trait SimpleIOChecks extends StreamFixture {
           } catch case _: IOException => true
         s"${first.exists(_ > 0)} $freed $failed ${pool.available == pool.buffers}"
       } finally {
-        io.perform(io.backend.ops.close(out))
+        io.perform(io.ops.close(out))
         pool.close()
       }
     }
@@ -98,13 +98,13 @@ trait SimpleIOChecks extends StreamFixture {
 
 /** Public API IP stream helpers, requiring only IpStreams. */
 trait SimpleIOIpStreamChecks extends ContractSuite {
-  val backend: Backend { val ops: gears.async.io.IpStreams }
+  val backend: Backend { type Interface <: gears.async.io.IpStreams }
 
   test("a graceful close delivers the whole reply to a client that sent more than the server read") {
     val replySize = 256 * 1024
     val received = running { io ?=>
       val listener = SimpleIO.listen(IpSocketAddress(IpAddress.IPv4Loopback, 0))
-      val address = io.backend.ops.localAddress(listener).asInstanceOf[IpSocketAddress]
+      val address = io.ops.localAddress(listener).asInstanceOf[IpSocketAddress]
       try {
         val server = Future {
           val client = SimpleIO.accept(listener)
@@ -128,8 +128,8 @@ trait SimpleIOIpStreamChecks extends ContractSuite {
           }
           server.await
           total
-        } finally io.perform(io.backend.ops.close(socket))
-      } finally io.perform(io.backend.ops.close(listener))
+        } finally io.perform(io.ops.close(socket))
+      } finally io.perform(io.ops.close(listener))
     }
     assertEquals(received, replySize.toLong)
   }
@@ -137,7 +137,7 @@ trait SimpleIOIpStreamChecks extends ContractSuite {
 
 /** Public API resolution helpers, requiring only Resolving. */
 trait SimpleIOResolveChecks extends ContractSuite {
-  val backend: Backend { val ops: Resolving }
+  val backend: Backend { type Interface <: Resolving }
 
   test("SimpleIO resolves localhost") {
     val resolved = running { io ?=> SimpleIO.resolve("localhost") }

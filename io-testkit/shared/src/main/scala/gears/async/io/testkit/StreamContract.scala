@@ -24,33 +24,39 @@ trait StreamContract extends StreamFixture {
     }.mkString
 
   /** A pooled read of what `out` is sent, `text`, from `in`: what it received, which the caller releases. */
-  private def receivedOf(io: Io[backend.ops.type], in: Readable, out: Writable, pool: BufferPool, text: String)(using
+  private def receivedOf(
+      io: Io[backend.Interface],
+      in: io.ops.Readable,
+      out: io.ops.Writable,
+      pool: BufferPool,
+      text: String
+  )(using
       Async
   ): Received = {
     writeAll(io, out, bytes(text))
     val into = Slot[Received]()
-    io.perform(io.backend.ops.read(in, pool, into))
+    io.perform(io.ops.read(in, pool, into))
     into.clear()
   }
 
   test("an op on a closed handle fails, and what reuses the handle's I/O object gets nothing of it") {
     running { io ?=>
       val (in, out) = stream(io)
-      val built = io.backend.ops.write(out, bytes("stale")) // built before the close, performed after
+      val built = io.ops.write(out, bytes("stale")) // built before the close, performed after
       close(io, in)
       close(io, out)
-      val again = attempt(io, io.backend.ops.close(out))
+      val again = attempt(io, io.ops.close(out))
       assert(again.isInstanceOf[ClosedChannelException], s"closing it again: $again")
       val (in2, out2) = stream(io) // on a backend with descriptors, most likely the same two numbers
       try {
         val early = attempt(io, built)
         assert(early.isInstanceOf[ClosedChannelException], s"an op built before the close: $early")
-        val late = attempt(io, io.backend.ops.write(out, bytes("stale")))
+        val late = attempt(io, io.ops.write(out, bytes("stale")))
         assert(late.isInstanceOf[ClosedChannelException], s"an op built after the close: $late")
         writeAll(io, out2, bytes("new"))
         val buf = allocate(16)
-        io.perform(io.backend.ops.read(in2, buf))
-        readExactly(io, io.backend.ops.read(in2, buf), buf, 3)
+        io.perform(io.ops.read(in2, buf))
+        readExactly(io, io.ops.read(in2, buf), buf, 3)
         assertEquals(text(buf), "new")
       } finally {
         close(io, in2)
@@ -64,7 +70,7 @@ trait StreamContract extends StreamFixture {
       val (in, out) = stream(io)
       close(io, out)
       close(io, in)
-      val failure = attempt(io, io.backend.ops.read(in, allocate(16)))
+      val failure = attempt(io, io.ops.read(in, allocate(16)))
       assert(failure.isInstanceOf[ClosedChannelException], String.valueOf(failure))
     }
   }
@@ -74,12 +80,12 @@ trait StreamContract extends StreamFixture {
       val (in, out) = stream(io)
       try {
         val buf = allocate(64)
-        val reading = Future(io.perform(io.backend.ops.read(in, buf)))
+        val reading = Future(io.perform(io.ops.read(in, buf)))
         settle(io)
         assert(reading.poll().isEmpty, "the read completed with nothing written")
         writeAll(io, out, bytes("hello"))
         reading.await
-        readExactly(io, io.backend.ops.read(in, buf), buf, 5)
+        readExactly(io, io.ops.read(in, buf), buf, 5)
         assertEquals(text(buf), "hello")
       } finally {
         close(io, in)
@@ -94,7 +100,7 @@ trait StreamContract extends StreamFixture {
       try {
         close(io, out)
         val buf = allocate(16)
-        io.perform(io.backend.ops.read(in, buf))
+        io.perform(io.ops.read(in, buf))
         assertEquals(buf.position(), 0)
       } finally close(io, in)
     }
@@ -106,7 +112,7 @@ trait StreamContract extends StreamFixture {
       try {
         val full = allocate(4)
         full.position(full.limit())
-        val read = io.backend.ops.read(in, full)
+        val read = io.ops.read(in, full)
         def refused(): Unit = {
           val failure = attempt(io, read)
           assert(failure.isInstanceOf[IllegalArgumentException], String.valueOf(failure))
@@ -116,8 +122,8 @@ trait StreamContract extends StreamFixture {
         refused()
         assertEquals(full.position(), full.limit())
         val buf = allocate(16)
-        io.perform(io.backend.ops.read(in, buf))
-        readExactly(io, io.backend.ops.read(in, buf), buf, 5)
+        io.perform(io.ops.read(in, buf))
+        readExactly(io, io.ops.read(in, buf), buf, 5)
         assertEquals(text(buf), "hello", "the refused reads took none of the bytes")
       } finally {
         close(io, in)
@@ -131,7 +137,7 @@ trait StreamContract extends StreamFixture {
       val (in, out) = stream(io)
       val empty = allocate(4)
       empty.limit(0)
-      val write = io.backend.ops.write(out, empty)
+      val write = io.ops.write(out, empty)
       try {
         close(io, in) // a write of bytes would fail now; one of nothing touches nothing
         io.perform(write)
@@ -147,7 +153,7 @@ trait StreamContract extends StreamFixture {
       val (in, out) = stream(io)
       try {
         val buf = allocate(16)
-        val read = io.backend.ops.read(in, buf)
+        val read = io.ops.read(in, buf)
         val first = Future(io.perform(read))
         settle(io)
         first.cancel()
@@ -171,7 +177,7 @@ trait StreamContract extends StreamFixture {
       val (in, out) = stream(io)
       try {
         val buf = allocate(16)
-        val read = io.backend.ops.read(in, buf)
+        val read = io.ops.read(in, buf)
         val started = System.nanoTime()
         intercept[TimeoutException](io.perform(read, 20.millis))
         assert(System.nanoTime() - started >= 20_000_000L, "the read timed out early")
@@ -182,7 +188,7 @@ trait StreamContract extends StreamFixture {
         readExactly(io, read, buf, 7)
         assertEquals(text(buf), "in time")
         // Its time limit went with it: nothing more comes of the read once it is done.
-        io.perform(io.backend.ops.timer(30))
+        io.perform(io.ops.timer(30))
         assertEquals(text(buf), "in time")
       } finally {
         close(io, in)
@@ -196,7 +202,7 @@ trait StreamContract extends StreamFixture {
       val (in, out) = stream(io)
       try {
         val buf = allocate(16)
-        val read = io.backend.ops.read(in, buf)
+        val read = io.ops.read(in, buf)
         writeAll(io, out, bytes("a"))
         Future(io.perform(read)).await
         val second = Future(io.perform(read))
@@ -215,14 +221,14 @@ trait StreamContract extends StreamFixture {
   test("a close op completes once the handle is closed, and fails the op pending on it") {
     running { io ?=>
       val (in, out) = stream(io)
-      val reading = Future(io.perform(io.backend.ops.read(in, allocate(16))))
+      val reading = Future(io.perform(io.ops.read(in, allocate(16))))
       settle(io)
-      io.perform(io.backend.ops.close(in))
+      io.perform(io.ops.close(in))
       val failure = failureOf(reading)
       assert(failure.isInstanceOf[ClosedChannelException], String.valueOf(failure))
-      val again = attempt(io, io.backend.ops.close(in))
+      val again = attempt(io, io.ops.close(in))
       assert(again.isInstanceOf[ClosedChannelException], s"closing a closed handle fails: $again")
-      io.perform(io.backend.ops.close(out))
+      io.perform(io.ops.close(out))
     }
   }
 
@@ -233,7 +239,7 @@ trait StreamContract extends StreamFixture {
         Future(writeAll(io, out, bytes("x"))).await
         Future(close(io, out)).await
         val buf = allocate(16)
-        assertEquals(readToEnd(io, io.backend.ops.read(in, buf), buf), "x")
+        assertEquals(readToEnd(io, io.ops.read(in, buf), buf), "x")
       } finally close(io, in)
     }
   }
@@ -245,7 +251,7 @@ trait StreamContract extends StreamFixture {
         val (in, out) = stream(io)
         try {
           val into = Slot[Received]()
-          val reading = Future(io.perform(io.backend.ops.read(in, pool, into)))
+          val reading = Future(io.perform(io.ops.read(in, pool, into)))
           settle(io)
           assert(reading.poll().isEmpty, "the read completed with nothing written")
           writeAll(io, out, bytes("pooled"))
@@ -256,7 +262,7 @@ trait StreamContract extends StreamFixture {
           assertEquals(pool.available, 1)
           val firstPart = textOf(received)
           received.release()
-          val rest = readPooledExactly(io, io.backend.ops.read(in, pool, into), into, 6 - firstPart.length)
+          val rest = readPooledExactly(io, io.ops.read(in, pool, into), into, 6 - firstPart.length)
           assertEquals(firstPart + rest, "pooled")
           assertEquals(pool.available, 2)
         } finally {
@@ -273,7 +279,7 @@ trait StreamContract extends StreamFixture {
       running { io ?=>
         val (in, out) = stream(io)
         val into = Slot[Received]()
-        val read = io.backend.ops.read(in, pool, into)
+        val read = io.ops.read(in, pool, into)
         try {
           writeAll(io, out, bytes("abcdefghijklmnopqrs"))
           assertEquals(readPooledExactly(io, read, into, 19), "abcdefghijklmnopqrs")
@@ -294,7 +300,7 @@ trait StreamContract extends StreamFixture {
         try {
           close(io, out)
           val into = Slot[Received]()
-          io.perform(io.backend.ops.read(in, pool, into))
+          io.perform(io.ops.read(in, pool, into))
           val received = into.clear()
           assertEquals(received.buffer.remaining(), 0)
           received.release()
@@ -312,13 +318,13 @@ trait StreamContract extends StreamFixture {
         try {
           writeAll(io, out, bytes("a"))
           val first = Slot[Received]()
-          io.perform(io.backend.ops.read(in, pool, first))
+          io.perform(io.ops.read(in, pool, first))
           held = first.clear()
           assertEquals(textOf(held.nn), "a")
           assertEquals(pool.available, 0)
           writeAll(io, out, bytes("b"))
           val into = Slot[Received]()
-          val read = io.backend.ops.read(in, pool, into)
+          val read = io.ops.read(in, pool, into)
           val pending = Future(attempt(io, read))
           settle(io)
           val beforeRelease = pending.poll()
@@ -393,7 +399,7 @@ trait StreamContract extends StreamFixture {
       try {
         writeAll(io, out, bytes("hello world"))
         val bufs = Array(allocate(4), allocate(4), allocate(3))
-        val read = io.backend.ops.read(in, bufs)
+        val read = io.ops.read(in, bufs)
         while bufs.exists(_.hasRemaining()) do {
           val before = bufs.map(_.position()).sum
           io.perform(read)
@@ -414,14 +420,14 @@ trait StreamContract extends StreamFixture {
     running { io ?=>
       val (in, out) = stream(io)
       try {
-        intercept[IllegalArgumentException](io.backend.ops.read(in, Array.empty[ByteBuffer]))
+        intercept[IllegalArgumentException](io.ops.read(in, Array.empty[ByteBuffer]))
         val full = allocate(4)
         full.position(4)
-        val refused = attempt(io, io.backend.ops.read(in, Array(full, full.duplicate())))
+        val refused = attempt(io, io.ops.read(in, Array(full, full.duplicate())))
         assert(refused.isInstanceOf[IllegalArgumentException], String.valueOf(refused))
         close(io, out)
         val bufs = Array(allocate(4), allocate(4))
-        io.perform(io.backend.ops.read(in, bufs))
+        io.perform(io.ops.read(in, bufs))
         assertEquals(bufs.map(_.position()).toList, List(0, 0), "the end of the stream adds nothing")
       } finally close(io, in)
     }
@@ -434,10 +440,10 @@ trait StreamContract extends StreamFixture {
         val parts = Array(bytes("ab"), bytes(""), bytes("cdef"))
         writeAll(io, out, parts)
         assert(parts.forall(!_.hasRemaining()))
-        io.perform(io.backend.ops.write(out, parts)) // nothing remaining
+        io.perform(io.ops.write(out, parts)) // nothing remaining
         val buf = allocate(16)
-        io.perform(io.backend.ops.read(in, buf))
-        readExactly(io, io.backend.ops.read(in, buf), buf, 6)
+        io.perform(io.ops.read(in, buf))
+        readExactly(io, io.ops.read(in, buf), buf, 6)
         assertEquals(text(buf), "abcdef")
       } finally {
         close(io, in)
@@ -461,7 +467,7 @@ trait StreamContract extends StreamFixture {
         val into = ByteBuffer.allocate(64)
         var got = ""
         while !got.endsWith("c|") do {
-          io.perform(io.backend.ops.read(in, into))
+          io.perform(io.ops.read(in, into))
           got = received(into)
         }
         assertEquals(got, "heap|dir|ro|abc|")
@@ -470,11 +476,11 @@ trait StreamContract extends StreamFixture {
         val second = allocate(16)
         var total = 0
         while total < 9 do {
-          io.perform(io.backend.ops.read(in, Array(first, second)))
+          io.perform(io.ops.read(in, Array(first, second)))
           total = first.position() + second.position()
         }
         assertEquals(received(first) + text(second), "scattered")
-        intercept[IllegalArgumentException](io.backend.ops.read(in, ByteBuffer.allocate(8).asReadOnlyBuffer()))
+        intercept[IllegalArgumentException](io.ops.read(in, ByteBuffer.allocate(8).asReadOnlyBuffer()))
       } finally {
         close(io, in)
         close(io, out)
@@ -485,12 +491,12 @@ trait StreamContract extends StreamFixture {
   test("continuously ready reads let sibling tasks and timers progress") {
     running { io ?=>
       val (in, out) = stream(io)
-      io.perform(io.backend.ops.close(out)) // EOF stays immediately ready on every read.
+      io.perform(io.ops.close(out)) // EOF stays immediately ready on every read.
       val progressed = new java.util.concurrent.atomic.AtomicBoolean
       try {
         val busy = Future {
           val buffer = arena.allocate(1)
-          val read = io.backend.ops.read(in, buffer)
+          val read = io.ops.read(in, buffer)
           var iterations = 0
           var observed = false
           while iterations < 10000 do {
@@ -502,14 +508,14 @@ trait StreamContract extends StreamFixture {
           observed
         }
         val sibling = Future {
-          io.perform(io.backend.ops.timer(0))
+          io.perform(io.ops.timer(0))
           progressed.set(true)
         }
         // MUnit's by-name assert holds a monitor: never suspend inside it, since a native continuation may migrate.
         val observedProgress = busy.await
         assert(observedProgress, "immediate readiness starved a sibling's timer")
         sibling.await
-      } finally io.perform(io.backend.ops.close(in))
+      } finally io.perform(io.ops.close(in))
     }
   }
 
@@ -519,16 +525,16 @@ trait StreamContract extends StreamFixture {
       try {
         // The child and its parent's pending read are distinct group members.
         val writer = Future {
-          io.perform(io.backend.ops.timer(10))
+          io.perform(io.ops.timer(10))
           writeAll(io, out, arena.of(Array[Byte](42)))
         }
         val buffer = arena.allocate(8)
-        io.perform(io.backend.ops.read(in, buffer))
+        io.perform(io.ops.read(in, buffer))
         writer.await
         assertEquals(buffer.position(), 1)
       } finally {
-        io.perform(io.backend.ops.close(in))
-        io.perform(io.backend.ops.close(out))
+        io.perform(io.ops.close(in))
+        io.perform(io.ops.close(out))
       }
     } // Joining the scope must finish even when the read operation's structural hash changed.
   }
@@ -540,7 +546,7 @@ trait StreamContract extends StreamFixture {
       try {
         val writer = Future {
           val buf = arena.allocate(8192)
-          val write = io.backend.ops.write(out, buf)
+          val write = io.ops.write(out, buf)
           var sent = 0
           while sent < total do {
             buf.clear().limit(math.min(8192, total - sent))
@@ -549,11 +555,11 @@ trait StreamContract extends StreamFixture {
             while buf.hasRemaining do io.perform(write)
             sent += buf.limit()
           }
-          io.perform(io.backend.ops.close(out))
+          io.perform(io.ops.close(out))
         }
         val reader = Future {
           val buf = arena.allocate(8192)
-          val read = io.backend.ops.read(in, buf)
+          val read = io.ops.read(in, buf)
           var received = 0
           var atEnd = false
           while !atEnd do {
@@ -572,7 +578,7 @@ trait StreamContract extends StreamFixture {
         }
         writer.await
         reader.await
-      } finally io.perform(io.backend.ops.close(in))
+      } finally io.perform(io.ops.close(in))
     }
     assertEquals(received, total)
   }
@@ -582,20 +588,20 @@ trait StreamContract extends StreamFixture {
       val (in, out) = stream(io)
       try {
         val buf = arena.allocate(16)
-        val read = Future(io.perform(io.backend.ops.read(in, buf))) // pending: nothing is written
-        val timer = Future(io.perform(io.backend.ops.timer(20)))
+        val read = Future(io.perform(io.ops.read(in, buf))) // pending: nothing is written
+        val timer = Future(io.perform(io.ops.timer(20)))
         val first = Async.select(timer.handle(_ => "timer"), read.handle(_ => "read"))
         read.cancel()
         val cancelled = read.awaitResult.failed.toOption.exists(_.isInstanceOf[CancellationException])
         // The cancelled read took nothing: what is written now is read in full.
         writeAll(io, out, arena.of("after".getBytes(StandardCharsets.UTF_8)))
         val again = arena.allocate(16)
-        io.perform(io.backend.ops.read(in, again))
-        readExactly(io, io.backend.ops.read(in, again), again, 5)
+        io.perform(io.ops.read(in, again))
+        readExactly(io, io.ops.read(in, again), again, 5)
         s"$first $cancelled ${text(again)}"
       } finally {
-        io.perform(io.backend.ops.close(in))
-        io.perform(io.backend.ops.close(out))
+        io.perform(io.ops.close(in))
+        io.perform(io.ops.close(out))
       }
     }
     assertEquals(outcome, "timer true after")
@@ -605,16 +611,16 @@ trait StreamContract extends StreamFixture {
     running { io ?=>
       val (in, out) = stream(io)
       try {
-        val first = Future(io.perform(io.backend.ops.read(in, allocate(16))))
+        val first = Future(io.perform(io.ops.read(in, allocate(16))))
         settle(io)
-        val second = attempt(io, io.backend.ops.read(in, allocate(16)))
+        val second = attempt(io, io.ops.read(in, allocate(16)))
         assert(second.isInstanceOf[IllegalArgumentException], s"a second read: $second")
-        val fromAnother = failureOf(Future(io.perform(io.backend.ops.read(in, allocate(16)))))
+        val fromAnother = failureOf(Future(io.perform(io.ops.read(in, allocate(16)))))
         assert(fromAnother.isInstanceOf[IllegalArgumentException], s"a second read from another future: $fromAnother")
         assert(first.poll().isEmpty, "the first read is still pending")
         writeAll(io, out, bytes("x"))
         first.await
-        val again = Future(io.perform(io.backend.ops.read(in, allocate(16)))) // once the first has finished
+        val again = Future(io.perform(io.ops.read(in, allocate(16)))) // once the first has finished
         settle(io)
         writeAll(io, out, bytes("y"))
         again.await

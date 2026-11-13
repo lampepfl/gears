@@ -43,7 +43,7 @@ object GearsWhois {
           }
         }
         println(s"--- server closed the connection after $received bytes")
-      } finally io.perform(io.backend.ops.close(fd))
+      } finally io.perform(io.ops.close(fd))
     }
   }
 

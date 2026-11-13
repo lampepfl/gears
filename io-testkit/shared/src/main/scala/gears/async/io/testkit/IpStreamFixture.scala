@@ -6,31 +6,30 @@ import gears.async.Future
 
 /** Listener and connected stream fixtures requiring only IpStreams. */
 trait IpStreamFixture extends StreamFixture {
-  val backend: Backend { val ops: IpStreams }
-  protected type Connection = backend.ops.Connection
-  protected type Listener = backend.ops.Listener
-
-  protected trait Connect {
-    def apply()(using Async): Connection
+  val backend: Backend { type Interface <: IpStreams }
+  protected trait Connect[C] {
+    def apply()(using Async): C
   }
 
-  protected def listenAndConnect(io: Io[backend.ops.type])(using Async): (Listener, Connect) = {
+  protected def listenAndConnect(
+      io: Io[backend.Interface]
+  )(using Async): (io.ops.Listener, Connect[io.ops.Connection]) = {
     val listener =
-      opening(io)(slot => io.backend.ops.listen(IpSocketAddress(IpAddress.IPv4Loopback, 0), slot))
-    val address = io.backend.ops.localAddress(listener).asInstanceOf[IpSocketAddress]
-    val connect = new Connect {
-      def apply()(using Async): Connection = {
-        opening(io)(slot => io.backend.ops.connect(address, slot))
+      opening(io)(slot => io.ops.listen(IpSocketAddress(IpAddress.IPv4Loopback, 0), slot))
+    val address = io.ops.localAddress(listener).asInstanceOf[IpSocketAddress]
+    val connect = new Connect[io.ops.Connection] {
+      def apply()(using Async): io.ops.Connection = {
+        opening(io)(slot => io.ops.connect(address, slot))
       }
     }
     (listener, connect)
   }
 
   /** Pairs a connection from the supplied opener with the connection accepted by `listener`. */
-  protected def pair(io: Io[backend.ops.type], listener: Listener)(connect: Async ?=> Connection)(using
+  protected def pair(io: Io[backend.Interface], listener: io.ops.Listener)(connect: Async ?=> io.ops.Connection)(using
       Async.Spawn
-  ): (Connection, Connection) = {
-    val accepting = Future(opening(io)(slot => io.backend.ops.accept(listener, slot)))
+  ): (io.ops.Connection, io.ops.Connection) = {
+    val accepting = Future(opening(io)(slot => io.ops.accept(listener, slot)))
     try {
       val client = connect
       try (client, accepting.await)
@@ -47,7 +46,7 @@ trait IpStreamFixture extends StreamFixture {
     }
   }
 
-  protected def stream(io: Io[backend.ops.type])(using Async.Spawn): (Readable, Writable) = {
+  protected def stream(io: Io[backend.Interface])(using Async.Spawn): (io.ops.Readable, io.ops.Writable) = {
     val (listener, connect) = listenAndConnect(io)
     try {
       val (writer, reader) = pair(io, listener)(connect())

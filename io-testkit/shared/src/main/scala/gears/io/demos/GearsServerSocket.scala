@@ -24,13 +24,13 @@ object GearsServerSocket {
   /** Reads a length-framed request through one 8 KiB buffer, replies with a framed response, and closes the connection
     * gracefully, so that the client reads the whole reply however the request ended.
     */
-  private def serve(io: Io[StreamSockets], client: io.backend.ops.Connection)(using Async): Unit = {
+  private def serve(io: Io[StreamSockets], client: io.ops.Connection)(using Async): Unit = {
     val arena = BufferArena.open()
     try {
       val buf = arena.allocate(8192)
       // One repeatable op per direction for the whole connection; the buffer's limit says how much each read takes.
-      val read = io.backend.ops.read(client, buf)
-      val write = io.backend.ops.write(client, buf)
+      val read = io.ops.read(client, buf)
+      val write = io.ops.write(client, buf)
 
       // The request, read exactly to its frame's end: whatever the client sent after it stays unread.
       val reader = new FrameReader(buf)
@@ -61,6 +61,6 @@ object GearsServerSocket {
     try {
       println("Socket is now listening for connections.")
       Sockets.serve(server)(client => serve(io, client))
-    } finally io.perform(io.backend.ops.close(server))
+    } finally io.perform(io.ops.close(server))
   }
 }

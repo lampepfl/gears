@@ -60,7 +60,7 @@ against both fixtures. Socket setup binds port zero and reads back the assigned 
 probing random ports. Explicit binds reuse an assigned address when checking conflicts, port reuse or a requested source
 port. Socket programs do not implicitly switch to Unix sockets, and datagram programs never open a TCP listener.
 Filesystem setup lives in `FileSystemFixture`, outside `ContractSuite`. The common `opening` helper allocates its own
-output slot: `opening(io)(slot => io.backend.ops.connect(address, slot))`. Checks that inspect slot
+output slot: `opening(io)(slot => io.ops.connect(address, slot))`. Checks that inspect slot
 occupancy or one-shot behaviour still construct their ops and slots explicitly. Shared transfer helpers repeat partial
 reads and writes, and pooled checks compare byte sequences without imposing chunk boundaries. Pool exhaustion may
 fail immediately or wait for a released buffer, as allowed by the interface. `FifoFileContract` registers only the
@@ -82,20 +82,20 @@ share `SimpleIOChecks.scala` without combining their capability requirements.
   streams; the other kinds are declared by the ops of the capability that opens them: `StreamSockets` a `Connection` (both, and
   shut down for writing) and a `Listener`, `IpDatagrams` a `BoundDatagram` and a `ConnectedDatagram`, `UnixDatagrams`
   their Unix ones, `RegularFiles` a `File`. So a backend without a capability has no such kind, and a program names it
-  through the backend it asked for: `io.backend.ops.Connection` for an `Io[IpStreams]`. Every handle is opened by an op of
+  through the backend it asked for: `io.ops.Connection` for an `Io[IpStreams]`. Every handle is opened by an op of
   the capability that has it, which writes it into a slot; an op takes the kind it works on, so an op on the wrong kind
   does not compile.
-- **`Io`** is where a program's ops run: `Io[I]` has a backend whose ops are an `I`, `backend: Backend { val ops: I }`, and adds only `perform`. `Io.run` gives
+- **`Io`** is where a program's ops run: `Io[I]` has a backend whose ops are an `I`, `backend: Backend { type Interface <: I }`, and adds only `perform`. `Io.run` gives
   it to the program; it is the program's gears `AsyncOperations` too. How it performs, and on which threads the
   program runs, is the backend's.
 
 ## A program
 
 ```scala
-def echo(using io: Io[IpStreams])(client: io.backend.ops.Connection)(using Async): Unit = {
+def echo(using io: Io[IpStreams])(client: io.ops.Connection)(using Async): Unit = {
   val buf = ...
-  val read = io.backend.ops.read(client, buf) // an op is a mutable record the caller owns, and reuses
-  val write = io.backend.ops.write(client, buf)
+  val read = io.ops.read(client, buf) // an op is a mutable record the caller owns, and reuses
+  val write = io.ops.write(client, buf)
   while { buf.clear(); io.perform(read); buf.position() > 0 } do {
     buf.flip()
     while buf.hasRemaining() do io.perform(write)
@@ -106,7 +106,7 @@ Io.run(using ReferenceBackend) { ... echo(client) ... }
 ```
 
 `Io.run` returns what the program returns, as `Async.blocking` does, and gives it its `Io` as a context parameter
-beside `Async.Spawn`. An op's type and a handle's are path-dependent on the `Io` (`io.Op`, `io.backend.ops.Connection`), so
+beside `Async.Spawn`. An op's type and a handle's are path-dependent on the `Io` (`io.Op`, `io.ops.Connection`), so
 a method taking a handle takes the `Io` first. Ops in flight together are futures performing them
 (`Future(io.perform(op))`), raced, awaited and cancelled as futures are. A time limit is `io.perform(op, 2.seconds)`.
 

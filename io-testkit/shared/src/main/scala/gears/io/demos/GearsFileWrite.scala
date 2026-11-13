@@ -20,7 +20,7 @@ object GearsFileWrite {
         println(s"opened file: $file")
         println("Event registered for file write.")
         println("starting to poll...")
-        val write = io.backend.ops.write(file, buf) // one repeatable op, resubmitted for every write
+        val write = io.ops.write(file, buf) // one repeatable op, resubmitted for every write
         while true do {
           buf.clear()
           buf.put(bytes)
@@ -28,7 +28,7 @@ object GearsFileWrite {
           io.perform(write)
           println(s"actually wrote ${buf.position()} bytes") // the buffer was loaded at position 0
         }
-      } finally io.perform(io.backend.ops.close(file))
+      } finally io.perform(io.ops.close(file))
     }
   }
 }

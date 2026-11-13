@@ -18,21 +18,21 @@ import scala.util.Success
   * at offsets; checked through `perform`, as programs over the backend (see `ContractSuite`).
   */
 trait FileContract extends FileSystemFixture {
-  val backend: Backend { val ops: RegularFiles }
+  val backend: Backend { type Interface <: RegularFiles }
 
   /** Opens the file at `path` with the `open` op, throwing its failure. */
-  protected def openFile(io: Io[backend.ops.type], path: Path, write: Boolean)(using Async): backend.ops.File = {
-    opening(io)(slot => backend.ops.open(path.toString, write, slot))
+  protected def openFile(io: Io[backend.Interface], path: Path, write: Boolean)(using Async): io.ops.File = {
+    opening(io)(slot => io.ops.open(path.toString, write, slot))
   }
 
   test("open refuses what is not a regular file, leaving its slot empty") {
     withTempDir { dir =>
       running { io ?=>
-        val into = Slot[backend.ops.File]()
-        val failure = attempt(io, backend.ops.open(dir.toString, write = false, into))
+        val into = Slot[io.ops.File]()
+        val failure = attempt(io, io.ops.open(dir.toString, write = false, into))
         assert(failure.isInstanceOf[IOException], String.valueOf(failure))
         intercept[IllegalStateException](into.clear())
-        val missing = attempt(io, backend.ops.open(dir.resolve("missing").toString, write = false, into))
+        val missing = attempt(io, io.ops.open(dir.resolve("missing").toString, write = false, into))
         assert(missing.isInstanceOf[IOException], String.valueOf(missing))
       }
     }
@@ -46,7 +46,7 @@ trait FileContract extends FileSystemFixture {
         val file = openFile(io, path, write = false)
         try {
           val buf = allocate(64)
-          assertEquals(readToEnd(io, backend.ops.read(file, buf), buf), "file contents")
+          assertEquals(readToEnd(io, io.ops.read(file, buf), buf), "file contents")
         } finally close(io, file)
       }
     }
@@ -60,7 +60,7 @@ trait FileContract extends FileSystemFixture {
         val file = openFile(io, path, write = false)
         try {
           val buf = allocate(2)
-          val read = backend.ops.read(file, buf, offset = 6)
+          val read = io.ops.read(file, buf, offset = 6)
           io.perform(read)
           readExactly(io, read, buf, 2)
           assertEquals(text(buf), "67")
@@ -72,7 +72,7 @@ trait FileContract extends FileSystemFixture {
           io.perform(read)
           assertEquals(buf.position(), 0)
           val fresh = allocate(4)
-          readExactly(io, backend.ops.read(file, fresh, offset = 0), fresh, 4)
+          readExactly(io, io.ops.read(file, fresh, offset = 0), fresh, 4)
           assertEquals(text(fresh), "0123")
         } finally close(io, file)
       }
@@ -88,9 +88,9 @@ trait FileContract extends FileSystemFixture {
         try {
           val buf = allocate(4)
           buf.position(buf.limit())
-          val streamed = attempt(io, backend.ops.read(file, buf))
+          val streamed = attempt(io, io.ops.read(file, buf))
           assert(streamed.isInstanceOf[IllegalArgumentException], String.valueOf(streamed))
-          val read = backend.ops.read(file, buf, offset = 2)
+          val read = io.ops.read(file, buf, offset = 2)
           val positional = attempt(io, read)
           assert(positional.isInstanceOf[IllegalArgumentException], String.valueOf(positional))
           buf.clear()
@@ -106,22 +106,22 @@ trait FileContract extends FileSystemFixture {
     withTempDir { dir =>
       running { io ?=>
         val missing = dir.resolve("missing.txt")
-        val into = Slot[backend.ops.File]()
-        val failure = attempt(io, backend.ops.open(missing.toString, write = true, into))
+        val into = Slot[io.ops.File]()
+        val failure = attempt(io, io.ops.open(missing.toString, write = true, into))
         assert(failure.isInstanceOf[IOException], String.valueOf(failure))
         assert(!Files.exists(missing), "open for writing created the file")
         val path = dir.resolve("kept.txt")
         Files.write(path, "kept".getBytes(StandardCharsets.UTF_8))
         val writable = openFile(io, path, write = true)
         try {
-          for op <- List(backend.ops.read(writable, allocate(8), 0), backend.ops.read(writable, allocate(8))) do {
+          for op <- List(io.ops.read(writable, allocate(8), 0), io.ops.read(writable, allocate(8))) do {
             val failure = attempt(io, op)
             assert(failure.isInstanceOf[IOException], s"a read of a file opened for writing: $failure")
           }
         } finally close(io, writable)
         val readable = openFile(io, path, write = false)
         try {
-          for op <- List(backend.ops.write(readable, bytes("x"), 0), backend.ops.write(readable, bytes("x"))) do {
+          for op <- List(io.ops.write(readable, bytes("x"), 0), io.ops.write(readable, bytes("x"))) do {
             val failure = attempt(io, op)
             assert(failure.isInstanceOf[IOException], s"a write of a file opened for reading: $failure")
           }
@@ -138,11 +138,11 @@ trait FileContract extends FileSystemFixture {
         Files.write(path, "x".getBytes(StandardCharsets.UTF_8))
         val file = openFile(io, path, write = true)
         try {
-          intercept[IllegalArgumentException](backend.ops.read(file, allocate(8), -1))
-          intercept[IllegalArgumentException](backend.ops.write(file, bytes("x"), -1))
+          intercept[IllegalArgumentException](io.ops.read(file, allocate(8), -1))
+          intercept[IllegalArgumentException](io.ops.write(file, bytes("x"), -1))
         } finally close(io, file)
         intercept[IllegalArgumentException](
-          backend.ops.open(s"$path\u0000.txt", write = false, Slot[backend.ops.File]())
+          io.ops.open(s"$path\u0000.txt", write = false, Slot[io.ops.File]())
         )
       }
     }
@@ -164,12 +164,12 @@ trait FileContract extends FileSystemFixture {
         val reading = openFile(io, path, write = false)
         try {
           val first = allocate(4)
-          io.perform(backend.ops.read(reading, first))
-          readExactly(io, backend.ops.read(reading, first), first, 4)
+          io.perform(io.ops.read(reading, first))
+          readExactly(io, io.ops.read(reading, first), first, 4)
           assertEquals(text(first), "abcd")
           val rest = allocate(16)
-          io.perform(backend.ops.read(reading, rest))
-          readExactly(io, backend.ops.read(reading, rest), rest, 6)
+          io.perform(io.ops.read(reading, rest))
+          readExactly(io, io.ops.read(reading, rest), rest, 6)
           assertEquals(text(rest), "456789")
         } finally close(io, reading)
       }
@@ -184,9 +184,9 @@ trait FileContract extends FileSystemFixture {
         val file = openFile(io, path, write = true)
         try {
           val buf = bytes("ab")
-          val write = backend.ops.write(file, buf, offset = 2)
+          val write = io.ops.write(file, buf, offset = 2)
           while buf.hasRemaining() do io.perform(write)
-          val sync = backend.ops.sync(file)
+          val sync = io.ops.sync(file)
           io.perform(sync)
           io.perform(sync) // repeatable
           assertEquals(Files.readString(path), "01ab456789")
@@ -203,7 +203,7 @@ trait FileContract extends FileSystemFixture {
         val file = openFile(io, path, write = true)
         val empty = allocate(4)
         empty.limit(0)
-        val write = backend.ops.write(file, empty, offset = 2)
+        val write = io.ops.write(file, empty, offset = 2)
         try io.perform(write)
         finally close(io, file)
         assertEquals(Files.readString(path), "0123")
@@ -221,7 +221,7 @@ trait FileContract extends FileSystemFixture {
         val file = openFile(io, path, write = false)
         try {
           val buf = allocate(2)
-          val read = backend.ops.read(file, buf, offset = 0)
+          val read = io.ops.read(file, buf, offset = 0)
           for expected <- Seq("01", "23", "45") do {
             buf.clear()
             readExactly(io, read, buf, expected.length)
@@ -241,7 +241,7 @@ trait FileContract extends FileSystemFixture {
         for round <- 1 to 64 do {
           val file = openFile(io, path, write = false)
           buf.clear()
-          val read = Future(io.perform(backend.ops.read(file, buf, offset = 0))) // before or as the close comes
+          val read = Future(io.perform(io.ops.read(file, buf, offset = 0))) // before or as the close comes
           val until = System.nanoTime() + (round % 8) * 25_000L // a little later each round, so the read is under way
           while System.nanoTime() < until do Thread.onSpinWait()
           close(io, file)
@@ -263,7 +263,7 @@ trait FileContract extends FileSystemFixture {
         Files.write(path, "x".getBytes(StandardCharsets.UTF_8))
         val file = openFile(io, path, write = false)
         close(io, file)
-        val failure = attempt(io, backend.ops.read(file, allocate(4), offset = 0))
+        val failure = attempt(io, io.ops.read(file, allocate(4), offset = 0))
         assert(failure.isInstanceOf[ClosedChannelException], String.valueOf(failure))
       }
     }
