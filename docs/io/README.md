@@ -75,8 +75,8 @@ share `SimpleIOChecks.scala` without combining their capability requirements.
 
 - **A capability** is what a backend can do, an `Interface` its `ops` mix in and a program asks for by intersection:
   `IpStreams`, `IpDatagrams` (`IpSockets` is both), `UnixStreams`, `UnixDatagrams`, `RegularFiles`, `Pipes`, `Fifos`,
-  `Resolving`, `Blocking`. Each extends the base `Interface`, which every backend has: read, write,
-  the pooled read, timers and close. A helper asks for `Io[IpStreams]` or
+  `Resolving`, `Blocking`. Each extends the base `Interface`, which every backend has: the type of its ops, `Op`, and timers. Handles and closing them are
+  `Handles`, and streams read and written are `ByteStreams`, each asked for like any other. A helper asks for `Io[IpStreams]` or
   `Io[IpStreams & RegularFiles]`, and a backend without one, such as a browser's, is refused when compiling.
 - **A handle's kind** is in its type, a subtype of its interface's `Handle`. Every backend has `Readable` and `Writable`
   streams; the other kinds are declared by the ops of the capability that opens them: `StreamSockets` a `Connection` (both, and
@@ -126,7 +126,7 @@ Each is stated on the interface where it applies, and checked by the contract su
 - **Any buffer** is taken, on the heap or not (`Interface`).
 - **Options** are given as a socket opens, `NoDelay` on unless set off; what a backend supports, for each kind of
   socket, is asked of it when the program runs (`SocketOptionOps`).
-- **Closing** fails the ops waiting on the handle and frees the port or path (`Interface.close`). The ops it ends, and any op
+- **Closing** fails the ops waiting on the handle and frees the port or path (`Handles.close`). The ops it ends, and any op
   performed on the handle after, a second close too, fail with a closed channel's failure, `ClosedChannelException`
   naming the handle, on every backend.
 

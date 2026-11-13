@@ -5,6 +5,7 @@ import gears.async.BufferedChannel
 import gears.async.Channel
 import gears.async.Future
 import gears.async.io.BufferPool
+import gears.async.io.ByteStreams
 import gears.async.io.Fifos
 import gears.async.io.Interface
 import gears.async.io.Io
@@ -99,14 +100,14 @@ object SimpleIO {
     opened[io.ops.Writable](io.ops.openFifoForWriting(path, _))
 
   /** Reads into `buf` once and returns how many bytes arrived, 0 at the end of the stream. */
-  def read(using io: Io[Interface])(handle: io.ops.Readable, buf: ByteBuffer)(using Async): Int = {
+  def read(using io: Io[ByteStreams])(handle: io.ops.Readable, buf: ByteBuffer)(using Async): Int = {
     val before = buf.position()
     io.perform(io.ops.read(handle, buf))
     buf.position() - before
   }
 
   /** Writes all of `buf`, however many writes it takes. */
-  def writeAll(using io: Io[Interface])(handle: io.ops.Writable, buf: ByteBuffer)(using Async): Unit = {
+  def writeAll(using io: Io[ByteStreams])(handle: io.ops.Writable, buf: ByteBuffer)(using Async): Unit = {
     val write = io.ops.write(handle, buf)
     while buf.hasRemaining do io.perform(write)
   }
@@ -196,7 +197,7 @@ object SimpleIO {
     * itself.
     */
   def chunks(using
-      io: Io[Interface]
+      io: Io[ByteStreams]
   )(handle: io.ops.Readable, pool: BufferPool, backlog: Int)(using Async.Spawn): Chunks = {
     require(pool.buffers >= backlog + 2, s"a backlog of $backlog needs a pool of ${backlog + 2} buffers")
     val channel = BufferedChannel[Option[Received]](backlog)

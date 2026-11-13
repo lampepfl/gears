@@ -7,16 +7,17 @@ import _root_.gears.async.Async
   * thread, and a backend performs nothing itself: a program performs its ops with an `Io` over the backend
   * (`Io.backend`), which `Io.run` gives it. How an op is performed, and where a program runs, is the backend's.
   *
-  * What every backend has is here: streams, read and written, into the caller's buffers or into buffers of the
-  * backend's (`pool`), timers, and handles closed as ops (`Interface.close`), since a backend whose I/O facility closes
-  * asynchronously, such as Network.framework or io_uring, reports a close done through a completion rather than by
-  * blocking the caller. Where the streams come from is a capability, an `Interface` that the backend's `ops` mix in,
-  * with the ops that open its handles and use them: IP stream and datagram sockets (`IpStreams`, `IpDatagrams`, both
-  * `IpSockets`), regular files (`RegularFiles`), pipes (`Pipes`), name resolution (`Resolving`), blocking ops
-  * (`Blocking`), `UnixStreams`, `UnixDatagrams` and `Fifos`. Code that needs a capability asks for an `Io` over ops
-  * that have it, by the capability (`Io[IpSockets]`, or `Io[IpStreams & RegularFiles]` for more), or for a backend
-  * whose ops do (`Backend { type Interface <: IpSockets }`), so a backend without it, such as one in a browser, which
-  * has no sockets or files of these kinds, is refused when compiling, not when running.
+  * Every backend has an `Interface`, the type of its ops and timers; the rest are capabilities. The commonest are
+  * streams, read and written, into the caller's buffers or into buffers of the backend's (`ByteStreams`, and `pool`),
+  * and handles closed as ops (`Handles.close`), since a backend whose I/O facility closes asynchronously, such as
+  * Network.framework or io_uring, reports a close done through a completion rather than by blocking the caller. Where
+  * the streams come from is a capability, an `Interface` that the backend's `ops` mix in, with the ops that open its
+  * handles and use them: IP stream and datagram sockets (`IpStreams`, `IpDatagrams`, both `IpSockets`), regular files
+  * (`RegularFiles`), pipes (`Pipes`), name resolution (`Resolving`), blocking ops (`Blocking`), `UnixStreams`,
+  * `UnixDatagrams` and `Fifos`. Code that needs a capability asks for an `Io` over ops that have it, by the capability
+  * (`Io[IpSockets]`, or `Io[IpStreams & RegularFiles]` for more), or for a backend whose ops do (`Backend { type
+  * Interface <: IpSockets }`), so a backend without it, such as one in a browser, which has no sockets or files of
+  * these kinds, is refused when compiling, not when running.
   */
 trait Backend {
 
@@ -28,7 +29,7 @@ trait Backend {
   type Interface <: gears.async.io.Interface
 
   /** Opens a pool of `buffers` buffers of up to `bufferSize` bytes each, for the reads into buffers of the backend's
-    * (`Interface.read` with a pool). Close it once nothing of it is held.
+    * (`ByteStreams.read` with a pool). Close it once nothing of it is held.
     */
   def pool(bufferSize: Int, buffers: Int): BufferPool
 

@@ -8,6 +8,7 @@ import gears.async.Async
   * owns any extra setup resources and releases them before returning the pair.
   */
 trait StreamFixture extends ContractSuite {
+  val backend: Backend { type Interface <: ByteStreams }
   protected def stream(io: Io[backend.Interface])(using Async.Spawn): (io.ops.Readable, io.ops.Writable)
 }
 

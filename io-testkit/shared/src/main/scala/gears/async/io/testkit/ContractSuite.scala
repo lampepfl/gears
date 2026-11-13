@@ -67,7 +67,7 @@ trait ContractSuite extends FunSuite {
   }
 
   /** Closes `handle`, as the interface has it. */
-  protected def close(io: Io[backend.Interface], handle: io.ops.Handle)(using Async): Unit =
+  protected def close(io: Io[Handles], handle: io.ops.Handle)(using Async): Unit =
     io.perform(io.ops.close(handle))
 
   /** Gives a future just started the time to perform its op and wait in it. */
@@ -78,7 +78,7 @@ trait ContractSuite extends FunSuite {
     future.awaitResult.failed.toOption.orNull
 
   /** Drains every buffer, allowing each performance to make only partial progress. */
-  protected def writeAll(io: Io[backend.Interface], out: io.ops.Writable, buf: ByteBuffer)(using Async): Unit = {
+  protected def writeAll(io: Io[ByteStreams], out: io.ops.Writable, buf: ByteBuffer)(using Async): Unit = {
     val write = io.ops.write(out, buf)
     while buf.hasRemaining() do {
       val before = buf.position()
@@ -88,7 +88,7 @@ trait ContractSuite extends FunSuite {
   }
 
   protected def writeAll(
-      io: Io[backend.Interface],
+      io: Io[ByteStreams],
       out: io.ops.Writable,
       bufs: Array[ByteBuffer]
   )(using Async): Unit = {

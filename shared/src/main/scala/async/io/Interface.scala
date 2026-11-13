@@ -32,16 +32,75 @@ final class Slot[A <: AnyRef] {
   */
 trait Repeatable
 
-/** The ops every backend can build, as values of its `Op` type, on I/O objects named by its handles, values of its
-  * `Handle` type: reads and writes of a stream, timers, and closing. Buffers are used between position and limit, and
-  * belong to the backend while the op is being performed, until `perform` returns. Any buffer is taken, on every
-  * backend: on the heap or not, and a read-only one to write from, though never to read into, which fails with an
-  * `IllegalArgumentException` as the op is built; a backend whose system calls need memory of their own copies through
-  * it, so that buffers with native memory behind them (`Backend.pool`'s, or on Scala Native a `PointerBuffer`'s) are
-  * the ones that cost no copy.
+/** What every backend's ops have: the type they are built as, and timers. Each capability extends it with the ops it
+  * builds (`ByteStreams`, `IpStreams` and the rest). Building an op performs nothing; a program performs it with its
+  * `Io`.
+  */
+trait Interface {
+
+  /** What these ops are built as, and a backend performs: a type of the backend's own, so that ops of another backend
+    * are a different type.
+    */
+  type Op
+
+  /** Completes once `milliseconds` have passed (see the other `timer`). */
+  final def timer(milliseconds: Int): Op & Repeatable = {
+    require(milliseconds >= 0, s"A timer's time is not negative: $milliseconds ms")
+    timer(scala.concurrent.duration.Duration(milliseconds.toLong, java.util.concurrent.TimeUnit.MILLISECONDS))
+  }
+
+  /** Completes once `duration` has passed since each submission, never before: to the nanosecond the backend can wait,
+    * which on kqueue is what `kevent` takes, and on NIO the millisecond its selector waits in. A time limit on its
+    * submission shorter than `duration` fails it with `TimeoutException` when the limit comes, as any op's does; one no
+    * shorter leaves it to complete. Not negative.
+    */
+  def timer(duration: scala.concurrent.duration.FiniteDuration): Op & Repeatable
+
+  /** A timer that completes at `nanoTime`, on `System.nanoTime`'s clock, a deadline that may be moved while it is
+    * pending (`Deadline.moveTo`), from any thread, so that a timer re-armed again and again, as QUIC's loss and pacing
+    * timers are for almost every packet, is one op performed once rather than one cancelled and performed anew each
+    * time. Performed again, it completes at its deadline as it stands then, at once if that has passed. Its time limit
+    * is as `timer`'s.
+    */
+  def deadlineTimer(nanoTime: Long): Op & Repeatable & Deadline
+}
+
+/** The handles of a backend's I/O objects, and closing them: what every capability that opens something extends, each
+  * declaring the kinds of handle it opens as subtypes of `Handle`.
+  */
+trait Handles extends Interface {
+
+  /** Names an open file, socket, or other I/O object of the backend: an object of the backend's own class, which only
+    * the backend can make, so that a program cannot forge a handle, nor pass one backend's handle to another, whose
+    * `Handle` is a different type. A program gets one from an op that opened something, and closes it with `close`; the
+    * backend never closes it.
+    */
+  type Handle <: AnyRef
+
+  /** Closes `handle`, completing once it is closed. The ops under way on it, from whichever future, have failed with an
+    * `IOException`, a closed channel's (`java.nio.channels.ClosedChannelException` on the JVM and Scala Native, naming
+    * the handle), before this completes, as the JDK fails a thread blocked on a channel that is closed: none of them
+    * can succeed once the close has begun, and a `perform` waiting on one in another future throws once that future
+    * runs again, perhaps after the close's `perform` returns. Its number is then free for reuse, and a listener's port
+    * for listening on again. A Unix socket path that a listener or datagram socket bound is removed with it, if the
+    * file there is still its own, not one a later listener bound in its place: checked, then removed, as no system call
+    * removes a file only if it is a given one, so a listener binding the path between the two, a few microseconds,
+    * loses its file. Fails if `handle` is not open, with the failure an op submitted on a closed handle has: a closed
+    * channel's, as above.
+    */
+  def close(handle: Handle): Op
+}
+
+/** The ops of streams, read and written, on I/O objects named by the backend's handles (see `Handles`), for a backend
+  * that has them: every capability whose handles are read or written as streams extends it. Buffers are used between
+  * position and limit, and belong to the backend while the op is being performed, until `perform` returns. Any buffer
+  * is taken, on every backend: on the heap or not, and a read-only one to write from, though never to read into, which
+  * fails with an `IllegalArgumentException` as the op is built; a backend whose system calls need memory of their own
+  * copies through it, so that buffers with native memory behind them (`Backend.pool`'s, or on Scala Native a
+  * `PointerBuffer`'s) are the ones that cost no copy.
   *
   * A handle's kind is in its type, a subtype of `Handle`, so that an op on the wrong kind of handle does not compile: a
-  * stream is read through a `Readable` and written through a `Writable`, the kinds every backend has. The other kinds
+  * stream is read through a `Readable` and written through a `Writable`, the kinds every stream has. The other kinds
   * are declared by the ops of the capability that opens them: a `Connection` (a connected stream socket, from
   * `StreamSockets`) and a `File` (from `RegularFiles`) are both readable and writable; a `Listener` accepts; datagram
   * sockets, bound (`BoundDatagram`, `UnixBoundDatagram`) or connected (`ConnectedDatagram`, `UnixConnectedDatagram`),
@@ -63,19 +122,7 @@ trait Repeatable
   * the queue. An op that is not `Repeatable`, every opener and `close` among them, is performed once; performed again
   * it throws `IllegalStateException`.
   */
-trait Interface {
-
-  /** What these ops are built as, and a backend performs: a type of the backend's own, so that ops of another backend
-    * are a different type.
-    */
-  type Op
-
-  /** Names an open file, socket, or other I/O object of the backend: an object of the backend's own class, which only
-    * the backend can make, so that a program cannot forge a handle, nor pass one backend's handle to another, whose
-    * `Handle` is a different type. A program gets one from an op that opened something, and closes it with `close`; the
-    * backend never closes it.
-    */
-  type Handle <: AnyRef
+trait ByteStreams extends Handles {
 
   /** A handle that can be read as a stream: a connection, a pipe's or FIFO's read end, or a file. */
   type Readable <: Handle
@@ -108,27 +155,6 @@ trait Interface {
     */
   def write(handle: Writable, bufs: Array[ByteBuffer]): Op & Repeatable
 
-  /** Completes once `milliseconds` have passed (see the other `timer`). */
-  final def timer(milliseconds: Int): Op & Repeatable = {
-    require(milliseconds >= 0, s"A timer's time is not negative: $milliseconds ms")
-    timer(scala.concurrent.duration.Duration(milliseconds.toLong, java.util.concurrent.TimeUnit.MILLISECONDS))
-  }
-
-  /** Completes once `duration` has passed since each submission, never before: to the nanosecond the backend can wait,
-    * which on kqueue is what `kevent` takes, and on NIO the millisecond its selector waits in. A time limit on its
-    * submission shorter than `duration` fails it with `TimeoutException` when the limit comes, as any op's does; one no
-    * shorter leaves it to complete. Not negative.
-    */
-  def timer(duration: scala.concurrent.duration.FiniteDuration): Op & Repeatable
-
-  /** A timer that completes at `nanoTime`, on `System.nanoTime`'s clock, a deadline that may be moved while it is
-    * pending (`Deadline.moveTo`), from any thread, so that a timer re-armed again and again, as QUIC's loss and pacing
-    * timers are for almost every packet, is one op performed once rather than one cancelled and performed anew each
-    * time. Performed again, it completes at its deadline as it stands then, at once if that has passed. Its time limit
-    * is as `timer`'s.
-    */
-  def deadlineTimer(nanoTime: Long): Op & Repeatable & Deadline
-
   /** Fills a buffer of `pool`'s, from `Backend.pool`, as the other `read` fills the caller's: completes once at least
     * one byte has been read, or at the end of the stream, writing what it read into `into`, which must be empty, as a
     * `Received` to release. Fails if `pool` has no buffer free when the read needs one; a backend that controls its
@@ -138,23 +164,10 @@ trait Interface {
     * own, as Node's streams do, hands such a chunk over.
     */
   def read(handle: Readable, pool: BufferPool, into: Slot[Received]): Op & Repeatable
-
-  /** Closes `handle`, completing once it is closed. The ops under way on it, from whichever future, have failed with an
-    * `IOException`, a closed channel's (`java.nio.channels.ClosedChannelException` on the JVM and Scala Native, naming
-    * the handle), before this completes, as the JDK fails a thread blocked on a channel that is closed: none of them
-    * can succeed once the close has begun, and a `perform` waiting on one in another future throws once that future
-    * runs again, perhaps after the close's `perform` returns. Its number is then free for reuse, and a listener's port
-    * for listening on again. A Unix socket path that a listener or datagram socket bound is removed with it, if the
-    * file there is still its own, not one a later listener bound in its place: checked, then removed, as no system call
-    * removes a file only if it is a given one, so a listener binding the path between the two, a few microseconds,
-    * loses its file. Fails if `handle` is not open, with the failure an op submitted on a closed handle has: a closed
-    * channel's, as above.
-    */
-  def close(handle: Handle): Op
 }
 
 /** The ops of stream sockets, IP or Unix, once opened (see `IpStreams` and `UnixStreams`, which open them). */
-trait StreamSockets extends Interface {
+trait StreamSockets extends ByteStreams {
 
   /** A connected stream socket, IP or Unix, from `connect` or `accept`: read, written and shut down for writing. */
   type Connection <: Readable & Writable
@@ -306,17 +319,17 @@ trait IpDatagrams extends SocketOptionOps {
 /** Regular files as ops, for a backend that has them. A file is opened by an op, since opening does disk I/O, for the
   * path, as reads do, and some environments can only open asynchronously; its reads and writes are positional, as
   * `pread` and `pwrite` are, so that one handle serves concurrent reads at different offsets and no op depends on a
-  * shared file position, which io_uring has none of either. `Interface.read` and `Interface.write` on a file handle
+  * shared file position, which io_uring has none of either. `ByteStreams.read` and `ByteStreams.write` on a file handle
   * read and write at the position the handle carries, as a stream, for code that treats a file as one.
   *
   * Cancellation follows `Blocking.blocking`: an op not yet started is skipped, one running finishes on its thread with
   * its result discarded, and `perform` returns once the thread has stopped touching the buffer. A close that comes
   * while an op on the file is in its system call waits for it, and the op fails as one on a closed handle does
-  * (`Interface.close`), on every backend, its buffer and offset left as they were even if the call finished first, as
-  * the JDK fails a call on a channel closed under it: a write's bytes may have reached the file. The close completes
-  * after the call, so the descriptor is never reused under the op.
+  * (`Handles.close`), on every backend, its buffer and offset left as they were even if the call finished first, as the
+  * JDK fails a call on a channel closed under it: a write's bytes may have reached the file. The close completes after
+  * the call, so the descriptor is never reused under the op.
   */
-trait RegularFiles extends Interface {
+trait RegularFiles extends ByteStreams {
 
   /** A regular file, from `open`: read and written as a stream and at offsets, and synced. */
   type File <: Readable & Writable
@@ -330,16 +343,16 @@ trait RegularFiles extends Interface {
     */
   def open(path: String, write: Boolean, into: Slot[File]): Op
 
-  /** Fills `buf` from the file at `offset`, as `Interface.read` fills it from a stream: completes once at least one
+  /** Fills `buf` from the file at `offset`, as `ByteStreams.read` fills it from a stream: completes once at least one
     * byte has been read, or at the end of the file, when nothing was added, so a caller performs it again with the
     * offset advanced; and fails, as it does, if `buf` has no room. A negative `offset` is refused as the op is built,
     * with an `IllegalArgumentException`, as it is for `write`.
     */
   def read(handle: File, buf: ByteBuffer, offset: Long): Op & Repeatable
 
-  /** Drains `buf` into the file at `offset`, as `Interface.write` drains it into a stream: completes once at least one
-    * byte has been written, or, if nothing remains, without writing; perform it again while `buf` has bytes remaining,
-    * with the offset advanced.
+  /** Drains `buf` into the file at `offset`, as `ByteStreams.write` drains it into a stream: completes once at least
+    * one byte has been written, or, if nothing remains, without writing; perform it again while `buf` has bytes
+    * remaining, with the offset advanced.
     */
   def write(handle: File, buf: ByteBuffer, offset: Long): Op & Repeatable
 
@@ -365,7 +378,7 @@ trait Resolving extends Interface {
 
 /** The ops of pipes, for a backend that has them: `read` on its read end, `write` on its write end.
   */
-trait Pipes extends Interface {
+trait Pipes extends ByteStreams {
 
   /** Opens a pipe. Completes after writing its read end into `read` and its write end into `write`, which must both be
     * empty; one that fails or is cancelled leaves both empty and neither end open.
@@ -374,7 +387,7 @@ trait Pipes extends Interface {
 }
 
 /** The ops of FIFOs, for a backend that has them, which are then read and written as pipes are. */
-trait Fifos extends Interface {
+trait Fifos extends ByteStreams {
 
   /** Opens the FIFO at `path` for reading, without waiting for a writer, and completes after writing it into `into`,
     * which must be empty. Read before a writer has opened it, it is at its end.
