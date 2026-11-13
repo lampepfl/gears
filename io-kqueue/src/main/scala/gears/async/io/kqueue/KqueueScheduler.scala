@@ -28,10 +28,11 @@ class KqueueScheduler(workers: Int) extends WorkpoolScheduler[KqueueOp, KqueueOp
           pipe.perform()
         case close: KqueueCloseHandle =>
           performClose(close)
-        case read: KqueueRead =>
-          performRead(read)
-        case write: KqueueWrite =>
-          performWrite(write)
+        case read: KqueueRead         => performWhenReady(read)
+        case read: KqueueScatterRead  => performWhenReady(read)
+        case read: KqueuePooledRead   => performWhenReady(read)
+        case write: KqueueWrite       => performWhenReady(write)
+        case write: KqueueGatherWrite => performWhenReady(write)
     }
   }
 }

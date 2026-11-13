@@ -1,13 +1,10 @@
 package gears.async.io.shareable
 
-import gears.async.Async
-import gears.async.Future
-import gears.async.Listener
 
 import java.io.IOException
 import java.nio.channels.ClosedChannelException
 import java.util.concurrent.atomic.AtomicLong
-import scala.util.Try
+import java.util.concurrent.atomic.AtomicReference
 
 /** A handle's state and the work claimed on it, in one word, so that each changes with regard to the other in one
   * step: the state in the top byte, and in the 56 bits below it the count of the work now claimed.
@@ -112,8 +109,17 @@ trait BaseHandle extends HandleState.Holder:
     */
   def awaitReadiness(read: Boolean, op: ReadinessOp, sinceTick: Int, self: EventSource): EventSource | Null
 
-  /** `self`, made the handle's listener by `awaitReadiness`, could not listen after all. */
-  def listenFailed(read: Boolean, self: EventSource): Unit
+  /** Whether the handle is known to have nothing to read, or no room to write, as of `tick`, read with
+    * `readinessTick` just before: an op then waits without trying first, since the try could only find that out
+    * again. It is known from the last try that found it so, or from an op that took all a report was for, and only
+    * while a listener would report anything new, which moves the tick on.
+    */
+  def drainedAt(read: Boolean, tick: Int): Boolean
+
+  /** `source`, reporting the handle ready for so much, saw an op take all of it: the handle is drained until its
+    * next report.
+    */
+  def markDrained(read: Boolean, source: EventSource): Unit
 
   /** Whether `op` was the handle's waiter, and no longer is. */
   def clearWaiter(read: Boolean, op: ReadinessOp): Boolean
@@ -126,12 +132,23 @@ trait BaseHandle extends HandleState.Holder:
 
   /** Whether `source` is the handle's listener for reads, or for writes. */
   def listenedBy(read: Boolean, source: EventSource): Boolean
-  def onComplete(k: Listener[Try[Unit]]): Unit
+
+  /** Has `owner` told once the handle is closed, at once if it already is. For whoever's `requestClose` began the
+    * close and returned false: a close has one owner, so one listener at most.
+    */
+  def onClosed(owner: CloseListener): Unit
   def claimWork(): Unit
   def releaseWork(): Unit
 
 trait BaseReadableHandle extends BaseHandle
 trait BaseWritableHandle extends BaseHandle
+
+/** Told that a handle's close is done, by whichever thread finished it. */
+trait CloseListener:
+  def handleClosed(): Unit
+
+object AbstractBaseHandle:
+  private[shareable] case object Closed
 
 abstract class AbstractBaseHandle extends BaseHandle:
   import HandleState.{ClosedState, ClosingState, OpenState, UnenteredState}
@@ -154,14 +171,22 @@ abstract class AbstractBaseHandle extends BaseHandle:
       completeClose()
     closedSync
 
-  // TODO: promise uses locks, need a nicer lock-free mechanism for close notification
-  private val closePromise: Future.Promise[Unit] = Future.Promise()
+  /** Whoever waits for the close to be done: null until there is one, its owner while it waits, and `Closed` from
+    * when the close is done, whichever comes first. The owner is told exactly once, by whichever of the two comes
+    * second.
+    */
+  private val closeListener = AtomicReference[CloseListener | AbstractBaseHandle.Closed.type | Null](null)
 
   protected def completeClose(): Unit =
-    closePromise.complete(WorkpoolScheduler.SuccessUnit)
+    closeListener.getAndSet(AbstractBaseHandle.Closed) match
+      case owner: CloseListener => owner.handleClosed()
+      case _                    => ()
 
-  final def onComplete(k: Listener[Try[Unit]]): Unit =
-    closePromise.onComplete(k)
+  final def onClosed(owner: CloseListener): Unit =
+    if !closeListener.compareAndSet(null, owner) then
+      closeListener.get() match
+        case AbstractBaseHandle.Closed => owner.handleClosed()
+        case _ => throw new IllegalStateException("A close already has its owner waiting")
 
   /** The ops waiting for the handle to be readable, and to be writable. Guarded by this handle's monitor, which is
     * what makes a claim and a clear exclude each other (see `ReadinessOp.claimAtReady`).
@@ -188,8 +213,27 @@ abstract class AbstractBaseHandle extends BaseHandle:
   protected def acceptsWaiter(read: Boolean, op: ReadinessOp, pending: ReadinessOp | Null): Boolean =
     pending == null || pending.settled
 
-  final def awaitReadiness(read: Boolean, op: ReadinessOp, sinceTick: Int, self: EventSource): EventSource | Null =
-    synchronized {
+  /** The tick at which the handle was last known drained, which is so now if it is still the tick: any other value,
+    * as it is to begin with and when a listener goes, means it is not known. Written under this handle's monitor.
+    */
+  @volatile private var readDrainedTick = -1
+  @volatile private var writeDrainedTick = -1
+
+  final def drainedAt(read: Boolean, tick: Int): Boolean =
+    (if read then readDrainedTick else writeDrainedTick) == tick
+
+  /** No listener, so nothing would report the handle ready: whether it is drained is not known. */
+  private def forgetDrained(read: Boolean): Unit =
+    if read then readDrainedTick = readTick - 1 else writeDrainedTick = writeTick - 1
+
+  final def markDrained(read: Boolean, source: EventSource): Unit = synchronized {
+    if (if read then readListener else writeListener) eq source then
+      if read then readDrainedTick = readTick else writeDrainedTick = writeTick
+  }
+
+  final def awaitReadiness(read: Boolean, op: ReadinessOp, sinceTick: Int, self: EventSource): EventSource | Null = {
+    var start = false
+    val listener = synchronized {
       if !acceptsWaiter(read, op, if read then readWaiter else writeWaiter) then
         throw new IllegalArgumentException(s"A ${if read then "read" else "write"} is already pending on this handle")
       // The listener may be another thread's, and have reported the handle ready, to no waiter, after the attempt.
@@ -199,13 +243,26 @@ abstract class AbstractBaseHandle extends BaseHandle:
         var listener = if read then readListener else writeListener
         if listener == null then
           listener = self
+          start = true
           if read then readListener = self else writeListener = self
+        // The op waits because the handle was not ready at this tick: so the next need not try before the next.
+        if read then readDrainedTick = sinceTick else writeDrainedTick = sinceTick
         listener
     }
-
-  final def listenFailed(read: Boolean, self: EventSource): Unit = synchronized {
-    if read then { if readListener eq self then readListener = null }
-    else if writeListener eq self then writeListener = null
+    // Only as `self` becomes the listener: it then reports the handle until it stops being one. No report can come
+    // before this, and a second op to wait meanwhile is refused, as this one is the waiter.
+    if start then
+      try self.startListening(this, read)
+      catch
+        case failure: Throwable =>
+          synchronized {
+            if read then { if readListener eq self then readListener = null }
+            else if writeListener eq self then writeListener = null
+            forgetDrained(read)
+            clearWaiter(read, op): Unit
+          }
+          throw failure
+    listener
   }
 
   final def clearWaiter(read: Boolean, op: ReadinessOp): Boolean = synchronized {
@@ -239,7 +296,9 @@ abstract class AbstractBaseHandle extends BaseHandle:
           stop = idle >= idleReportsLimit
           if read then readIdleReports = if stop then 0 else idle
           else writeIdleReports = if stop then 0 else idle
-          if stop then if read then readListener = null else writeListener = null
+          if stop then
+            if read then readListener = null else writeListener = null
+            forgetDrained(read)
           null
         else
           if read then readIdleReports = 0 else writeIdleReports = 0
@@ -289,6 +348,6 @@ abstract class AbstractBaseHandle extends BaseHandle:
           given ClosePermit = ()
           closeHandle()
         else false // the last work released closes it
-      case ClosingState   => false
-      case ClosedState    => true
-      case UnenteredState => throw new IllegalStateException("Handle is not open")
+      // Closing is done once: a second close fails as any op on a closed handle does.
+      case ClosingState | ClosedState => throw new ClosedChannelException()
+      case UnenteredState             => throw new IllegalStateException("Handle is not open")

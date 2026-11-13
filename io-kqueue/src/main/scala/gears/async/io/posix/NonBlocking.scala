@@ -60,77 +60,77 @@ object NonBlocking {
       read.toInt
   }
 
-  // /** The most buffers one `readv` or `writev` takes (`IOV_MAX` on macOS and Linux): beyond them, an op takes the rest
-  //   * on its next submission, as it does what one call did not finish.
-  //   */
-  // inline val MaxBuffers = 1024
+  /** The most buffers one `readv` or `writev` takes (`IOV_MAX` on macOS and Linux): beyond them, an op takes the rest
+    * on its next submission, as it does what one call did not finish.
+    */
+  inline val MaxBuffers = 1024
 
-  // /** Fills `bufs` from `fd` in order, as `read` fills one, with one `readv`: the bytes read, 0 if it would block, or -1
-  //   * at end of stream, which leaves the buffers as they were.
-  //   */
-  // def readv(fd: Int, bufs: Array[java.nio.ByteBuffer]): Int =
-  //   NativeBuffer.staged(bufs, copyIn = false, copyOut = true)(readvAddressable(fd, _))
+  /** Fills `bufs` from `fd` in order, as `read` fills one, with one `readv`: the bytes read, 0 if it would block, or -1
+    * at end of stream, which leaves the buffers as they were.
+    */
+  def readv(fd: Int, bufs: Array[java.nio.ByteBuffer]): Int =
+    NativeBuffer.staged(bufs, copyIn = false, copyOut = true)(readvAddressable(fd, _))
 
-  // private def readvAddressable(fd: Int, bufs: Array[java.nio.ByteBuffer]): Int = {
-  //   val vectors = stackalloc[uio.iovec](math.min(bufs.length, MaxBuffers))
-  //   val count = fill(vectors, bufs, room = true)
-  //   val read = Unblocked.readv(fd, vectors, count)
-  //   if read < 0 then
-  //     if !wouldBlock then throw new IOException(s"Failed to read from descriptor $fd: ${cError()}")
-  //     0
-  //   else if read == 0 then EOF
-  //   else
-  //     advance(bufs, read.toLong)
-  //     read.toInt
-  // }
+  private def readvAddressable(fd: Int, bufs: Array[java.nio.ByteBuffer]): Int = {
+    val vectors = stackalloc[uio.iovec](math.min(bufs.length, MaxBuffers))
+    val count = fill(vectors, bufs, room = true)
+    val read = Unblocked.readv(fd, vectors, count)
+    if read < 0 then
+      if !wouldBlock then throw new IOException(s"Failed to read from descriptor $fd: ${cError()}")
+      0
+    else if read == 0 then EOF
+    else
+      advance(bufs, read.toLong)
+      read.toInt
+  }
 
-  // /** Drains `bufs` into `fd` in order, as `write` drains one, with one `writev`: the bytes written, or -1 if it would
-  //   * block.
-  //   */
-  // def writev(fd: Int, bufs: Array[java.nio.ByteBuffer]): Int =
-  //   NativeBuffer.staged(bufs, copyIn = true, copyOut = false)(writevAddressable(fd, _))
+  /** Drains `bufs` into `fd` in order, as `write` drains one, with one `writev`: the bytes written, or -1 if it would
+    * block.
+    */
+  def writev(fd: Int, bufs: Array[java.nio.ByteBuffer]): Int =
+    NativeBuffer.staged(bufs, copyIn = true, copyOut = false)(writevAddressable(fd, _))
 
-  // private def writevAddressable(fd: Int, bufs: Array[java.nio.ByteBuffer]): Int = {
-  //   val vectors = stackalloc[uio.iovec](math.min(bufs.length, MaxBuffers))
-  //   val count = fill(vectors, bufs, room = false)
-  //   val written = Unblocked.writev(fd, vectors, count)
-  //   if written < 0 then {
-  //     if !wouldBlock then throw new IOException(s"Failed to write to descriptor $fd: ${cError()}")
-  //     -1
-  //   } else {
-  //     advance(bufs, written.toLong)
-  //     written.toInt
-  //   }
-  // }
+  private def writevAddressable(fd: Int, bufs: Array[java.nio.ByteBuffer]): Int = {
+    val vectors = stackalloc[uio.iovec](math.min(bufs.length, MaxBuffers))
+    val count = fill(vectors, bufs, room = false)
+    val written = Unblocked.writev(fd, vectors, count)
+    if written < 0 then {
+      if !wouldBlock then throw new IOException(s"Failed to write to descriptor $fd: ${cError()}")
+      -1
+    } else {
+      advance(bufs, written.toLong)
+      written.toInt
+    }
+  }
 
-  // /** Points `vectors` at `bufs`, those with room or bytes remaining, in order, at most `MaxBuffers`: their count. */
-  // def fill(vectors: Ptr[uio.iovec], bufs: Array[java.nio.ByteBuffer], room: Boolean): Int = {
-  //   var count = 0
-  //   var i = 0
-  //   while i < bufs.length && count < MaxBuffers do {
-  //     val buf = bufs(i)
-  //     if buf.hasRemaining() then {
-  //       val v = vectors + count
-  //       v._1 = NativeBuffer.atPosition(buf)
-  //       v._2 = buf.remaining().toCSize
-  //       count += 1
-  //     }
-  //     i += 1
-  //   }
-  //   count
-  // }
+  /** Points `vectors` at `bufs`, those with room or bytes remaining, in order, at most `MaxBuffers`: their count. */
+  def fill(vectors: Ptr[uio.iovec], bufs: Array[java.nio.ByteBuffer], room: Boolean): Int = {
+    var count = 0
+    var i = 0
+    while i < bufs.length && count < MaxBuffers do {
+      val buf = bufs(i)
+      if buf.hasRemaining() then {
+        val v = vectors + count
+        v._1 = NativeBuffer.atPosition(buf)
+        v._2 = buf.remaining().toCSize
+        count += 1
+      }
+      i += 1
+    }
+    count
+  }
 
-  // /** Advances `bufs` in order by `bytes` all told, each to its limit before the next. */
-  // def advance(bufs: Array[java.nio.ByteBuffer], bytes: Long): Unit = {
-  //   var left = bytes
-  //   var i = 0
-  //   while left > 0 && i < bufs.length do {
-  //     val n = math.min(left, bufs(i).remaining().toLong).toInt
-  //     if n > 0 then NativeBuffer.advance(bufs(i), n)
-  //     left -= n
-  //     i += 1
-  //   }
-  // }
+  /** Advances `bufs` in order by `bytes` all told, each to its limit before the next. */
+  def advance(bufs: Array[java.nio.ByteBuffer], bytes: Long): Unit = {
+    var left = bytes
+    var i = 0
+    while left > 0 && i < bufs.length do {
+      val n = math.min(left, bufs(i).remaining().toLong).toInt
+      if n > 0 then NativeBuffer.advance(bufs(i), n)
+      left -= n
+      i += 1
+    }
+  }
 
   /** Drains `buf` into `fd` between position and limit. Returns the number of bytes written, or -1 if the write would
     * block.

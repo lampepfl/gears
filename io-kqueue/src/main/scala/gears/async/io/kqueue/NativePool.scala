@@ -1,11 +1,18 @@
 package gears.async.io.kqueue
 
-import gears.async.io.BufferPool
+import gears.async.io.posix.NativeBuffer
+import gears.async.io.shareable.LendingPool
 
-class NativePool(val bufferSize: Int, val buffers: Int) extends BufferPool {
+import java.nio.ByteBuffer
+import scala.scalanative.unsafe.Zone
 
-  override def available: Int = ???
+/** A pool of buffers over native memory, which reads fill with no copy. The memory is a zone's, freed as the pool
+  * closes.
+  */
+final class NativePool(bufferSize: Int, buffers: Int) extends LendingPool(bufferSize, buffers) {
+  private val zone = Zone.open()
 
-  override def close(): Unit = ???
+  protected def allocate(): ByteBuffer = NativeBuffer.allocate(bufferSize)(using zone)
 
+  protected def free(): Unit = zone.close()
 }

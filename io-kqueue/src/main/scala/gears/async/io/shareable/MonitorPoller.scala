@@ -4,6 +4,9 @@ trait MonitorPoller extends Poller, EventSource {
   type ThisWorkerSource = MonitorPoller
   def asThisWorkerSource: this.type & ThisWorkerSource = this
 
+  def startListening(handle: BaseHandle, read: Boolean): Unit =
+    throw new UnsupportedOperationException("A monitor reports no handles")
+
   private val notifier = new Object
 
   protected def wake(): Unit = notifier.synchronized {

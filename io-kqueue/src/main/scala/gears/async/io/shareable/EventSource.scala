@@ -10,6 +10,12 @@ trait EventSource {
     */
   def holdTimer(op: TimerOp): TimerSource[?]
 
+  /** This source has become `handle`'s listener for reads, or for writes: from now on it reports each time the
+    * handle becomes ready, not for as long as it is, and at once if it is ready now. Called once for as long as it
+    * stays the listener, by the handle, from `awaitReadiness`, on this source's own thread.
+    */
+  def startListening(handle: BaseHandle, read: Boolean): Unit
+
   /** This source is no longer `handle`'s listener for reads, or for writes: it stops reporting them. Called on this
     * source's own thread, by the handle, from `readyWaiter`.
     */

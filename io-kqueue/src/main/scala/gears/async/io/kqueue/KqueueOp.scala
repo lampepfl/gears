@@ -10,7 +10,12 @@ import gears.async.io.posix.PosixKernelHandle
 import gears.async.io.posix.PosixPipeOpener
 import gears.async.io.posix.PosixReadOps
 import gears.async.io.posix.PosixWriteOps
+import gears.async.io.Received
 import gears.async.io.shareable.AbstractCloseOp
+import gears.async.io.shareable.AbstractGatherWriteOp
+import gears.async.io.shareable.AbstractPooledReadOp
+import gears.async.io.shareable.AbstractScatterReadOp
+import gears.async.io.shareable.LendingPool
 import gears.async.io.shareable.AbstractMakeDeadlineOp
 import gears.async.io.shareable.AbstractMakePipeOp
 import gears.async.io.shareable.AbstractMakeTimerOp
@@ -48,15 +53,9 @@ trait KqueueReadOps extends PosixReadOps:
   type ReadableHandle = KqueueReadable
   type WorkerSource = KqueuePoller
 
-  final def _listenRead(worker: KqueuePoller, handle: KqueueReadable): Unit =
-    worker.listen(handle, read = true)
-
 trait KqueueWriteOps extends PosixWriteOps:
   type WriteableHandle = KqueueWritable
   type WorkerSource = KqueuePoller
-
-  final def _listenWrite(worker: KqueuePoller, handle: KqueueWritable): Unit =
-    worker.listen(handle, read = false)
 
 private[kqueue] final class KqueueRead(handle: KqueueReadable, buf: ByteBuffer)
     extends AbstractReadOp[KqueueReadable, KqueuePoller](handle, buf),
@@ -65,6 +64,21 @@ private[kqueue] final class KqueueRead(handle: KqueueReadable, buf: ByteBuffer)
 
 private[kqueue] final class KqueueWrite(handle: KqueueWritable, buf: ByteBuffer)
     extends AbstractWriteOp[KqueueWritable, KqueuePoller](handle, buf),
+      KqueueWritableOp,
+      KqueueWriteOps
+
+private[kqueue] final class KqueueScatterRead(handle: KqueueReadable, bufs: Array[ByteBuffer])
+    extends AbstractScatterReadOp[KqueueReadable, KqueuePoller](handle, bufs),
+      KqueueReadableOp,
+      KqueueReadOps
+
+private[kqueue] final class KqueuePooledRead(handle: KqueueReadable, pool: LendingPool, into: Slot[Received])
+    extends AbstractPooledReadOp[KqueueReadable, KqueuePoller](handle, pool, into),
+      KqueueReadableOp,
+      KqueueReadOps
+
+private[kqueue] final class KqueueGatherWrite(handle: KqueueWritable, bufs: Array[ByteBuffer])
+    extends AbstractGatherWriteOp[KqueueWritable, KqueuePoller](handle, bufs),
       KqueueWritableOp,
       KqueueWriteOps
 

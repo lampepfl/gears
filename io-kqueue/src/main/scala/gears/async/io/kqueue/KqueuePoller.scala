@@ -4,6 +4,7 @@ import gears.async.io.kqueue.internal.KqueueLoop
 import gears.async.io.shareable.BaseHandle
 import gears.async.io.shareable.EventSource
 import gears.async.io.shareable.Poller
+import gears.async.io.shareable.ReadinessOp
 
 import scala.scalanative.unsafe.*
 import scala.scalanative.unsigned.*
@@ -35,16 +36,17 @@ trait KqueuePoller(maxEvents: Int) extends Poller, EventSource {
     * edge-triggered filter, added once and left until the handle closes, when the kernel takes it with the
     * descriptor, or gives this listener up (`stopListening`). An op that waits meanwhile costs no system call.
     */
-  final def listen(handle: KqueueHandle, read: Boolean): Unit = {
-    val fd = handle.fd
-    handlesLock.synchronized {
-      if fd >= handles.length then handles = java.util.Arrays.copyOf(handles, Math.max(fd + 1, 2 * handles.length))
-      handles(fd) = handle
-    }
-    KqueueLoop.createAndRegisterEvents(kq, 1) { changes =>
-      KqueueLoop.addFile(changes(0), fd, read, clear = true)
-    }
-  }
+  override def startListening(handle: BaseHandle, read: Boolean): Unit = handle match
+    case handle: KqueueHandle =>
+      val fd = handle.fd
+      handlesLock.synchronized {
+        if fd >= handles.length then handles = java.util.Arrays.copyOf(handles, Math.max(fd + 1, 2 * handles.length))
+        handles(fd) = handle
+      }
+      KqueueLoop.createAndRegisterEvents(kq, 1) { changes =>
+        KqueueLoop.addFile(changes(0), fd, read, clear = true)
+      }
+    case _ => throw new IllegalArgumentException(s"Not a handle of this backend's: $handle")
 
   /** Takes the filter off the kqueue, and the handle from `handles` unless this still listens for its other
     * direction.
@@ -72,13 +74,20 @@ trait KqueuePoller(maxEvents: Int) extends Poller, EventSource {
     * time. With no waiter the handle only counts it, for an op that is about to wait (see `awaitReadiness`), and to
     * give this listener up once that has happened too often.
     */
-  private def dispatch(fd: Int, read: Boolean): Unit = {
+  private def dispatch(fd: Int, read: Boolean, available: Long): Unit = {
     val handle = handlesLock.synchronized(if fd < handles.length then handles(fd) else null)
     if handle != null then
       val op = handle.readyWaiter(read, this)
       // If a cancel settles the op as its claim is given back, its performer clears it.
-      if op != null && !op.readyWakeup() then op.releaseReady(): Unit
+      if op != null && !op.readyWakeup(available, this) then op.releaseReady(): Unit
   }
+
+  /** How much `event` reports its descriptor ready for, bytes to read or room to write, unless it also reports the
+    * end of the stream or an error, which no later event follows.
+    */
+  private def available(event: KqueueLoop.Event): Long =
+    if KqueueLoop.isEOF(event) || KqueueLoop.isError(event) then ReadinessOp.Unknown
+    else KqueueLoop.data(event).toLong
 
   /** Set before the kqueue is closed, which the worker does as it leaves its loop. */
   @volatile private var closed = false
@@ -99,8 +108,11 @@ trait KqueuePoller(maxEvents: Int) extends Poller, EventSource {
       if !isEmpty() then 0L
       else if deadlineTask >= 0 then Math.max(deadlineTask - now, 0)
       else -1L
+    // First without waiting: under load something is there already, and a poll that may wait costs more, since it
+    // tells the GC that the thread is leaving (see `Unblocked`).
+    val ready = KqueueLoop.pollEventsNow(kq, events, maxEvents)
     val polled =
-      if timeout == 0 then KqueueLoop.pollEventsNow(kq, events, maxEvents)
+      if ready > 0 || timeout == 0 then ready
       else if timeout > 0 then
         KqueueLoop.pollEventsTimeout(
           kq,
@@ -114,8 +126,8 @@ trait KqueuePoller(maxEvents: Int) extends Poller, EventSource {
     while i < polled do
       val event = events(i)
       // A wake-up has nothing to hand over: the worker looks at its inbox and timers as `waitForDeadline` returns.
-      if KqueueLoop.isReadEvent(event) then dispatch(KqueueLoop.fileIdent(event), read = true)
-      else if KqueueLoop.isWriteEvent(event) then dispatch(KqueueLoop.fileIdent(event), read = false)
+      if KqueueLoop.isReadEvent(event) then dispatch(KqueueLoop.fileIdent(event), read = true, available(event))
+      else if KqueueLoop.isWriteEvent(event) then dispatch(KqueueLoop.fileIdent(event), read = false, available(event))
       i += 1
   }
 

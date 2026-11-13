@@ -23,9 +23,9 @@ class KqueueThreadedTimerSuite extends ThreadedTimerContract {
 //   val backend: Blocking = KqueueBackend
 // }
 
-// class KqueuePipeSuite extends PipeContract {
-//   val backend: Pipes = KqueueBackend
-// }
+class KqueuePipeSuite extends PipeContract {
+  val backend: KqueueBackend.type = KqueueBackend
+}
 
 // /** Runs the same stream contracts using TCP, without exposing Pipes to the suite. */
 // class KqueueSocketStreamSuite extends StreamContract with IpStreamFixture {
@@ -71,9 +71,9 @@ class KqueueThreadedTimerSuite extends ThreadedTimerContract {
 //       }
 // }
 
-// class KqueueSimpleIOSuite extends SimpleIOChecks with PipeFixture {
-//   val backend: Pipes = KqueueBackend
-// }
+class KqueueSimpleIOSuite extends SimpleIOChecks with PipeFixture {
+  val backend: KqueueBackend.type = KqueueBackend
+}
 
 // class KqueueSimpleIOSocketSuite extends SimpleIOChecks with IpStreamFixture {
 //   val backend: IpStreams = KqueueBackend

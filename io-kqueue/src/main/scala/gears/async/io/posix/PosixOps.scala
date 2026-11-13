@@ -11,8 +11,12 @@ trait PosixReadOps extends NonBlockingReadOps:
   type ReadableHandle <: PosixKernelHandle & BaseReadableHandle
   final def _readHandle(handle: ReadableHandle, buf: ByteBuffer): Int =
     NonBlocking.read(handle.fd, buf)
+  final def _readvHandle(handle: ReadableHandle, bufs: Array[ByteBuffer]): Int =
+    NonBlocking.readv(handle.fd, bufs)
 
 trait PosixWriteOps extends NonBlockingWriteOps:
   type WriteableHandle <: PosixKernelHandle & BaseWritableHandle
   final def _writeHandle(handle: WriteableHandle, buf: ByteBuffer): Int =
     NonBlocking.write(handle.fd, buf)
+  final def _writevHandle(handle: WriteableHandle, bufs: Array[ByteBuffer]): Int =
+    NonBlocking.writev(handle.fd, bufs)

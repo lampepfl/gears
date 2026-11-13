@@ -252,15 +252,8 @@ object WorkpoolScheduler {
       if !op.pollClose() then shouldWait = true
       if shouldWait then op.parkUntilSettled()
 
-    def performRead(
-        op: Op1 & AbstractReadOp[?, ThisWorkerSource]
-    )(using Async): Unit = performWhenReady(op)
-
-    def performWrite(
-        op: Op1 & AbstractWriteOp[?, ThisWorkerSource]
-    )(using Async): Unit = performWhenReady(op)
-
-    private def performWhenReady(op: Op1 & AbstractReadinessOp[?, ThisWorkerSource])(using Async): Unit =
+    /** Does a read or a write at once, or has it wait for its handle to be ready (see `performWhenReady`). */
+    def performWhenReady(op: Op1 & AbstractReadinessOp[?, ThisWorkerSource])(using Async): Unit =
       op.performWhenReady(asThisWorkerSource)
 
     def isEmpty(): Boolean = inbox.isEmpty() && ready.isEmpty()
