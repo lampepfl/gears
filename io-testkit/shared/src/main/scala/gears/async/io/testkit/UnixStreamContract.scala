@@ -13,19 +13,19 @@ trait UnixStreamContract extends FileSystemFixture {
   val backend: Backend & UnixStreams
 
   /** A listener on a Unix socket path, listening, from the `listen` op, whose failure is thrown. */
-  private def unixListen(io: Io[backend.type], address: UnixAddress)(using Async): backend.Listener = {
+  private def unixListen(io: Io[backend.type], address: UnixAddress)(using Async): backend.ops.Listener = {
     opening(io)(slot => io.backend.ops.listen(address, slot))
   }
 
   /** A connection to a Unix socket path, from the `connect` op, whose failure is thrown. */
-  private def unixConnect(io: Io[backend.type], address: UnixAddress)(using Async): backend.Connection = {
+  private def unixConnect(io: Io[backend.type], address: UnixAddress)(using Async): backend.ops.Connection = {
     opening(io)(slot => io.backend.ops.connect(address, slot))
   }
 
   /** A connection to `listener`, at `address`: its client's end and the one `listener` accepted. */
-  private def unixPair(io: Io[backend.type], listener: backend.Listener, address: UnixAddress)(using
+  private def unixPair(io: Io[backend.type], listener: backend.ops.Listener, address: UnixAddress)(using
       Async.Spawn
-  ): (backend.Connection, backend.Connection) = {
+  ): (backend.ops.Connection, backend.ops.Connection) = {
     val accepting = Future(opening(io)(slot => io.backend.ops.accept(listener, slot)))
     val client = unixConnect(io, address)
     (client, accepting.await)
@@ -85,7 +85,7 @@ trait UnixStreamContract extends FileSystemFixture {
         val second = unixListen(io, path) // replaces the first's socket file
         try {
           close(io, first)
-          val into = Slot[backend.Connection]()
+          val into = Slot[backend.ops.Connection]()
           val failure = attempt(io, io.backend.ops.connect(path, into))
           assertEquals(failure, null, s"the second listener's file was removed: $failure")
           close(io, into.clear())
@@ -99,7 +99,7 @@ trait UnixStreamContract extends FileSystemFixture {
       running { io ?=>
         val path = dir.resolve("data.txt")
         Files.write(path, "data".getBytes(StandardCharsets.UTF_8))
-        val into = Slot[backend.Listener]()
+        val into = Slot[backend.ops.Listener]()
         val failure = attempt(io, io.backend.ops.listen(UnixAddress(path.toString), into))
         assert(failure.isInstanceOf[java.io.IOException], String.valueOf(failure))
         assertEquals(Files.readString(path), "data")
@@ -109,8 +109,8 @@ trait UnixStreamContract extends FileSystemFixture {
 
   test("an empty Unix path, or one with a NUL, is refused as the op is built") {
     for path <- List("", "a\u0000b") do {
-      intercept[IllegalArgumentException](backend.ops.listen(UnixAddress(path), Slot[backend.Listener]()))
-      intercept[IllegalArgumentException](backend.ops.connect(UnixAddress(path), Slot[backend.Connection]()))
+      intercept[IllegalArgumentException](backend.ops.listen(UnixAddress(path), Slot[backend.ops.Listener]()))
+      intercept[IllegalArgumentException](backend.ops.connect(UnixAddress(path), Slot[backend.ops.Connection]()))
     }
   }
 

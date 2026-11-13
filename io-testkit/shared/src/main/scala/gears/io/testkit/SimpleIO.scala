@@ -45,42 +45,42 @@ object SimpleIO {
   }
 
   /** Connects a stream socket to `address` and returns it. */
-  def connect(address: IpSocketAddress)(using io: Io[IpStreams], async: Async): io.backend.Connection =
-    opened[io.backend.Connection](io.backend.ops.connect(address, _))
+  def connect(address: IpSocketAddress)(using io: Io[IpStreams], async: Async): io.backend.ops.Connection =
+    opened[io.backend.ops.Connection](io.backend.ops.connect(address, _))
 
   /** Connects a stream socket to a Unix socket path and returns it. */
-  def connect(address: UnixAddress)(using io: Io[UnixStreams], async: Async): io.backend.Connection =
-    opened[io.backend.Connection](io.backend.ops.connect(address, _))
+  def connect(address: UnixAddress)(using io: Io[UnixStreams], async: Async): io.backend.ops.Connection =
+    opened[io.backend.ops.Connection](io.backend.ops.connect(address, _))
 
   /** Listens on `address` and returns the listener. */
-  def listen(address: IpSocketAddress)(using io: Io[IpStreams], async: Async): io.backend.Listener =
-    opened[io.backend.Listener](io.backend.ops.listen(address, _))
+  def listen(address: IpSocketAddress)(using io: Io[IpStreams], async: Async): io.backend.ops.Listener =
+    opened[io.backend.ops.Listener](io.backend.ops.listen(address, _))
 
   /** Listens on a Unix socket path and returns the listener. */
-  def listen(address: UnixAddress)(using io: Io[UnixStreams], async: Async): io.backend.Listener =
-    opened[io.backend.Listener](io.backend.ops.listen(address, _))
+  def listen(address: UnixAddress)(using io: Io[UnixStreams], async: Async): io.backend.ops.Listener =
+    opened[io.backend.ops.Listener](io.backend.ops.listen(address, _))
 
   /** Opens a datagram socket bound to `local` and returns it. */
-  def bindDatagram(local: IpSocketAddress)(using io: Io[IpDatagrams], async: Async): io.backend.BoundDatagram =
-    opened[io.backend.BoundDatagram](io.backend.ops.bindDatagram(local, _))
+  def bindDatagram(local: IpSocketAddress)(using io: Io[IpDatagrams], async: Async): io.backend.ops.BoundDatagram =
+    opened[io.backend.ops.BoundDatagram](io.backend.ops.bindDatagram(local, _))
 
   /** Opens a datagram socket connected to `remote`, bound to `local` if given, and returns it. */
   def connectDatagram(local: IpSocketAddress | Null, remote: IpSocketAddress)(using
       io: Io[IpDatagrams],
       async: Async
-  ): io.backend.ConnectedDatagram =
-    opened[io.backend.ConnectedDatagram](io.backend.ops.connectDatagram(local, remote, _))
+  ): io.backend.ops.ConnectedDatagram =
+    opened[io.backend.ops.ConnectedDatagram](io.backend.ops.connectDatagram(local, remote, _))
 
   /** Opens a Unix datagram socket bound to `local` and returns it. */
-  def bindDatagram(local: UnixAddress)(using io: Io[UnixDatagrams], async: Async): io.backend.UnixBoundDatagram =
-    opened[io.backend.UnixBoundDatagram](io.backend.ops.bindDatagram(local, _))
+  def bindDatagram(local: UnixAddress)(using io: Io[UnixDatagrams], async: Async): io.backend.ops.UnixBoundDatagram =
+    opened[io.backend.ops.UnixBoundDatagram](io.backend.ops.bindDatagram(local, _))
 
   /** Opens a Unix datagram socket connected to `remote`, bound to `local` if given, and returns it. */
   def connectDatagram(local: UnixAddress | Null, remote: UnixAddress)(using
       io: Io[UnixDatagrams],
       async: Async
-  ): io.backend.UnixConnectedDatagram =
-    opened[io.backend.UnixConnectedDatagram](io.backend.ops.connectDatagram(local, remote, _))
+  ): io.backend.ops.UnixConnectedDatagram =
+    opened[io.backend.ops.UnixConnectedDatagram](io.backend.ops.connectDatagram(local, remote, _))
 
   /** Opens a pipe and returns its read end and its write end. */
   def pipe()(using io: Io[Pipes], async: Async): (io.Readable, io.Writable) = {
@@ -114,7 +114,7 @@ object SimpleIO {
   /** Shuts a connected stream down for writing: the peer reads what was written, then the end of the stream, and this
     * side may still read (see `StreamSocketOps.shutdownOutput`).
     */
-  def shutdownOutput(using io: Io[StreamSockets])(handle: io.backend.Connection)(using Async): Unit =
+  def shutdownOutput(using io: Io[StreamSockets])(handle: io.backend.ops.Connection)(using Async): Unit =
     io.perform(io.backend.ops.shutdownOutput(handle))
 
   /** Closes a connected stream without resetting it: shuts it down for writing, so that the peer reads all that was
@@ -124,7 +124,7 @@ object SimpleIO {
     */
   def closeGracefully(using
       io: Io[StreamSockets]
-  )(handle: io.backend.Connection, scratch: ByteBuffer, timeout: scala.concurrent.duration.FiniteDuration = Linger)(
+  )(handle: io.backend.ops.Connection, scratch: ByteBuffer, timeout: scala.concurrent.duration.FiniteDuration = Linger)(
       using Async
   ): Unit =
     try {
@@ -146,8 +146,8 @@ object SimpleIO {
     } finally io.perform(io.backend.ops.close(handle))
 
   /** Accepts one connection and returns it. */
-  def accept(using io: Io[StreamSockets])(listener: io.backend.Listener)(using Async): io.backend.Connection = {
-    val into = Slot[io.backend.Connection]()
+  def accept(using io: Io[StreamSockets])(listener: io.backend.ops.Listener)(using Async): io.backend.ops.Connection = {
+    val into = Slot[io.backend.ops.Connection]()
     io.perform(io.backend.ops.accept(listener, into))
     into.clear()
   }

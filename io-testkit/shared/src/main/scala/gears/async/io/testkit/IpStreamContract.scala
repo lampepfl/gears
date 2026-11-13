@@ -17,19 +17,19 @@ trait IpStreamContract extends IpStreamFixture {
   val backend: Backend & IpStreams
 
   /** A listener on `address`, listening, from the `listen` op, whose failure is thrown. */
-  private def tcpListen(io: Io[backend.type], address: IpSocketAddress)(using Async): backend.Listener = {
+  private def tcpListen(io: Io[backend.type], address: IpSocketAddress)(using Async): backend.ops.Listener = {
     opening(io)(slot => io.backend.ops.listen(address, slot))
   }
 
   /** A connection to `address`, from the `connect` op, whose failure is thrown. */
-  private def tcpConnect(io: Io[backend.type], address: IpSocketAddress)(using Async): backend.Connection = {
+  private def tcpConnect(io: Io[backend.type], address: IpSocketAddress)(using Async): backend.ops.Connection = {
     opening(io)(slot => io.backend.ops.connect(address, slot))
   }
 
   /** A connection to the listener on the loopback at `port`: its client's end and the one `listener` accepted. */
-  private def tcpPair(io: Io[backend.type], listener: backend.Listener, port: Int)(using
+  private def tcpPair(io: Io[backend.type], listener: backend.ops.Listener, port: Int)(using
       Async.Spawn
-  ): (backend.Connection, backend.Connection) = {
+  ): (backend.ops.Connection, backend.ops.Connection) = {
     pair(io, listener)(tcpConnect(io, IpSocketAddress(IpAddress.IPv4Loopback, port)))
   }
 
@@ -122,11 +122,11 @@ trait IpStreamContract extends IpStreamFixture {
 
   /** Runs `body` with `count` connections over loopback, each as its client and server ends, closed afterwards. */
   private def withConnections(io: Io[backend.type], count: Int)(
-      body: Seq[(backend.Connection, backend.Connection)] => Unit
+      body: Seq[(backend.ops.Connection, backend.ops.Connection)] => Unit
   )(using Async.Spawn): Unit = {
     val listener = tcpListen(io, IpSocketAddress(IpAddress.IPv4Loopback, 0))
     val port = io.backend.ops.localAddress(listener).asInstanceOf[IpSocketAddress].port
-    val pairs = scala.collection.mutable.ArrayBuffer.empty[(backend.Connection, backend.Connection)]
+    val pairs = scala.collection.mutable.ArrayBuffer.empty[(backend.ops.Connection, backend.ops.Connection)]
     try {
       for _ <- 1 to count do pairs += tcpPair(io, listener, port)
       body(pairs.toSeq)
@@ -265,7 +265,7 @@ trait IpStreamContract extends IpStreamFixture {
       val taken = tcpListen(io, IpSocketAddress(IpAddress.IPv4Loopback, 0))
       val port = io.backend.ops.localAddress(taken).asInstanceOf[IpSocketAddress].port
       try {
-        val into = Slot[backend.Listener]()
+        val into = Slot[backend.ops.Listener]()
         val failure = attempt(io, io.backend.ops.listen(IpSocketAddress(IpAddress.IPv4Loopback, port), into))
         assert(failure.isInstanceOf[IOException], String.valueOf(failure))
         intercept[IllegalStateException](into.clear())
@@ -280,7 +280,7 @@ trait IpStreamContract extends IpStreamFixture {
       try {
         // Connected before any accept: they wait in the listener's queue.
         val clients = (1 to 3).map(_ => tcpConnect(io, IpSocketAddress(IpAddress.IPv4Loopback, port)))
-        val accepted = Slot[Array[backend.Connection]]()
+        val accepted = Slot[Array[backend.ops.Connection]]()
         val accept = io.backend.ops.acceptAll(listener, accepted, max = 2)
         val servers = scala.collection.mutable.ArrayBuffer.empty[Handle]
         while servers.length < 3 do {
@@ -301,7 +301,7 @@ trait IpStreamContract extends IpStreamFixture {
       val listener = tcpListen(io, IpSocketAddress(IpAddress.IPv4Loopback, 0))
       val port = io.backend.ops.localAddress(listener).asInstanceOf[IpSocketAddress].port
       close(io, listener)
-      val into = Slot[backend.Connection]()
+      val into = Slot[backend.ops.Connection]()
       val failure = attempt(io, io.backend.ops.connect(IpSocketAddress(IpAddress.IPv4Loopback, port), into))
       assert(failure.isInstanceOf[IOException], String.valueOf(failure))
       intercept[IllegalStateException](into.clear())
@@ -325,12 +325,12 @@ trait IpStreamContract extends IpStreamFixture {
   test("an accept on a closed listener fails, as does one waiting when it is closed") {
     running { io ?=>
       val listener = tcpListen(io, IpSocketAddress(IpAddress.IPv4Loopback, 0))
-      val waiting = Future(io.perform(io.backend.ops.accept(listener, Slot[backend.Connection]())))
+      val waiting = Future(io.perform(io.backend.ops.accept(listener, Slot[backend.ops.Connection]())))
       io.perform(io.backend.ops.timer(20)) // for the accept to be waiting
       close(io, listener)
       val failure = waiting.awaitResult.failed.toOption.orNull
       assert(failure.isInstanceOf[ClosedChannelException], String.valueOf(failure))
-      val after = attempt(io, io.backend.ops.accept(listener, Slot[backend.Connection]()))
+      val after = attempt(io, io.backend.ops.accept(listener, Slot[backend.ops.Connection]()))
       assert(after.isInstanceOf[ClosedChannelException], String.valueOf(after))
     }
   }
@@ -406,7 +406,7 @@ trait IpStreamContract extends IpStreamFixture {
     * server's ends, closed after `body`.
     */
   private def connected(io: Io[backend.type], listening: SocketOptions, connecting: SocketOptions)(
-      body: (backend.Connection, backend.Connection) => Unit
+      body: (backend.ops.Connection, backend.ops.Connection) => Unit
   )(using Async.Spawn): Unit = {
     val listener =
       opening(io)(slot => io.backend.ops.listen(IpSocketAddress(IpAddress.IPv4Loopback, 0), listening, slot))
@@ -515,7 +515,7 @@ trait IpStreamContract extends IpStreamFixture {
         val address = io.backend.ops.localAddress(first).asInstanceOf[IpSocketAddress]
         val second = opening(io)(slot => io.backend.ops.listen(address, reuse, slot))
         try {
-          val refused = Slot[backend.Listener]()
+          val refused = Slot[backend.ops.Listener]()
           val failure = attempt(io, io.backend.ops.listen(address, refused))
           assert(failure.isInstanceOf[IOException], s"one without it: $failure")
         } finally close(io, second)
@@ -555,7 +555,7 @@ trait IpStreamContract extends IpStreamFixture {
       val port = io.backend.ops.localAddress(listener).asInstanceOf[IpSocketAddress].port
       try {
         val accepts = List.fill(3) {
-          val into = Slot[backend.Connection]()
+          val into = Slot[backend.ops.Connection]()
           (Future(io.perform(io.backend.ops.accept(listener, into))), into)
         }
         io.perform(io.backend.ops.timer(20))
@@ -587,15 +587,15 @@ trait IpStreamContract extends IpStreamFixture {
 
   test("connect, listen and shutdownOutput are one-shot: performed again, they throw IllegalStateException") {
     running { io ?=>
-      val into = Slot[backend.Listener]()
+      val into = Slot[backend.ops.Listener]()
       val listening = io.backend.ops.listen(IpSocketAddress(IpAddress.IPv4Loopback, 0), into)
       io.perform(listening)
       val listener = into.clear()
       val address = io.backend.ops.localAddress(listener).asInstanceOf[IpSocketAddress]
       intercept[IllegalStateException](io.perform(listening))
-      val accepted = Slot[backend.Connection]()
+      val accepted = Slot[backend.ops.Connection]()
       val accepting = Future(io.perform(io.backend.ops.accept(listener, accepted)))
-      val connected = Slot[backend.Connection]()
+      val connected = Slot[backend.ops.Connection]()
       val connecting = io.backend.ops.connect(address, connected)
       io.perform(connecting)
       intercept[IllegalStateException](io.perform(connecting))

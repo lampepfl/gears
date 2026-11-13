@@ -7,8 +7,8 @@ import gears.async.Future
 /** Listener and connected stream fixtures requiring only IpStreams. */
 trait IpStreamFixture extends StreamFixture {
   val backend: Backend & IpStreams
-  protected type Connection = backend.Connection
-  protected type Listener = backend.Listener
+  protected type Connection = backend.ops.Connection
+  protected type Listener = backend.ops.Listener
 
   protected trait Connect {
     def apply()(using Async): Connection

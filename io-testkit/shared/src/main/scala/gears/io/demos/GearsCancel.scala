@@ -125,7 +125,7 @@ object GearsCancel {
           } catch case _: IllegalStateException => true
         println(s"resubmitting the cancelled blocking task: ${if refused then "refused" else "accepted"}")
 
-        // Closing a handle fails the ops pending on it (`Ops.close`), so a future waiting on one is rejected by that
+        // Closing a handle fails the ops pending on it (`Interface.close`), so a future waiting on one is rejected by that
         // failure, with nothing left for a cancel to do.
         val (orphanRead, orphanWrite) = SimpleIO.pipe()
         val reading = Promise[Unit]()

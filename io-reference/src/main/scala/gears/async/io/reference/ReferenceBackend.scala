@@ -31,16 +31,6 @@ object ReferenceBackend
     with Pipes
     with Resolving
     with Blocking {
-  type Op = RefOp
-  type Handle = RefHandle
-  type Readable = ReadEnd
-  type Writable = WriteEnd
-  type Connection = ConnectionHandle
-  type Listener = ListenerHandle
-  type BoundDatagram = BoundDatagramHandle
-  type ConnectedDatagram = ConnectedDatagramHandle
-  type File = FileHandle
-
   val ops: ReferenceOps.type = ReferenceOps
 
   def pool(bufferSize: Int, buffers: Int): BufferPool = new RefPool(bufferSize, buffers)

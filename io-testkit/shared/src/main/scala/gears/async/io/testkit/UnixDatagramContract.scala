@@ -14,14 +14,17 @@ trait UnixDatagramContract extends FileSystemFixture {
   val backend: Backend & UnixDatagrams
 
   /** A Unix datagram socket bound to `local`, from the `bindDatagram` op, whose failure is thrown. */
-  protected def bindUnixDatagram(io: Io[backend.type], local: UnixAddress)(using Async): backend.UnixBoundDatagram = {
+  protected def bindUnixDatagram(
+      io: Io[backend.type],
+      local: UnixAddress
+  )(using Async): backend.ops.UnixBoundDatagram = {
     opening(io)(slot => backend.ops.bindDatagram(local, slot))
   }
 
   /** A Unix datagram socket connected to `remote`, from the `connectDatagram` op, whose failure is thrown. */
   protected def connectUnixDatagram(io: Io[backend.type], local: UnixAddress | Null, remote: UnixAddress)(using
       Async
-  ): backend.UnixConnectedDatagram = {
+  ): backend.ops.UnixConnectedDatagram = {
     opening(io)(slot => backend.ops.connectDatagram(local, remote, slot))
   }
 
@@ -146,7 +149,7 @@ trait UnixDatagramContract extends FileSystemFixture {
       backend.ops.bindDatagram(
         UnixAddress("/nowhere.sock"),
         SocketOptions.default.set(SocketOption.DontFragment, true),
-        Slot[backend.UnixBoundDatagram]()
+        Slot[backend.ops.UnixBoundDatagram]()
       )
     )
     assume(

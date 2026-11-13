@@ -33,12 +33,12 @@ final class Slot[A <: AnyRef] {
 trait Repeatable
 
 /** The ops every backend can build, as values of its `Op` type, on I/O objects named by its handles, values of its
-  * `Handle` type (see `Backend.Handle`): reads and writes of a stream, timers, and closing. Buffers are used between
-  * position and limit, and belong to the backend while the op is being performed, until `perform` returns. Any buffer
-  * is taken, on every backend: on the heap or not, and a read-only one to write from, though never to read into, which
-  * fails with an `IllegalArgumentException` as the op is built; a backend whose system calls need memory of their own
-  * copies through it, so that buffers with native memory behind them (`Backend.pool`'s, or on Scala Native a
-  * `PointerBuffer`'s) are the ones that cost no copy.
+  * `Handle` type: reads and writes of a stream, timers, and closing. Buffers are used between position and limit, and
+  * belong to the backend while the op is being performed, until `perform` returns. Any buffer is taken, on every
+  * backend: on the heap or not, and a read-only one to write from, though never to read into, which fails with an
+  * `IllegalArgumentException` as the op is built; a backend whose system calls need memory of their own copies through
+  * it, so that buffers with native memory behind them (`Backend.pool`'s, or on Scala Native a `PointerBuffer`'s) are
+  * the ones that cost no copy.
   *
   * A handle's kind is in its type, a subtype of `Handle`, so that an op on the wrong kind of handle does not compile: a
   * stream is read through a `Readable` and written through a `Writable`, the kinds every backend has. The other kinds
@@ -63,12 +63,18 @@ trait Repeatable
   * the queue. An op that is not `Repeatable`, every opener and `close` among them, is performed once; performed again
   * it throws `IllegalStateException`.
   */
-trait Ops {
+trait Interface {
 
-  /** What these ops are built as: the `Backend.Op` of the backend they are of, which its `ops` fix. */
+  /** What these ops are built as, and a backend performs: a type of the backend's own, so that ops of another backend
+    * are a different type.
+    */
   type Op
 
-  /** What names an I/O object of the backend these ops are of: its `Backend.Handle`, which the backend's `ops` fix. */
+  /** Names an open file, socket, or other I/O object of the backend: an object of the backend's own class, which only
+    * the backend can make, so that a program cannot forge a handle, nor pass one backend's handle to another, whose
+    * `Handle` is a different type. A program gets one from an op that opened something, and closes it with `close`; the
+    * backend never closes it.
+    */
   type Handle <: AnyRef
 
   /** A handle that can be read as a stream: a connection, a pipe's or FIFO's read end, or a file. */
@@ -148,7 +154,7 @@ trait Ops {
 }
 
 /** The ops of stream sockets, IP or Unix, once opened (see `IpStreamOps` and `UnixStreamOps`, which open them). */
-trait StreamSocketOps extends Ops {
+trait StreamSocketOps extends Interface {
 
   /** A connected stream socket, IP or Unix, from `connect` or `accept`: read, written and shut down for writing. */
   type Connection <: Readable & Writable
@@ -300,17 +306,17 @@ trait IpDatagramOps extends SocketOptionOps {
 /** Regular files as ops, for a backend that has them (see `RegularFiles`). A file is opened by an op, since opening
   * does disk I/O, for the path, as reads do, and some environments can only open asynchronously; its reads and writes
   * are positional, as `pread` and `pwrite` are, so that one handle serves concurrent reads at different offsets and no
-  * op depends on a shared file position, which io_uring has none of either. `Ops.read` and `Ops.write` on a file handle
-  * read and write at the position the handle carries, as a stream, for code that treats a file as one.
+  * op depends on a shared file position, which io_uring has none of either. `Interface.read` and `Interface.write` on a
+  * file handle read and write at the position the handle carries, as a stream, for code that treats a file as one.
   *
   * Cancellation follows `BlockingOps.blocking`: an op not yet started is skipped, one running finishes on its thread
   * with its result discarded, and `perform` returns once the thread has stopped touching the buffer. A close that comes
   * while an op on the file is in its system call waits for it, and the op fails as one on a closed handle does
-  * (`Ops.close`), on every backend, its buffer and offset left as they were even if the call finished first, as the JDK
-  * fails a call on a channel closed under it: a write's bytes may have reached the file. The close completes after the
-  * call, so the descriptor is never reused under the op.
+  * (`Interface.close`), on every backend, its buffer and offset left as they were even if the call finished first, as
+  * the JDK fails a call on a channel closed under it: a write's bytes may have reached the file. The close completes
+  * after the call, so the descriptor is never reused under the op.
   */
-trait FileOps extends Ops {
+trait FileOps extends Interface {
 
   /** A regular file, from `open`: read and written as a stream and at offsets, and synced. */
   type File <: Readable & Writable
@@ -324,16 +330,16 @@ trait FileOps extends Ops {
     */
   def open(path: String, write: Boolean, into: Slot[File]): Op
 
-  /** Fills `buf` from the file at `offset`, as `Ops.read` fills it from a stream: completes once at least one byte has
-    * been read, or at the end of the file, when nothing was added, so a caller performs it again with the offset
-    * advanced; and fails, as it does, if `buf` has no room. A negative `offset` is refused as the op is built, with an
-    * `IllegalArgumentException`, as it is for `write`.
+  /** Fills `buf` from the file at `offset`, as `Interface.read` fills it from a stream: completes once at least one
+    * byte has been read, or at the end of the file, when nothing was added, so a caller performs it again with the
+    * offset advanced; and fails, as it does, if `buf` has no room. A negative `offset` is refused as the op is built,
+    * with an `IllegalArgumentException`, as it is for `write`.
     */
   def read(handle: File, buf: ByteBuffer, offset: Long): Op & Repeatable
 
-  /** Drains `buf` into the file at `offset`, as `Ops.write` drains it into a stream: completes once at least one byte
-    * has been written, or, if nothing remains, without writing; perform it again while `buf` has bytes remaining, with
-    * the offset advanced.
+  /** Drains `buf` into the file at `offset`, as `Interface.write` drains it into a stream: completes once at least one
+    * byte has been written, or, if nothing remains, without writing; perform it again while `buf` has bytes remaining,
+    * with the offset advanced.
     */
   def write(handle: File, buf: ByteBuffer, offset: Long): Op & Repeatable
 
@@ -345,7 +351,7 @@ trait FileOps extends Ops {
 }
 
 /** Name resolution, for a backend that has it (see `Resolving`). */
-trait ResolveOps extends Ops {
+trait ResolveOps extends Interface {
 
   /** Resolves a host name, without blocking the caller's worker. Completes after writing its `IpAddress` values into
     * `into`, which must be empty; fails with an `IOException` if the name cannot be resolved, or has no IPv4 or IPv6
@@ -359,7 +365,7 @@ trait ResolveOps extends Ops {
 
 /** The ops of pipes, for a backend that has them (see `Pipes`): `read` on its read end, `write` on its write end.
   */
-trait PipeOps extends Ops {
+trait PipeOps extends Interface {
 
   /** Opens a pipe. Completes after writing its read end into `read` and its write end into `write`, which must both be
     * empty; one that fails or is cancelled leaves both empty and neither end open.
@@ -368,7 +374,7 @@ trait PipeOps extends Ops {
 }
 
 /** The ops of FIFOs, for a backend that has them (see `Fifos`), which are then read and written as pipes are. */
-trait FifoOps extends Ops {
+trait FifoOps extends Interface {
 
   /** Opens the FIFO at `path` for reading, without waiting for a writer, and completes after writing it into `into`,
     * which must be empty. Read before a writer has opened it, it is at its end.
@@ -408,7 +414,7 @@ trait UnixStreamOps extends StreamSocketOps with SocketOptionOps {
 }
 
 /** Blocking code as an op, for a backend that has it (see `Blocking`). */
-trait BlockingOps extends Ops {
+trait BlockingOps extends Interface {
 
   /** Runs `body` where it may block, off the threads that run the program's futures, completing when it returns.
     * Cancelling it skips `body` if it has not started and interrupts it if it is running; interruption is cooperative,

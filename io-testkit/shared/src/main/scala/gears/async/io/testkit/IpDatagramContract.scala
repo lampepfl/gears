@@ -18,14 +18,14 @@ trait IpDatagramContract extends ContractSuite {
   val backend: Backend & IpDatagrams
 
   /** A datagram socket bound to `local`, from the `bindDatagram` op, whose failure is thrown. */
-  protected def bindDatagram(io: Io[backend.type], local: IpSocketAddress)(using Async): backend.BoundDatagram = {
+  protected def bindDatagram(io: Io[backend.type], local: IpSocketAddress)(using Async): backend.ops.BoundDatagram = {
     opening(io)(slot => backend.ops.bindDatagram(local, slot))
   }
 
   /** A datagram socket connected to `remote`, from the `connectDatagram` op, whose failure is thrown. */
   protected def connectDatagram(io: Io[backend.type], local: IpSocketAddress | Null, remote: IpSocketAddress)(using
       Async
-  ): backend.ConnectedDatagram = {
+  ): backend.ops.ConnectedDatagram = {
     opening(io)(slot => backend.ops.connectDatagram(local, remote, slot))
   }
 
@@ -105,7 +105,7 @@ trait IpDatagramContract extends ContractSuite {
       val second = bindDatagram(io, IpSocketAddress(IpAddress.IPv4Loopback, 0))
       val secondPort = io.backend.ops.localAddress(second).port
       try {
-        def senderOf(to: backend.BoundDatagram)(using munit.Location): Int = {
+        def senderOf(to: backend.ops.BoundDatagram)(using munit.Location): Int = {
           val from = Slot[IpSocketAddress]()
           io.perform(backend.ops.receive(to, allocate(16), from))
           from.clear() match {
@@ -243,7 +243,7 @@ trait IpDatagramContract extends ContractSuite {
       val server = bindDatagram(io, IpSocketAddress(IpAddress.IPv4Loopback, 0))
       val port = io.backend.ops.localAddress(server).port
       try {
-        val into = Slot[backend.BoundDatagram]()
+        val into = Slot[backend.ops.BoundDatagram]()
         val failure = attempt(io, backend.ops.bindDatagram(IpSocketAddress(IpAddress.IPv4Loopback, port), into))
         assert(failure.isInstanceOf[IOException], String.valueOf(failure))
         intercept[IllegalStateException](into.clear())
@@ -303,7 +303,7 @@ trait IpDatagramContract extends ContractSuite {
   }
 
   /** A bound socket opening with `options` on loopback, port 0. */
-  private def boundWith(io: Io[backend.type], options: SocketOptions)(using Async): backend.BoundDatagram = {
+  private def boundWith(io: Io[backend.type], options: SocketOptions)(using Async): backend.ops.BoundDatagram = {
     opening(io)(slot => backend.ops.bindDatagram(IpSocketAddress(IpAddress.IPv4Loopback, 0), options, slot))
   }
 
@@ -377,7 +377,7 @@ trait IpDatagramContract extends ContractSuite {
         val port = backend.ops.localAddress(first)
         val second = opening(io)(slot => backend.ops.bindDatagram(port, reuse, slot))
         try {
-          val refused = Slot[backend.BoundDatagram]()
+          val refused = Slot[backend.ops.BoundDatagram]()
           val failure = attempt(io, backend.ops.bindDatagram(port, refused))
           assert(failure.isInstanceOf[IOException], s"one without it: $failure")
           intercept[IllegalArgumentException](backend.ops.setOption(second, SocketOption.ReusePort, false))
@@ -518,12 +518,12 @@ trait IpDatagramContract extends ContractSuite {
   }
 
   test("a datagram socket refuses local and remote addresses of different families") {
-    val ops = backend.ops
+    val ops: backend.ops.type = backend.ops
     intercept[IllegalArgumentException](
       ops.connectDatagram(
         IpSocketAddress(IpAddress.IPv4Loopback, 0),
         IpSocketAddress(IpAddress.IPv6Loopback, 9),
-        Slot[backend.ConnectedDatagram]()
+        Slot[backend.ops.ConnectedDatagram]()
       )
     )
   }
@@ -554,7 +554,7 @@ trait IpDatagramContract extends ContractSuite {
 
   test("binding a datagram socket is one-shot") {
     running { io ?=>
-      val bound = Slot[backend.BoundDatagram]()
+      val bound = Slot[backend.ops.BoundDatagram]()
       val binding = io.backend.ops.bindDatagram(IpSocketAddress(IpAddress.IPv4Loopback, 0), bound)
       io.perform(binding)
       intercept[IllegalStateException](io.perform(binding))

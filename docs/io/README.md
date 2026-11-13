@@ -8,7 +8,7 @@ it. Futures, groups, `sleep` and `withTimeout` work as anywhere in gears, `sleep
 ## Where to start reading
 
 1. **The public interface**, in `shared/src/main/scala/async/io/`: `Io.scala` (running a program and performing ops),
-   `Backend.scala` (backends and their capabilities), `Ops.scala` (every op and the rules they share),
+   `Backend.scala` (backends and their capabilities), `Interface.scala` (every op and the rules they share),
    `SocketOptions.scala`, `Addresses.scala`, `Deadline.scala` and `BufferPool.scala`. All a program sees.
 2. **The contract suites**, in `io-testkit/`: what every backend must do, each check a program over the backend
    through `perform`. `OpsContract` checks core timers and program execution using only `Backend`.
@@ -22,7 +22,7 @@ it. Futures, groups, `sleep` and `withTimeout` work as anywhere in gears, `sleep
 
 | where | holds | depends on |
 | --- | --- | --- |
-| `gears.async.io` (core, `shared/`) | the interface: `Io` and `Io.run`, `Backend` and its capabilities, `Ops`, `Slot`, addresses, socket options, `Deadline`, `BufferPool` | the rest of gears |
+| `gears.async.io` (core, `shared/`) | the interface: `Io` and `Io.run`, `Backend` and its capabilities, `Interface`, `Slot`, addresses, socket options, `Deadline`, `BufferPool` | the rest of gears |
 | `ioTestkit` (`io-testkit/`, JVM, Scala Native and Scala.js) | the contract suites and `BufferArena` (`gears.async.io.testkit`), `SimpleIO` with `SimpleIOChecks` (`gears.io.testkit`), and the gears demos (`gears.io.demos`) with their command line, `DemoCommands` | core, munit, mainargs |
 | `ioReference` (`io-reference/`, JVM) | the reference backend, `gears.async.io.reference.ReferenceBackend`, and its suites | core, the testkit's contracts |
 | `ioReferenceDemos` (`io-reference/demos/`) | the demos over the reference backend: `ioReferenceDemos/run <command>` | the reference backend, the testkit |
@@ -75,14 +75,14 @@ share `SimpleIOChecks.scala` without combining their capability requirements.
 
 - **A capability** is what a backend can do, a trait each backend mixes in and a program asks for by intersection:
   `IpStreams`, `IpDatagrams` (`IpSockets` is both), `UnixStreams`, `UnixDatagrams`, `RegularFiles`, `Pipes`, `Fifos`,
-  `Resolving`, `Blocking`. Each narrows the backend's `Ops`; the base `Ops`, which every backend has, is read, write,
+  `Resolving`, `Blocking`. Each narrows the backend's `ops`; the base `Interface`, which every backend has, is read, write,
   the pooled read, timers and close. A capability is a `Backend` itself, so a helper asks for `IpStreams` or
   `IpStreams & RegularFiles`, and a backend without one, such as a browser's, is refused when compiling.
-- **A handle's kind** is in its type, a subtype of the backend's `Handle`. Every backend has `Readable` and `Writable`
-  streams; the other kinds are declared by the capability that opens them: `StreamSockets` a `Connection` (both, and
-  shut down for writing) and a `Listener`, `IpDatagrams` a `BoundDatagram` and a `ConnectedDatagram`, `UnixDatagrams`
-  their Unix ones, `RegularFiles` a `File`. So a backend without a capability has no such kind, and a program names it
-  through the backend it asked for: `io.backend.Connection` for an `Io[IpStreams]`. Every handle is opened by an op of
+- **A handle's kind** is in its type, a subtype of its interface's `Handle`. Every backend has `Readable` and `Writable`
+  streams; the other kinds are declared by the ops of the capability that opens them: `StreamSocketOps` a `Connection` (both, and
+  shut down for writing) and a `Listener`, `IpDatagramOps` a `BoundDatagram` and a `ConnectedDatagram`, `UnixDatagramOps`
+  their Unix ones, `FileOps` a `File`. So a backend without a capability has no such kind, and a program names it
+  through the backend it asked for: `io.backend.ops.Connection` for an `Io[IpStreams]`. Every handle is opened by an op of
   the capability that has it, which writes it into a slot; an op takes the kind it works on, so an op on the wrong kind
   does not compile.
 - **`Io`** is where a program's ops run: `Io[B]` has a backend, `backend: B`, and adds only `perform`. `Io.run` gives
@@ -92,7 +92,7 @@ share `SimpleIOChecks.scala` without combining their capability requirements.
 ## A program
 
 ```scala
-def echo(using io: Io[IpStreams])(client: io.backend.Connection)(using Async): Unit = {
+def echo(using io: Io[IpStreams])(client: io.backend.ops.Connection)(using Async): Unit = {
   val buf = ...
   val read = io.backend.ops.read(client, buf) // an op is a mutable record the caller owns, and reuses
   val write = io.backend.ops.write(client, buf)
@@ -106,7 +106,7 @@ Io.run(using ReferenceBackend) { ... echo(client) ... }
 ```
 
 `Io.run` returns what the program returns, as `Async.blocking` does, and gives it its `Io` as a context parameter
-beside `Async.Spawn`. An op's type and a handle's are path-dependent on the `Io` (`io.Op`, `io.backend.Connection`), so
+beside `Async.Spawn`. An op's type and a handle's are path-dependent on the `Io` (`io.Op`, `io.backend.ops.Connection`), so
 a method taking a handle takes the `Io` first. Ops in flight together are futures performing them
 (`Future(io.perform(op))`), raced, awaited and cancelled as futures are. A time limit is `io.perform(op, 2.seconds)`.
 
@@ -122,11 +122,11 @@ Each is stated on the interface where it applies, and checked by the contract su
   a buffer with no room or a read-only one. I/O failures are `IOException`s.
 - **One op at a time on a stream's direction**: a second read, or write, pending is refused, since two would take or
   interleave the stream's bytes. A datagram socket's sends and receives and a listener's accepts, each whole, take
-  turns instead, in the order they came (`Ops`).
-- **Any buffer** is taken, on the heap or not (`Ops`).
+  turns instead, in the order they came (`Interface`).
+- **Any buffer** is taken, on the heap or not (`Interface`).
 - **Options** are given as a socket opens, `NoDelay` on unless set off; what a backend supports, for each kind of
   socket, is asked of it when the program runs (`SocketOptionOps`).
-- **Closing** fails the ops waiting on the handle and frees the port or path (`Ops.close`). The ops it ends, and any op
+- **Closing** fails the ops waiting on the handle and frees the port or path (`Interface.close`). The ops it ends, and any op
   performed on the handle after, a second close too, fail with a closed channel's failure, `ClosedChannelException`
   naming the handle, on every backend.
 

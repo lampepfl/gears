@@ -19,14 +19,7 @@ trait Io[+B <: Backend] extends AsyncOperations {
   val backend: B
 
   /** What this performs: its backend's ops. */
-  type Op = backend.Op
-
-  /** The handles of the backend's I/O objects, and the kinds every backend has (see `Ops`): the kinds a capability adds
-    * are its backend's, `io.backend.Connection` for one with stream sockets.
-    */
-  type Handle = backend.Handle
-  type Readable = backend.Readable
-  type Writable = backend.Writable
+  type Op = backend.ops.Op
 
   /** Performs `op` and suspends the caller until it is done: it returns when the op finishes, throws its failure, or
     * throws `CancellationException` when the caller is cancelled first. Whichever way it ends, once it returns or
