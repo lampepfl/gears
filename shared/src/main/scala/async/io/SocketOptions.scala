@@ -181,7 +181,7 @@ object SocketOptions {
 /** The socket options ops, for a backend with sockets: what it supports, for each kind of socket, and reading and
   * changing them on an open socket. Plain methods, not ops: every backend answers at once.
   */
-trait SocketOptionOps extends Interface {
+trait SocketOptionOps extends Handles {
 
   /** Whether this backend, on this host, has `option` for sockets of kind `kind`: whether an opener of one given it
     * applies it rather than failing. False for an option that does not apply to the kind (`SocketOption.appliesTo`).
