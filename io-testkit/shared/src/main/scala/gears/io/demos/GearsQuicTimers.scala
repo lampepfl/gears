@@ -111,7 +111,7 @@ object GearsQuicTimers {
     */
   private def serve(
       io: Io[IpDatagrams],
-      socket: io.backend.BoundDatagram,
+      socket: io.backend.ops.BoundDatagram,
       counts: Counts,
       closed: UnboundedChannel[Long],
       buffer: Int => ByteBuffer
@@ -148,7 +148,7 @@ object GearsQuicTimers {
     */
   private def drive(
       io: Io[IpDatagrams],
-      socket: io.backend.BoundDatagram,
+      socket: io.backend.ops.BoundDatagram,
       id: Long,
       peer: IpSocketAddress,
       inbox: UnboundedChannel[Event],

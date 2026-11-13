@@ -21,14 +21,14 @@ trait FileContract extends FileSystemFixture {
   val backend: Backend & RegularFiles
 
   /** Opens the file at `path` with the `open` op, throwing its failure. */
-  protected def openFile(io: Io[backend.type], path: Path, write: Boolean)(using Async): backend.File = {
+  protected def openFile(io: Io[backend.type], path: Path, write: Boolean)(using Async): backend.ops.File = {
     opening(io)(slot => backend.ops.open(path.toString, write, slot))
   }
 
   test("open refuses what is not a regular file, leaving its slot empty") {
     withTempDir { dir =>
       running { io ?=>
-        val into = Slot[backend.File]()
+        val into = Slot[backend.ops.File]()
         val failure = attempt(io, backend.ops.open(dir.toString, write = false, into))
         assert(failure.isInstanceOf[IOException], String.valueOf(failure))
         intercept[IllegalStateException](into.clear())
@@ -106,7 +106,7 @@ trait FileContract extends FileSystemFixture {
     withTempDir { dir =>
       running { io ?=>
         val missing = dir.resolve("missing.txt")
-        val into = Slot[backend.File]()
+        val into = Slot[backend.ops.File]()
         val failure = attempt(io, backend.ops.open(missing.toString, write = true, into))
         assert(failure.isInstanceOf[IOException], String.valueOf(failure))
         assert(!Files.exists(missing), "open for writing created the file")
@@ -141,7 +141,9 @@ trait FileContract extends FileSystemFixture {
           intercept[IllegalArgumentException](backend.ops.read(file, allocate(8), -1))
           intercept[IllegalArgumentException](backend.ops.write(file, bytes("x"), -1))
         } finally close(io, file)
-        intercept[IllegalArgumentException](backend.ops.open(s"$path\u0000.txt", write = false, Slot[backend.File]()))
+        intercept[IllegalArgumentException](
+          backend.ops.open(s"$path\u0000.txt", write = false, Slot[backend.ops.File]())
+        )
       }
     }
   }

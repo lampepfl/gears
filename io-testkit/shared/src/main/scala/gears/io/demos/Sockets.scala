@@ -20,14 +20,14 @@ type StreamAddress = IpSocketAddress | UnixAddress
 object Sockets {
 
   /** A stream socket connected to `address`, of either family, on a backend with both. */
-  def connect(address: StreamAddress)(using io: Io[IpStreams & UnixStreams], async: Async): io.backend.Connection =
+  def connect(address: StreamAddress)(using io: Io[IpStreams & UnixStreams], async: Async): io.backend.ops.Connection =
     address match {
       case unix: UnixAddress   => SimpleIO.connect(unix)
       case ip: IpSocketAddress => SimpleIO.connect(ip)
     }
 
   /** A listener on `address`, of either family, listening, on a backend with both. */
-  def listen(address: StreamAddress)(using io: Io[IpStreams & UnixStreams], async: Async): io.backend.Listener =
+  def listen(address: StreamAddress)(using io: Io[IpStreams & UnixStreams], async: Async): io.backend.ops.Listener =
     address match {
       case unix: UnixAddress   => SimpleIO.listen(unix)
       case ip: IpSocketAddress => SimpleIO.listen(ip)
@@ -41,14 +41,14 @@ object Sockets {
     */
   def serve(using
       io: Io[StreamSockets]
-  )(listener: io.backend.Listener)(serve: io.backend.Connection => Async.Spawn ?=> Unit)(using
+  )(listener: io.backend.ops.Listener)(serve: io.backend.ops.Connection => Async.Spawn ?=> Unit)(using
       Async.Spawn
   ): Unit = {
-    val accepted = gears.async.io.Slot[Array[io.backend.Connection]]()
+    val accepted = gears.async.io.Slot[Array[io.backend.ops.Connection]]()
     val accept = io.backend.ops.acceptAll(listener, accepted, max = 64)
     var failing = false
     while true do {
-      val clients: Array[io.backend.Connection] | Null =
+      val clients: Array[io.backend.ops.Connection] | Null =
         try {
           io.perform(accept)
           failing = false
@@ -79,20 +79,20 @@ sealed trait Endpoint[-B <: StreamSockets] {
   def address: StreamAddress
 
   /** A stream socket connected to `address`. */
-  def connect()(using io: Io[B], async: Async): io.backend.Connection
+  def connect()(using io: Io[B], async: Async): io.backend.ops.Connection
 
   /** A listener on `address`, listening. */
-  def listen()(using io: Io[B], async: Async): io.backend.Listener
+  def listen()(using io: Io[B], async: Async): io.backend.ops.Listener
 }
 
 object Endpoint {
   final case class Ip(address: IpSocketAddress) extends Endpoint[IpStreams] {
-    def connect()(using io: Io[IpStreams], async: Async): io.backend.Connection = SimpleIO.connect(address)
-    def listen()(using io: Io[IpStreams], async: Async): io.backend.Listener = SimpleIO.listen(address)
+    def connect()(using io: Io[IpStreams], async: Async): io.backend.ops.Connection = SimpleIO.connect(address)
+    def listen()(using io: Io[IpStreams], async: Async): io.backend.ops.Listener = SimpleIO.listen(address)
   }
 
   final case class Unix(address: UnixAddress) extends Endpoint[UnixStreams] {
-    def connect()(using io: Io[UnixStreams], async: Async): io.backend.Connection = SimpleIO.connect(address)
-    def listen()(using io: Io[UnixStreams], async: Async): io.backend.Listener = SimpleIO.listen(address)
+    def connect()(using io: Io[UnixStreams], async: Async): io.backend.ops.Connection = SimpleIO.connect(address)
+    def listen()(using io: Io[UnixStreams], async: Async): io.backend.ops.Listener = SimpleIO.listen(address)
   }
 }

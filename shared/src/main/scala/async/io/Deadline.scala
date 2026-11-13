@@ -1,6 +1,6 @@
 package gears.async.io
 
-/** A timer whose deadline may be moved while it is pending (see `Ops.deadlineTimer`). */
+/** A timer whose deadline may be moved while it is pending (see `Interface.deadlineTimer`). */
 trait Deadline {
 
   /** The deadline, on `System.nanoTime`'s clock. */

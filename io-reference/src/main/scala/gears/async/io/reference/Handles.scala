@@ -20,7 +20,7 @@ import java.nio.file.attribute.BasicFileAttributes
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
-/** The failure of an op on a closed handle, naming it: a closed channel's, as `Ops.close` has it. */
+/** The failure of an op on a closed handle, naming it: a closed channel's, as `Interface.close` has it. */
 final class HandleClosedException(handle: AnyRef) extends ClosedChannelException {
   override def getMessage: String = s"$handle is closed"
 }

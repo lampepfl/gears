@@ -23,9 +23,9 @@ trait ContractSuite extends FunSuite {
   val backend: Backend
 
   /** The backend's handles, and the kinds every backend has. */
-  protected type Handle = backend.Handle
-  protected type Readable = backend.Readable
-  protected type Writable = backend.Writable
+  protected type Handle = backend.ops.Handle
+  protected type Readable = backend.ops.Readable
+  protected type Writable = backend.ops.Writable
 
   /** Runs `body` as a program over `backend`, given the backend's `Io`, and returns its result: `Io.run`, unless a
     * backend's suite runs its programs another way.

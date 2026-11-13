@@ -59,7 +59,7 @@ object GearsKeyValue {
     */
   private def readCommands(
       io: Io[StreamSockets],
-      fd: io.backend.Connection,
+      fd: io.backend.ops.Connection,
       inbox: ByteBuffer,
       store: Store,
       replies: BufferedChannel[Array[Byte]]
@@ -91,7 +91,7 @@ object GearsKeyValue {
   /** Writes reply batches in order, one buffer at a time, until the end marker. */
   private def writeReplies(
       io: Io[StreamSockets],
-      fd: io.backend.Connection,
+      fd: io.backend.ops.Connection,
       outbox: ByteBuffer,
       replies: BufferedChannel[Array[Byte]]
   )(using
@@ -117,7 +117,7 @@ object GearsKeyValue {
   }
 
   /** One client connection: reading and writing run at the same time on the same socket. */
-  private def session(io: Io[StreamSockets], fd: io.backend.Connection, store: Store)(using Async): Unit = {
+  private def session(io: Io[StreamSockets], fd: io.backend.ops.Connection, store: Store)(using Async): Unit = {
     val arena = BufferArena.open()
     try {
       val inbox = arena.allocate(BufferSize)
