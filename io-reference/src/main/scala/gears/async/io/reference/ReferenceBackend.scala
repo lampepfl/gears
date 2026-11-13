@@ -23,23 +23,16 @@ import scala.concurrent.duration.FiniteDuration
   * It has IP stream and datagram sockets, Unix stream sockets, regular files, pipes, name resolution and blocking ops:
   * what the JDK has, which has no Unix datagram sockets and no way to open a FIFO without blocking.
   */
-object ReferenceBackend
-    extends IpStreams
-    with IpDatagrams
-    with UnixStreams
-    with RegularFiles
-    with Pipes
-    with Resolving
-    with Blocking {
+object ReferenceBackend extends Backend {
   val ops: ReferenceOps.type = ReferenceOps
 
   def pool(bufferSize: Int, buffers: Int): BufferPool = new RefPool(bufferSize, buffers)
 
   /** Runs `program` on gears' virtual threads, each op performed by the future performing it. */
-  private[io] def run[T](program: Io[this.type] ?=> Async.Spawn ?=> T): T = {
+  private[io] def run[T](program: Io[ops.type] ?=> Async.Spawn ?=> T): T = {
     given VThreadSupport.type = VThreadSupport
     given VThreadScheduler.type = VThreadScheduler
-    val io: Io[this.type] = new Io[this.type] {
+    val io: Io[ops.type] = new Io[ops.type] {
       val backend: ReferenceBackend.type = ReferenceBackend
       private[io] def performWithin(op: RefOp, timeoutMillis: Int)(using Async): Unit = op.perform(timeoutMillis)
     }
@@ -50,13 +43,13 @@ object ReferenceBackend
 
 /** The reference backend's ops, each checked as it is built. */
 object ReferenceOps
-    extends IpStreamOps
-    with UnixStreamOps
-    with IpDatagramOps
-    with FileOps
-    with PipeOps
-    with ResolveOps
-    with BlockingOps {
+    extends IpStreams
+    with UnixStreams
+    with IpDatagrams
+    with RegularFiles
+    with Pipes
+    with Resolving
+    with Blocking {
   import SocketOption.Kind
 
   type Op = RefOp

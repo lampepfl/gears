@@ -15,15 +15,18 @@ import scala.util.Failure
   * programs over the backend (see `ContractSuite`).
   */
 trait IpDatagramContract extends ContractSuite {
-  val backend: Backend & IpDatagrams
+  val backend: Backend { val ops: IpDatagrams }
 
   /** A datagram socket bound to `local`, from the `bindDatagram` op, whose failure is thrown. */
-  protected def bindDatagram(io: Io[backend.type], local: IpSocketAddress)(using Async): backend.ops.BoundDatagram = {
+  protected def bindDatagram(
+      io: Io[backend.ops.type],
+      local: IpSocketAddress
+  )(using Async): backend.ops.BoundDatagram = {
     opening(io)(slot => backend.ops.bindDatagram(local, slot))
   }
 
   /** A datagram socket connected to `remote`, from the `connectDatagram` op, whose failure is thrown. */
-  protected def connectDatagram(io: Io[backend.type], local: IpSocketAddress | Null, remote: IpSocketAddress)(using
+  protected def connectDatagram(io: Io[backend.ops.type], local: IpSocketAddress | Null, remote: IpSocketAddress)(using
       Async
   ): backend.ops.ConnectedDatagram = {
     opening(io)(slot => backend.ops.connectDatagram(local, remote, slot))
@@ -303,7 +306,7 @@ trait IpDatagramContract extends ContractSuite {
   }
 
   /** A bound socket opening with `options` on loopback, port 0. */
-  private def boundWith(io: Io[backend.type], options: SocketOptions)(using Async): backend.ops.BoundDatagram = {
+  private def boundWith(io: Io[backend.ops.type], options: SocketOptions)(using Async): backend.ops.BoundDatagram = {
     opening(io)(slot => backend.ops.bindDatagram(IpSocketAddress(IpAddress.IPv4Loopback, 0), options, slot))
   }
 

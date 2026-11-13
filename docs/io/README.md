@@ -73,19 +73,19 @@ share `SimpleIOChecks.scala` without combining their capability requirements.
 
 ## The concepts
 
-- **A capability** is what a backend can do, a trait each backend mixes in and a program asks for by intersection:
+- **A capability** is what a backend can do, an `Interface` its `ops` mix in and a program asks for by intersection:
   `IpStreams`, `IpDatagrams` (`IpSockets` is both), `UnixStreams`, `UnixDatagrams`, `RegularFiles`, `Pipes`, `Fifos`,
-  `Resolving`, `Blocking`. Each narrows the backend's `ops`; the base `Interface`, which every backend has, is read, write,
-  the pooled read, timers and close. A capability is a `Backend` itself, so a helper asks for `IpStreams` or
-  `IpStreams & RegularFiles`, and a backend without one, such as a browser's, is refused when compiling.
+  `Resolving`, `Blocking`. Each extends the base `Interface`, which every backend has: read, write,
+  the pooled read, timers and close. A helper asks for `Io[IpStreams]` or
+  `Io[IpStreams & RegularFiles]`, and a backend without one, such as a browser's, is refused when compiling.
 - **A handle's kind** is in its type, a subtype of its interface's `Handle`. Every backend has `Readable` and `Writable`
-  streams; the other kinds are declared by the ops of the capability that opens them: `StreamSocketOps` a `Connection` (both, and
-  shut down for writing) and a `Listener`, `IpDatagramOps` a `BoundDatagram` and a `ConnectedDatagram`, `UnixDatagramOps`
-  their Unix ones, `FileOps` a `File`. So a backend without a capability has no such kind, and a program names it
+  streams; the other kinds are declared by the ops of the capability that opens them: `StreamSockets` a `Connection` (both, and
+  shut down for writing) and a `Listener`, `IpDatagrams` a `BoundDatagram` and a `ConnectedDatagram`, `UnixDatagrams`
+  their Unix ones, `RegularFiles` a `File`. So a backend without a capability has no such kind, and a program names it
   through the backend it asked for: `io.backend.ops.Connection` for an `Io[IpStreams]`. Every handle is opened by an op of
   the capability that has it, which writes it into a slot; an op takes the kind it works on, so an op on the wrong kind
   does not compile.
-- **`Io`** is where a program's ops run: `Io[B]` has a backend, `backend: B`, and adds only `perform`. `Io.run` gives
+- **`Io`** is where a program's ops run: `Io[I]` has a backend whose ops are an `I`, `backend: Backend { val ops: I }`, and adds only `perform`. `Io.run` gives
   it to the program; it is the program's gears `AsyncOperations` too. How it performs, and on which threads the
   program runs, is the backend's.
 

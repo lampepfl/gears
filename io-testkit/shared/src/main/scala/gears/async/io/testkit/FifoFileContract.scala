@@ -7,7 +7,7 @@ import java.nio.file.Files
 
 /** Checks that distinguish FIFOs from regular files, requiring both capabilities. */
 trait FifoFileContract extends FileSystemFixture {
-  val backend: Backend & Fifos & RegularFiles
+  val backend: Backend { val ops: Fifos & RegularFiles }
 
   test("open refuses a FIFO, and openFifoForReading a regular file") {
     withTempDir { dir =>

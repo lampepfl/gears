@@ -2,7 +2,7 @@ package gears.io.demos
 
 import gears.async.Async
 import gears.async.Future
-import gears.async.io.Backend
+import gears.async.io.Interface
 import gears.async.io.Io
 import gears.async.io.IpDatagrams
 import gears.async.io.IpSocketAddress
@@ -54,7 +54,7 @@ object GearsDatagram {
   /** Sends `request` with `send`, then waits for the reply with `receive`, each performed once, within five seconds.
     */
   private def exchange(
-      io: Io[Backend],
+      io: Io[Interface],
       remote: Any,
       send: io.Op,
       receive: io.Op,
@@ -106,7 +106,7 @@ object GearsDatagram {
   /** Receives packets with `receive`, one repeatable op, and echoes each, keeping it until the whole echo has gone,
     * with a new op per sender from `reply`.
     */
-  private def echo(io: Io[Backend], receive: io.Op, packet: ByteBuffer, reply: () => io.Op)(using Async): Unit = {
+  private def echo(io: Io[Interface], receive: io.Op, packet: ByteBuffer, reply: () => io.Op)(using Async): Unit = {
     println("Datagram socket is now waiting for messages.")
     while true do {
       io.perform(receive)

@@ -24,7 +24,7 @@ trait StreamContract extends StreamFixture {
     }.mkString
 
   /** A pooled read of what `out` is sent, `text`, from `in`: what it received, which the caller releases. */
-  private def receivedOf(io: Io[backend.type], in: Readable, out: Writable, pool: BufferPool, text: String)(using
+  private def receivedOf(io: Io[backend.ops.type], in: Readable, out: Writable, pool: BufferPool, text: String)(using
       Async
   ): Received = {
     writeAll(io, out, bytes(text))

@@ -98,7 +98,7 @@ trait SimpleIOChecks extends StreamFixture {
 
 /** Public API IP stream helpers, requiring only IpStreams. */
 trait SimpleIOIpStreamChecks extends ContractSuite {
-  val backend: Backend & gears.async.io.IpStreams
+  val backend: Backend { val ops: gears.async.io.IpStreams }
 
   test("a graceful close delivers the whole reply to a client that sent more than the server read") {
     val replySize = 256 * 1024
@@ -137,7 +137,7 @@ trait SimpleIOIpStreamChecks extends ContractSuite {
 
 /** Public API resolution helpers, requiring only Resolving. */
 trait SimpleIOResolveChecks extends ContractSuite {
-  val backend: Backend & Resolving
+  val backend: Backend { val ops: Resolving }
 
   test("SimpleIO resolves localhost") {
     val resolved = running { io ?=> SimpleIO.resolve("localhost") }

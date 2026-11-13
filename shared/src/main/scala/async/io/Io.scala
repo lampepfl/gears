@@ -5,18 +5,18 @@ import _root_.gears.async.AsyncOperations
 
 /** What a program performs its ops with: where its backend's ops run. It has a backend (`backend`), whose ops, handles
   * and capabilities are what the program uses, and adds only where they run: `perform`. It is not a backend and has no
-  * ops of its own; its type names the backend it is over, so a program's helper asks for an `Io` over a backend with
-  * the capabilities it needs, `Io[IpSockets]`, and one over a backend with more, `Io[IpSockets & RegularFiles]`, is one
-  * of those. A program gets its `Io` from `Io.run`, since a backend alone performs nothing; how it performs an op is
-  * the backend's. A program's `Io` is lexical: a future it spawns captures it, and runs where the program runs.
+  * ops of its own; its type names the interface of its backend's ops, so a program's helper asks for an `Io` with the
+  * capabilities it needs, `Io[IpSockets]`, and one with more, `Io[IpSockets & RegularFiles]`, is one of those. A
+  * program gets its `Io` from `Io.run`, since a backend alone performs nothing; how it performs an op is the backend's.
+  * A program's `Io` is lexical: a future it spawns captures it, and runs where the program runs.
   *
   * It is also the program's gears `AsyncOperations`: `sleep` is a timer op performed, so gears' `sleep`, `withTimeout`
   * and `Timer` run on the backend's timers.
   */
-trait Io[+B <: Backend] extends AsyncOperations {
+trait Io[+I <: Interface] extends AsyncOperations {
 
   /** The backend whose ops this performs. */
-  val backend: B
+  val backend: Backend { val ops: I }
 
   /** What this performs: its backend's ops. */
   type Op = backend.ops.Op
@@ -61,6 +61,6 @@ object Io {
     * beside its `Async`, where the backend runs it (`Backend.run`). A program's `Io` is not a `Backend`, so starting a
     * run over one is refused when compiling.
     */
-  def run[T](using backend: Backend)(program: Io[backend.type] ?=> Async.Spawn ?=> T): T =
+  def run[T](using backend: Backend)(program: Io[backend.ops.type] ?=> Async.Spawn ?=> T): T =
     backend.run(program)
 }
