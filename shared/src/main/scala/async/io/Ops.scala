@@ -33,14 +33,14 @@ final class Slot[A <: AnyRef] {
 trait Repeatable
 
 /** The ops every backend can build, as values of its `Op` type, on I/O objects named by its handles, values of its
-  * `Handle` type, `H` here (see `Backend.Handle`): reads and writes of a stream, timers, and closing. Buffers are used
-  * between position and limit, and belong to the backend while the op is being performed, until `perform` returns. Any
-  * buffer is taken, on every backend: on the heap or not, and a read-only one to write from, though never to read into,
-  * which fails with an `IllegalArgumentException` as the op is built; a backend whose system calls need memory of their
-  * own copies through it, so that buffers with native memory behind them (`Backend.pool`'s, or on Scala Native a
+  * `Handle` type (see `Backend.Handle`): reads and writes of a stream, timers, and closing. Buffers are used between
+  * position and limit, and belong to the backend while the op is being performed, until `perform` returns. Any buffer
+  * is taken, on every backend: on the heap or not, and a read-only one to write from, though never to read into, which
+  * fails with an `IllegalArgumentException` as the op is built; a backend whose system calls need memory of their own
+  * copies through it, so that buffers with native memory behind them (`Backend.pool`'s, or on Scala Native a
   * `PointerBuffer`'s) are the ones that cost no copy.
   *
-  * A handle's kind is in its type, a subtype of `H`, so that an op on the wrong kind of handle does not compile: a
+  * A handle's kind is in its type, a subtype of `Handle`, so that an op on the wrong kind of handle does not compile: a
   * stream is read through a `Readable` and written through a `Writable`, the kinds every backend has. The other kinds
   * are declared by the ops of the capability that opens them: a `Connection` (a connected stream socket, from
   * `StreamSocketOps`) and a `File` (from `FileOps`) are both readable and writable; a `Listener` accepts; datagram
@@ -63,13 +63,16 @@ trait Repeatable
   * the queue. An op that is not `Repeatable`, every opener and `close` among them, is performed once; performed again
   * it throws `IllegalStateException`.
   */
-trait Ops[Op, H <: AnyRef] {
+trait Ops[Op] {
+
+  /** What names an I/O object of the backend these ops are of: its `Backend.Handle`, which the backend's `ops` fix. */
+  type Handle <: AnyRef
 
   /** A handle that can be read as a stream: a connection, a pipe's or FIFO's read end, or a file. */
-  type Readable <: H
+  type Readable <: Handle
 
   /** A handle that can be written as a stream: a connection, a pipe's or FIFO's write end, or a file. */
-  type Writable <: H
+  type Writable <: Handle
 
   /** Fills `buf`, which must have room. Completes once at least one byte has been read, or at end of stream, when
     * nothing was added: compare the buffer's position before and after. A read into a buffer with no room fails with an
@@ -138,17 +141,17 @@ trait Ops[Op, H <: AnyRef] {
     * loses its file. Fails if `handle` is not open, with the failure an op submitted on a closed handle has: a closed
     * channel's, as above.
     */
-  def close(handle: H): Op
+  def close(handle: Handle): Op
 }
 
 /** The ops of stream sockets, IP or Unix, once opened (see `IpStreamOps` and `UnixStreamOps`, which open them). */
-trait StreamSocketOps[Op, H <: AnyRef] extends Ops[Op, H] {
+trait StreamSocketOps[Op] extends Ops[Op] {
 
   /** A connected stream socket, IP or Unix, from `connect` or `accept`: read, written and shut down for writing. */
   type Connection <: Readable & Writable
 
   /** A listening stream socket, IP or Unix, from `listen`, which accepts connections. */
-  type Listener <: H
+  type Listener <: Handle
 
   /** Accepts one connection on a listening socket. Completes after writing the new connection into `into`, which must
     * be empty.
@@ -186,7 +189,7 @@ trait StreamSocketOps[Op, H <: AnyRef] extends Ops[Op, H] {
 /** The ops that open IP stream sockets, for a backend that has them (see `IpStreams`), used once open as any stream
   * socket is (`StreamSocketOps`, and `read` and `write`).
   */
-trait IpStreamOps[Op, H <: AnyRef] extends StreamSocketOps[Op, H] with SocketOptionOps[Op, H] {
+trait IpStreamOps[Op] extends StreamSocketOps[Op] with SocketOptionOps[Op] {
 
   /** Opens a stream socket and connects it to `address`. Completes once connected, after writing the socket into
     * `into`, which must be empty; fails if the connection is refused or cannot be made.
@@ -215,13 +218,13 @@ trait IpStreamOps[Op, H <: AnyRef] extends StreamSocketOps[Op, H] with SocketOpt
   * receiving from and sending to anyone (`bindDatagram`), or connected, to one peer (`connectDatagram`): two kinds, so
   * that sending a connected socket's packet elsewhere, or a bound socket's to nobody, does not compile.
   */
-trait IpDatagramOps[Op, H <: AnyRef] extends SocketOptionOps[Op, H] {
+trait IpDatagramOps[Op] extends SocketOptionOps[Op] {
 
   /** An IP datagram socket bound to a local address, from `bindDatagram`, which sends to and receives from anyone. */
-  type BoundDatagram <: H
+  type BoundDatagram <: Handle
 
   /** An IP datagram socket connected to one peer, from `connectDatagram`, which sends to and receives from it alone. */
-  type ConnectedDatagram <: H
+  type ConnectedDatagram <: Handle
 
   /** Opens a datagram socket bound to `local`, port 0 for any. Completes once it is bound, after writing it into
     * `into`, which must be empty; fails if `local` is in use or cannot be bound.
@@ -304,7 +307,7 @@ trait IpDatagramOps[Op, H <: AnyRef] extends SocketOptionOps[Op, H] {
   * fails a call on a channel closed under it: a write's bytes may have reached the file. The close completes after the
   * call, so the descriptor is never reused under the op.
   */
-trait FileOps[Op, H <: AnyRef] extends Ops[Op, H] {
+trait FileOps[Op] extends Ops[Op] {
 
   /** A regular file, from `open`: read and written as a stream and at offsets, and synced. */
   type File <: Readable & Writable
@@ -339,7 +342,7 @@ trait FileOps[Op, H <: AnyRef] extends Ops[Op, H] {
 }
 
 /** Name resolution, for a backend that has it (see `Resolving`). */
-trait ResolveOps[Op, H <: AnyRef] extends Ops[Op, H] {
+trait ResolveOps[Op] extends Ops[Op] {
 
   /** Resolves a host name, without blocking the caller's worker. Completes after writing its `IpAddress` values into
     * `into`, which must be empty; fails with an `IOException` if the name cannot be resolved, or has no IPv4 or IPv6
@@ -353,7 +356,7 @@ trait ResolveOps[Op, H <: AnyRef] extends Ops[Op, H] {
 
 /** The ops of pipes, for a backend that has them (see `Pipes`): `read` on its read end, `write` on its write end.
   */
-trait PipeOps[Op, H <: AnyRef] extends Ops[Op, H] {
+trait PipeOps[Op] extends Ops[Op] {
 
   /** Opens a pipe. Completes after writing its read end into `read` and its write end into `write`, which must both be
     * empty; one that fails or is cancelled leaves both empty and neither end open.
@@ -362,7 +365,7 @@ trait PipeOps[Op, H <: AnyRef] extends Ops[Op, H] {
 }
 
 /** The ops of FIFOs, for a backend that has them (see `Fifos`), which are then read and written as pipes are. */
-trait FifoOps[Op, H <: AnyRef] extends Ops[Op, H] {
+trait FifoOps[Op] extends Ops[Op] {
 
   /** Opens the FIFO at `path` for reading, without waiting for a writer, and completes after writing it into `into`,
     * which must be empty. Read before a writer has opened it, it is at its end.
@@ -378,7 +381,7 @@ trait FifoOps[Op, H <: AnyRef] extends Ops[Op, H] {
 /** The ops of Unix domain stream sockets, for a backend that has them (see `UnixStreams`): opened here, and used as IP
   * stream sockets are, by the stream ops (`StreamSocketOps`, and `read` and `write`).
   */
-trait UnixStreamOps[Op, H <: AnyRef] extends StreamSocketOps[Op, H] with SocketOptionOps[Op, H] {
+trait UnixStreamOps[Op] extends StreamSocketOps[Op] with SocketOptionOps[Op] {
 
   /** Opens a stream socket and connects it to `address`, as `IpStreamOps.connect` does to an IP address. */
   final def connect(address: UnixAddress, into: Slot[Connection]): Op = connect(address, SocketOptions.default, into)
@@ -402,7 +405,7 @@ trait UnixStreamOps[Op, H <: AnyRef] extends StreamSocketOps[Op, H] with SocketO
 }
 
 /** Blocking code as an op, for a backend that has it (see `Blocking`). */
-trait BlockingOps[Op, H <: AnyRef] extends Ops[Op, H] {
+trait BlockingOps[Op] extends Ops[Op] {
 
   /** Runs `body` where it may block, off the threads that run the program's futures, completing when it returns.
     * Cancelling it skips `body` if it has not started and interrupts it if it is running; interruption is cooperative,
@@ -421,13 +424,13 @@ trait BlockingOps[Op, H <: AnyRef] extends Ops[Op, H] {
 /** The ops of Unix domain datagram sockets, for a backend that has them (see `UnixDatagrams`), as `IpDatagramOps` are
   * for IP ones: bound, or connected to one peer.
   */
-trait UnixDatagramOps[Op, H <: AnyRef] extends SocketOptionOps[Op, H] {
+trait UnixDatagramOps[Op] extends SocketOptionOps[Op] {
 
   /** A Unix domain datagram socket bound to a path, from `bindDatagram`, as `IpDatagramOps.BoundDatagram` is for IP. */
-  type UnixBoundDatagram <: H
+  type UnixBoundDatagram <: Handle
 
   /** A Unix domain datagram socket connected to one peer, from `connectDatagram`, as `ConnectedDatagram` is for IP. */
-  type UnixConnectedDatagram <: H
+  type UnixConnectedDatagram <: Handle
 
   /** Opens a datagram socket bound to `local`, as `IpDatagramOps.bindDatagram` does. */
   final def bindDatagram(local: UnixAddress, into: Slot[UnixBoundDatagram]): Op =

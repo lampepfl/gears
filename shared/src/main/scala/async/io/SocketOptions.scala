@@ -181,7 +181,7 @@ object SocketOptions {
 /** The socket options ops, for a backend with sockets: what it supports, for each kind of socket, and reading and
   * changing them on an open socket. Plain methods, not ops: every backend answers at once.
   */
-trait SocketOptionOps[Op, H <: AnyRef] extends Ops[Op, H] {
+trait SocketOptionOps[Op] extends Ops[Op] {
 
   /** Whether this backend, on this host, has `option` for sockets of kind `kind`: whether an opener of one given it
     * applies it rather than failing. False for an option that does not apply to the kind (`SocketOption.appliesTo`).
@@ -197,10 +197,10 @@ trait SocketOptionOps[Op, H <: AnyRef] extends Ops[Op, H] {
     * with an `IllegalArgumentException` for an option the backend does not support or that does not apply to the
     * socket, and an `IOException` on a closed handle.
     */
-  def option[V](handle: H, option: SocketOption[V]): V
+  def option[V](handle: Handle, option: SocketOption[V]): V
 
   /** Sets `option` to `value` on the open socket `handle`, failing as `option` does, and with an
     * `IllegalArgumentException` for one it cannot change (`canChange`).
     */
-  def setOption[V](handle: H, option: SocketOption[V], value: V): Unit
+  def setOption[V](handle: Handle, option: SocketOption[V], value: V): Unit
 }
