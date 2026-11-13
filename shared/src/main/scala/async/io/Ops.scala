@@ -63,7 +63,10 @@ trait Repeatable
   * the queue. An op that is not `Repeatable`, every opener and `close` among them, is performed once; performed again
   * it throws `IllegalStateException`.
   */
-trait Ops[Op] {
+trait Ops {
+
+  /** What these ops are built as: the `Backend.Op` of the backend they are of, which its `ops` fix. */
+  type Op
 
   /** What names an I/O object of the backend these ops are of: its `Backend.Handle`, which the backend's `ops` fix. */
   type Handle <: AnyRef
@@ -145,7 +148,7 @@ trait Ops[Op] {
 }
 
 /** The ops of stream sockets, IP or Unix, once opened (see `IpStreamOps` and `UnixStreamOps`, which open them). */
-trait StreamSocketOps[Op] extends Ops[Op] {
+trait StreamSocketOps extends Ops {
 
   /** A connected stream socket, IP or Unix, from `connect` or `accept`: read, written and shut down for writing. */
   type Connection <: Readable & Writable
@@ -189,7 +192,7 @@ trait StreamSocketOps[Op] extends Ops[Op] {
 /** The ops that open IP stream sockets, for a backend that has them (see `IpStreams`), used once open as any stream
   * socket is (`StreamSocketOps`, and `read` and `write`).
   */
-trait IpStreamOps[Op] extends StreamSocketOps[Op] with SocketOptionOps[Op] {
+trait IpStreamOps extends StreamSocketOps with SocketOptionOps {
 
   /** Opens a stream socket and connects it to `address`. Completes once connected, after writing the socket into
     * `into`, which must be empty; fails if the connection is refused or cannot be made.
@@ -218,7 +221,7 @@ trait IpStreamOps[Op] extends StreamSocketOps[Op] with SocketOptionOps[Op] {
   * receiving from and sending to anyone (`bindDatagram`), or connected, to one peer (`connectDatagram`): two kinds, so
   * that sending a connected socket's packet elsewhere, or a bound socket's to nobody, does not compile.
   */
-trait IpDatagramOps[Op] extends SocketOptionOps[Op] {
+trait IpDatagramOps extends SocketOptionOps {
 
   /** An IP datagram socket bound to a local address, from `bindDatagram`, which sends to and receives from anyone. */
   type BoundDatagram <: Handle
@@ -307,7 +310,7 @@ trait IpDatagramOps[Op] extends SocketOptionOps[Op] {
   * fails a call on a channel closed under it: a write's bytes may have reached the file. The close completes after the
   * call, so the descriptor is never reused under the op.
   */
-trait FileOps[Op] extends Ops[Op] {
+trait FileOps extends Ops {
 
   /** A regular file, from `open`: read and written as a stream and at offsets, and synced. */
   type File <: Readable & Writable
@@ -342,7 +345,7 @@ trait FileOps[Op] extends Ops[Op] {
 }
 
 /** Name resolution, for a backend that has it (see `Resolving`). */
-trait ResolveOps[Op] extends Ops[Op] {
+trait ResolveOps extends Ops {
 
   /** Resolves a host name, without blocking the caller's worker. Completes after writing its `IpAddress` values into
     * `into`, which must be empty; fails with an `IOException` if the name cannot be resolved, or has no IPv4 or IPv6
@@ -356,7 +359,7 @@ trait ResolveOps[Op] extends Ops[Op] {
 
 /** The ops of pipes, for a backend that has them (see `Pipes`): `read` on its read end, `write` on its write end.
   */
-trait PipeOps[Op] extends Ops[Op] {
+trait PipeOps extends Ops {
 
   /** Opens a pipe. Completes after writing its read end into `read` and its write end into `write`, which must both be
     * empty; one that fails or is cancelled leaves both empty and neither end open.
@@ -365,7 +368,7 @@ trait PipeOps[Op] extends Ops[Op] {
 }
 
 /** The ops of FIFOs, for a backend that has them (see `Fifos`), which are then read and written as pipes are. */
-trait FifoOps[Op] extends Ops[Op] {
+trait FifoOps extends Ops {
 
   /** Opens the FIFO at `path` for reading, without waiting for a writer, and completes after writing it into `into`,
     * which must be empty. Read before a writer has opened it, it is at its end.
@@ -381,7 +384,7 @@ trait FifoOps[Op] extends Ops[Op] {
 /** The ops of Unix domain stream sockets, for a backend that has them (see `UnixStreams`): opened here, and used as IP
   * stream sockets are, by the stream ops (`StreamSocketOps`, and `read` and `write`).
   */
-trait UnixStreamOps[Op] extends StreamSocketOps[Op] with SocketOptionOps[Op] {
+trait UnixStreamOps extends StreamSocketOps with SocketOptionOps {
 
   /** Opens a stream socket and connects it to `address`, as `IpStreamOps.connect` does to an IP address. */
   final def connect(address: UnixAddress, into: Slot[Connection]): Op = connect(address, SocketOptions.default, into)
@@ -405,7 +408,7 @@ trait UnixStreamOps[Op] extends StreamSocketOps[Op] with SocketOptionOps[Op] {
 }
 
 /** Blocking code as an op, for a backend that has it (see `Blocking`). */
-trait BlockingOps[Op] extends Ops[Op] {
+trait BlockingOps extends Ops {
 
   /** Runs `body` where it may block, off the threads that run the program's futures, completing when it returns.
     * Cancelling it skips `body` if it has not started and interrupts it if it is running; interruption is cooperative,
@@ -424,7 +427,7 @@ trait BlockingOps[Op] extends Ops[Op] {
 /** The ops of Unix domain datagram sockets, for a backend that has them (see `UnixDatagrams`), as `IpDatagramOps` are
   * for IP ones: bound, or connected to one peer.
   */
-trait UnixDatagramOps[Op] extends SocketOptionOps[Op] {
+trait UnixDatagramOps extends SocketOptionOps {
 
   /** A Unix domain datagram socket bound to a path, from `bindDatagram`, as `IpDatagramOps.BoundDatagram` is for IP. */
   type UnixBoundDatagram <: Handle
