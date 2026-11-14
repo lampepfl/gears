@@ -119,7 +119,8 @@ lazy val ioReferenceDemos =
     )
     .dependsOn(ioReference, ioTestkit.jvm)
 
-// A high performance native backend for macOS and FreeBSD.
+// A high performance native backend for macOS and FreeBSD. Its native resources override `setjmp` and `longjmp` in
+// every program that links it with `_setjmp` and `_longjmp`, which leave the signal mask alone (see setjmp_override.S).
 lazy val ioKqueue =
   (project in file("io-kqueue"))
     .enablePlugins(ScalaNativePlugin)

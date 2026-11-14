@@ -24,13 +24,16 @@ trait KqueuePoller(maxEvents: Int) extends Poller, EventSource {
     KqueueLoop.addUser(events(0), WakeEvent) // edge-triggered, registered once
   }
 
-  /** Guards `handles`, which a close clears from its own thread. */
+  /** Guards writes to `handles`, which a close clears from its own thread. This worker's thread, which alone puts
+    * handles there, reads it without: all it can miss is that a close has just taken one out, and a closed handle has
+    * no waiter.
+    */
   private val handlesLock = new Object
 
   /** The handle this kqueue listens for, by descriptor number, which is all an event names. The waiters are the
     * handle's own.
     */
-  private var handles = new Array[KqueueHandle | Null](64)
+  @volatile private var handles = new Array[KqueueHandle | Null](64)
 
   /** Has the kqueue report `handle` each time it becomes readable, or writable, and at once if it is now: an
     * edge-triggered filter, added once and left until the handle closes, when the kernel takes it with the
@@ -75,7 +78,8 @@ trait KqueuePoller(maxEvents: Int) extends Poller, EventSource {
     * give this listener up once that has happened too often.
     */
   private def dispatch(fd: Int, read: Boolean, available: Long): Unit = {
-    val handle = handlesLock.synchronized(if fd < handles.length then handles(fd) else null)
+    val current = handles
+    val handle = if fd < current.length then current(fd) else null
     if handle != null then
       val op = handle.readyWaiter(read, this)
       // If a cancel settles the op as its claim is given back, its performer clears it.

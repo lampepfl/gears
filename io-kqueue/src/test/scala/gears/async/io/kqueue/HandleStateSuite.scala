@@ -128,7 +128,7 @@ class HandleStateSuite extends munit.FunSuite {
     val op = FakeOp()
     def tick = handle.readinessTick(read = true)
     assert(!handle.drainedAt(read = true, tick))
-    handle.markDrained(read = true, source) // not its listener: nothing is known
+    handle.waiterDone(read = true, op, source, drained = true) // not its listener: nothing is known
     assert(!handle.drainedAt(read = true, tick))
 
     val waitedAt = tick
@@ -138,9 +138,9 @@ class HandleStateSuite extends munit.FunSuite {
 
     assert(handle.readyWaiter(read = true, source) eq op)
     assert(!handle.drainedAt(read = true, tick), "a report means there may be something")
-    handle.markDrained(read = true, source)
+    handle.waiterDone(read = true, op, source, drained = true)
     assert(handle.drainedAt(read = true, tick), "the op took all that was reported")
-    assert(handle.clearWaiter(read = true, op))
+    assert(!handle.clearWaiter(read = true, op), "an op that is done is no longer the waiter")
 
     // An op that read the tick before a report is told to look again, not to wait.
     val stale = tick
@@ -148,7 +148,7 @@ class HandleStateSuite extends munit.FunSuite {
     assert(handle.awaitReadiness(read = true, op, stale, source) == null)
 
     while source.stopped.get() == 0 do handle.readyWaiter(read = true, source): Unit
-    handle.markDrained(read = true, source)
+    handle.waiterDone(read = true, op, source, drained = true)
     assert(!handle.drainedAt(read = true, tick), "no listener would report anything new")
   }
 

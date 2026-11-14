@@ -15,7 +15,7 @@ trait ReadinessOp:
     * was not ready after all, which leaves the op claimed, still the handle's waiter, for the event source to
     * `releaseReady`. `available` is how much the source reported the handle ready for, bytes to read or room to
     * write, as it took the report, or `ReadinessOp.Unknown`: an op that takes all of it tells the handle it is
-    * drained (`BaseHandle.markDrained`).
+    * drained (`BaseHandle.waiterDone`).
     */
   def readyWakeup(available: Long, source: EventSource): Boolean
 

@@ -252,4 +252,28 @@ class KqueueSchedulingSuite extends munit.FunSuite {
       for _ <- 1 to 100 do summon[Async].scheduler.execute(() => spin(100_000L))
     }
   }
+
+  test("a future spawned from a worker runs on that worker, when it is the only one waiting there") {
+    onPool(4) {
+      var elsewhere = 0
+      var i = 0
+      while i < 200 do
+        val here = Thread.currentThread().getName()
+        // Whichever worker resumes this future after the await is the one that spawns next.
+        if Future(Thread.currentThread().getName()).await != here then elsewhere += 1
+        i += 1
+      assertEquals(elsewhere, 0)
+    }
+  }
+
+  test("futures a worker can't get to are taken by workers with nothing to do") {
+    onPool(4) {
+      val work = 20L // ms each, keeping its worker
+      val start = System.nanoTime()
+      val threads = List.fill(16)(Future { Thread.sleep(work); Thread.currentThread().getName() }).map(_.await)
+      val took = (System.nanoTime() - start) / 1_000_000L
+      assert(threads.distinct.size > 1, s"all ran on ${threads.distinct}")
+      assert(took < 16 * work, s"took ${took}ms, as long as one worker alone")
+    }
+  }
 }

@@ -52,11 +52,17 @@ class TimerHeapOpSuite extends munit.FunSuite {
     case _                       => false
   }
 
-  /** An op entered as its performer would, which links it to a group of its own. */
+  /** An op entered as its performer would, and waited on: it is linked to a group of its own for as long as it
+    * waits, as `parkUntilSettled` links it.
+    */
   private def entered[T <: CountingTimer](timer: T)(body: T => Async ?=> Unit): Unit =
     Async.blocking {
       Async.group {
-        timer.performWith(body(timer))
+        timer.performWith {
+          timer.link()
+          try body(timer)
+          finally timer.unlink()
+        }
       }
     }
 
@@ -171,8 +177,11 @@ class TimerHeapOpSuite extends munit.FunSuite {
     Async.blocking {
       Async.group {
         timer.performWith {
-          timer.onComplete(receiver(result => outcome = Some(result)))
-          summon[Async].group.cancel()
+          timer.link()
+          try
+            timer.onComplete(receiver(result => outcome = Some(result)))
+            summon[Async].group.cancel()
+          finally timer.unlink()
         }
       }
     }

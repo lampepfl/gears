@@ -116,12 +116,13 @@ trait BaseHandle extends HandleState.Holder:
     */
   def drainedAt(read: Boolean, tick: Int): Boolean
 
-  /** `source`, reporting the handle ready for so much, saw an op take all of it: the handle is drained until its
-    * next report.
+  /** `op`, which `source` claimed with `readyWaiter`, has done its work, and is no longer the handle's waiter. If
+    * `drained`, it took all that `source` reported the handle ready for, and the handle is drained until its next
+    * report.
     */
-  def markDrained(read: Boolean, source: EventSource): Unit
+  def waiterDone(read: Boolean, op: ReadinessOp, source: EventSource, drained: Boolean): Unit
 
-  /** Whether `op` was the handle's waiter, and no longer is. */
+  /** Whether `op` was the handle's waiter, and no longer is. Costs nothing for an op that is not. */
   def clearWaiter(read: Boolean, op: ReadinessOp): Boolean
 
   /** `source` reports the handle ready: its waiter, claimed with `claimAtReady` while still its waiter, or null if
@@ -191,8 +192,8 @@ abstract class AbstractBaseHandle extends BaseHandle:
   /** The ops waiting for the handle to be readable, and to be writable. Guarded by this handle's monitor, which is
     * what makes a claim and a clear exclude each other (see `ReadinessOp.claimAtReady`).
     */
-  private var readWaiter: ReadinessOp | Null = null
-  private var writeWaiter: ReadinessOp | Null = null
+  @volatile private var readWaiter: ReadinessOp | Null = null
+  @volatile private var writeWaiter: ReadinessOp | Null = null
 
   /** The event source listening for the handle to be readable, and to be writable: the first an op waited on, and
     * the same one for as long as ops go on waiting (see `idleReportsLimit`), so that only it is woken for the handle.
@@ -226,9 +227,17 @@ abstract class AbstractBaseHandle extends BaseHandle:
   private def forgetDrained(read: Boolean): Unit =
     if read then readDrainedTick = readTick - 1 else writeDrainedTick = writeTick - 1
 
-  final def markDrained(read: Boolean, source: EventSource): Unit = synchronized {
-    if (if read then readListener else writeListener) eq source then
-      if read then readDrainedTick = readTick else writeDrainedTick = writeTick
+  /** The tick of the listener's last report, which `waiterDone` marks the handle drained as of. Guarded by this
+    * handle's monitor.
+    */
+  private var readReportTick = 0
+  private var writeReportTick = 0
+
+  final def waiterDone(read: Boolean, op: ReadinessOp, source: EventSource, drained: Boolean): Unit = synchronized {
+    if read then { if readWaiter eq op then readWaiter = null }
+    else if writeWaiter eq op then writeWaiter = null
+    if drained && ((if read then readListener else writeListener) eq source) then
+      if read then readDrainedTick = readReportTick else writeDrainedTick = writeReportTick
   }
 
   final def awaitReadiness(read: Boolean, op: ReadinessOp, sinceTick: Int, self: EventSource): EventSource | Null = {
@@ -265,11 +274,16 @@ abstract class AbstractBaseHandle extends BaseHandle:
     listener
   }
 
-  final def clearWaiter(read: Boolean, op: ReadinessOp): Boolean = synchronized {
-    val held = (if read then readWaiter else writeWaiter) eq op
-    if held then if read then readWaiter = null else writeWaiter = null
-    held
-  }
+  final def clearWaiter(read: Boolean, op: ReadinessOp): Boolean =
+    // Looked at first without the lock: an op done by its handle's listener was taken out by `waiterDone`, and only
+    // its own performer, here, puts it in.
+    if (if read then readWaiter else writeWaiter) ne op then false
+    else
+      synchronized {
+        val held = (if read then readWaiter else writeWaiter) eq op
+        if held then if read then readWaiter = null else writeWaiter = null
+        held
+      }
 
   /** How many times in a row the handle is reported ready with no op waiting before it gives up its listener. Until
     * then an op that waits costs no system call; past it, the handle is taken to be one whose ops find it ready, for
@@ -302,6 +316,7 @@ abstract class AbstractBaseHandle extends BaseHandle:
           null
         else
           if read then readIdleReports = 0 else writeIdleReports = 0
+          if read then readReportTick = readTick else writeReportTick = writeTick
           if op.claimAtReady() then op else null
     }
     if stop then source.stopListening(this, read)

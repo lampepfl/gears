@@ -58,9 +58,18 @@ sealed abstract class AbstractTimerHeapOp
     * while registering its listener leaves through the fibre's boundary, not through this call.
     */
   def parkUntilSettled()(using Async): Unit = {
+    exposed = true
     val out = state.get() match
       case out: Outcome => out
-      case _            => summon[Async].withGroup(CompletionGroup.Unlinked).await(this)
+      case _            =>
+        // Linked to the performer's group only now that it waits, and for as long: an op that is done as it is
+        // tried has nothing a cancel could stop. A group already cancelled cancels the op as it is linked.
+        link()
+        try
+          state.get() match
+            case out: Outcome => out
+            case _            => summon[Async].withGroup(CompletionGroup.Unlinked).await(this)
+        finally unlink()
     out match
       case result: Try[Unit]             => result.get
       case TimerHeapOp.CancelledSentinel => throw new CancellationException()
@@ -79,11 +88,44 @@ sealed abstract class AbstractTimerHeapOp
     case TimerHeapOp.CloseFired        => false
     case TimerHeapOp.ReadyFired        => false
 
-  /** Forgets the last performance's outcome, for the next performance of a repeatable op. */
-  protected def reset(): Unit = synchronized {
+  /** Forgets the last performance's outcome, for the next performance of a repeatable op. Without the op's lock:
+    * whatever could settle the last performance was done with it before its performer left (see `leave`), and a
+    * cancel only counts while the op is linked, which between performances it is not.
+    */
+  protected def reset(): Unit = {
+    exposed = false
     _cancelLater = false
     state.set(null)
   }
+
+  /** The worker this performance's future is pinned to, or null (see `WorkpoolScheduler.pinned`). */
+  @volatile private var pinHome: AnyRef | Null = null
+
+  final def pinnedTo(home: AnyRef | Null): Unit = pinHome = home
+
+  /** Gives the waiting performer its outcome, which resumes it. For a pinned future, the thread doing so is told
+    * where it belongs, for the scheduler to resume it there and nowhere else.
+    */
+  private def tell(waiting: Listener[Outcome], result: Outcome): Unit =
+    val home = pinHome
+    if home == null then waiting.completeNow(result, this): Unit
+    else WorkpoolScheduler.resumingAt(home)(waiting.completeNow(result, this): Unit)
+
+  /** Whether this performance may have been given to something that can settle it: a worker's heap, its handle as a
+    * waiter, or a close. The performer's alone to read and write.
+    */
+  private var exposed = false
+
+  /** Before the op is given to something that can settle it other than a heap, which `hasDeadline` tells of. */
+  protected final def expose(): Unit = exposed = true
+
+  /** As the performer leaves. Whatever settles an op settles it and takes its listener as one step, under the op's
+    * lock, which this waits for: a performer that sees the outcome and leaves can't have its next performance's
+    * listener taken for this one. An op done as it was tried, given to nothing, has no such step under way, and takes
+    * no lock.
+    */
+  protected final def leave(): Unit =
+    if exposed || hasDeadline then removeListener(): Unit
 
   /** The group this performance is linked to, or `Unlinked` between performances. Guarded by this op's monitor. */
   private var linkedTo: CompletionGroup = CompletionGroup.Unlinked
@@ -112,12 +154,12 @@ sealed abstract class AbstractTimerHeapOp
     // work.
     val waiting = synchronized {
       if !linkedTo.isCancelled then null
-      else if tryCancel() then removeListener()
+      else if tryCancel() then takeListener()
       else
         _cancelLater = true
         null
     }
-    if waiting != null then waiting.completeNow(TimerHeapOp.CancelledSentinel, this): Unit
+    if waiting != null then tell(waiting, TimerHeapOp.CancelledSentinel)
 
   def isCancelled: Boolean = state.get() == TimerHeapOp.CancelledSentinel
 
@@ -126,9 +168,9 @@ sealed abstract class AbstractTimerHeapOp
     // leaves can't have its next performance's listener taken for this one.
     val waiting = synchronized {
       if !state.compareAndSet(TimerHeapOp.TimerFired, result) then throw new IllegalStateException("Did not claim work")
-      removeListener()
+      takeListener()
     }
-    if waiting != null then waiting.completeNow(result, this): Unit
+    if waiting != null then tell(waiting, result)
   }
 
   private final def tryCancel(): Boolean = {
@@ -139,7 +181,10 @@ sealed abstract class AbstractTimerHeapOp
 
   @volatile private var listener: Listener[Outcome] | Null = null
 
-  final protected def removeListener(): Listener[Outcome] | Null = synchronized {
+  final protected def removeListener(): Listener[Outcome] | Null = synchronized(takeListener())
+
+  /** With the op's lock held. */
+  private def takeListener(): Listener[Outcome] | Null = {
     val l = listener
     listener = null
     l
@@ -162,7 +207,8 @@ sealed abstract class AbstractTimerHeapOp
       case CancelledSentinel => k.completeNow(CancelledSentinel, this)
       case TimerHeapOp.TimerFired | TimerHeapOp.CloseFired | TimerHeapOp.ReadyFired => false
 
-  final override protected def addListener(k: Listener[Outcome]): Unit = synchronized:
+  /** Called by `onComplete` alone, with the op's lock held. */
+  final override protected def addListener(k: Listener[Outcome]): Unit =
     if listener != null then throw new IllegalStateException("Listener already registered")
     listener = k
 
@@ -204,9 +250,9 @@ sealed abstract class AbstractTimerHeapOp
     // leaves can't have its next performance's listener taken for this one.
     val waiting = synchronized {
       if !state.compareAndSet(TimerHeapOp.CloseFired, result) then throw new IllegalStateException("Did not claim work")
-      removeListener()
+      takeListener()
     }
-    if waiting != null then waiting.completeNow(result, this): Unit
+    if waiting != null then tell(waiting, result)
   }
 
   /** Claims the op for a worker that found its handle ready, or for its handle closing: as `claimAtDeadline`. */
@@ -218,9 +264,9 @@ sealed abstract class AbstractTimerHeapOp
     // Settled and its listener taken as one step, as in `completeFromTimer`.
     val waiting = synchronized {
       if !state.compareAndSet(TimerHeapOp.ReadyFired, result) then throw new IllegalStateException("Did not claim work")
-      removeListener()
+      takeListener()
     }
-    if waiting != null then waiting.completeNow(result, this): Unit
+    if waiting != null then tell(waiting, result)
   }
 
   /** Gives back a claim made with `claimAtReady`, the handle not having been ready after all: the op waits on, and can
@@ -234,22 +280,26 @@ sealed abstract class AbstractTimerHeapOp
         if !state.compareAndSet(TimerHeapOp.ReadyFired, TimerHeapOp.CancelledSentinel) then
           throw new IllegalStateException("Did not claim work")
         stillWaiting = false
-        removeListener()
+        takeListener()
       else
         if !state.compareAndSet(TimerHeapOp.ReadyFired, null) then throw new IllegalStateException("Did not claim work")
         null
     }
-    if waiting != null then waiting.completeNow(TimerHeapOp.CancelledSentinel, this): Unit
+    if waiting != null then tell(waiting, TimerHeapOp.CancelledSentinel)
     stillWaiting
   }
 
-  final def setTimeout(t: Long, source: TimerHeap.TimerSource[?]): Unit = timersLock.synchronized {
-    // Whatever the op's state: it goes on this heap even if it was cancelled as it was entered, and `clearTimeout`
-    // must know where to take it from.
-    worker = source
-    if t < 0 then timeoutDeadline = -1L
-    else timeoutDeadline = TimerHeap.deadlineAfter(t * 1000000L)
-  }
+  final def setTimeout(t: Long, source: TimerHeap.TimerSource[?]): Unit =
+    // An op with no time limit and no deadline of its own never goes on a heap: there is nothing to record, nor for
+    // `clearTimeout` to take back. Read without the lock, as only the performer, one at a time, writes these.
+    if t >= 0 || hasOwnDeadline || worker != null || timeoutDeadline >= 0 then
+      timersLock.synchronized {
+        // Whatever the op's state: it goes on this heap even if it was cancelled as it was entered, and
+        // `clearTimeout` must know where to take it from.
+        worker = source
+        if t < 0 then timeoutDeadline = -1L
+        else timeoutDeadline = TimerHeap.deadlineAfter(t * 1000000L)
+      }
 
   /** Puts the op, which has a time limit, on `source`'s heap, and has `clearTimeout` take it from there. */
   final def holdTimeoutOn(source: EventSource): Unit =
@@ -260,12 +310,13 @@ sealed abstract class AbstractTimerHeapOp
     * `parkUntilSettled` waits for, reads it to tell whether it is the limit that has passed.
     */
   final def clearTimeout(): Unit =
-    val w = timersLock.synchronized {
-      val w = worker
-      worker = null
-      w
-    }
-    if w != null then w.removeTimer(this)
+    if worker != null then // else it was on no heap: see `setTimeout`
+      val w = timersLock.synchronized {
+        val w = worker
+        worker = null
+        w
+      }
+      if w != null then w.removeTimer(this)
 
   /** Takes no op lock: the heap reads `deadlineNow` under its own lock, so that order is heap, then op. */
   final def requestTimersUpdate(): Unit = {
@@ -325,7 +376,7 @@ abstract class SingleUseAbstractTimerHeapOp extends AbstractTimerHeapOp {
     println(
       s"requestExit on ${this.getClass.getSimpleName}@${System.identityHashCode(this)} called on thread ${Thread.currentThread().getName}"
     )
-    val _ = removeListener()
+    leave()
   }
 }
 
@@ -352,7 +403,7 @@ abstract class RepeatableAbstractTimerHeapOp extends AbstractTimerHeapOp with Re
       println(
         s"requestExit on ${this.getClass.getSimpleName}@${System.identityHashCode(this)} called on thread ${Thread.currentThread().getName}"
       )
-      val _ = removeListener()
+      leave()
     } finally {
       // Last: a performer let in any sooner would have its listener and its link taken by the lines above.
       entered.set(false)
@@ -426,7 +477,7 @@ abstract class AbstractReadinessOp[H <: BaseHandle, W <: EventSource](handle: H)
             // All that was there as the source took its report: whatever comes after it is reported anew, so until
             // then there is nothing, and the next op need not look. Not at the end of a stream, where nothing was
             // moved, since no report follows it.
-            if moved > 0 && moved >= available then handle.markDrained(isRead, source)
+            handle.waiterDone(isRead, this, source, drained = moved > 0 && moved >= available)
             WorkpoolScheduler.SuccessUnit
       catch
         case NonFatal(ex)     => Failure(ex)
@@ -454,6 +505,7 @@ abstract class AbstractReadinessOp[H <: BaseHandle, W <: EventSource](handle: H)
         // A handle known to be drained is not tried: its listener reports it when there is something again.
         if !handle.drainedAt(isRead, tick) && attempt() != AbstractReadinessOp.Blocked then done = true
         else
+          expose()
           val listener = handle.awaitReadiness(isRead, this, tick, self)
           if listener != null then // else reported ready since the tick was read: again
             waiting = true

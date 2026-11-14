@@ -275,6 +275,33 @@ class KqueueReadinessSuite extends munit.FunSuite {
     }
   }
 
+  test("a future whose reads are always ready yields to the others on its one worker") {
+    onPool(1) { io ?=>
+      val (in, out) = pipe()
+      io.perform(KqueueOps.close(out)) // the end of the stream: every read is done as it is tried
+      val progressed = new AtomicBoolean(false)
+      val busy = Future {
+        val buf = ByteBuffer.allocate(1)
+        val read = KqueueOps.read(in, buf)
+        var seen = false
+        var i = 0
+        while i < 10_000 do
+          io.perform(read)
+          seen ||= progressed.get()
+          i += 1
+        seen
+      }
+      val sibling = Future {
+        io.perform(KqueueOps.timer(0))
+        progressed.set(true)
+      }
+      val seen = busy.await
+      assert(seen, "the sibling's timer did not fire until the reads were over")
+      sibling.await
+      io.perform(KqueueOps.close(in))
+    }
+  }
+
   test("many reads and writes pass through a pipe in order") {
     onPool(4) { io ?=>
       val (in, out) = pipe()
