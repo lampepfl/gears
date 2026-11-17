@@ -106,6 +106,11 @@ abstract class AbstractReadinessOp[H <: BaseHandle](protected val waitsOn: H)
   final def performWhenReady(self: Source)(using Async): Unit = performWhenReadyOn(waitsOn)(self)
 }
 
+object ReadyWaiting:
+
+  /** What `attempt` returns when the handle was not ready. */
+  inline val Blocked = -1
+
 object AbstractReadinessOp:
 
   /** What `attempt` returns when the handle was not ready. */

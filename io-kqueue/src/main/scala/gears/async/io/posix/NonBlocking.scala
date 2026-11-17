@@ -2,6 +2,7 @@ package gears.async.io.posix
 
 import java.io.IOException
 import java.nio.ByteBuffer
+import scala.scalanative.meta.LinktimeInfo
 import scala.scalanative.posix.errno
 import scala.scalanative.posix.sys.uio
 import scala.scalanative.unsafe.*
@@ -21,24 +22,24 @@ object NonBlocking {
 
   inline val EOF = -1
 
-  // /** Accepts a new connection on `serverFd`, which must be non-blocking, and returns it non-blocking too. Returns the
-  //   * client file descriptor, or -1 if no client was accepted. On macOS and FreeBSD that takes the `accept` alone: an
-  //   * accepted socket has the listening socket's properties, `O_NONBLOCK` among them (see accept(2)).
-  //   */
-  // def accept(serverFd: Int): Int = {
-  //   var clientFd = Unblocked.accept(serverFd, null, null)
-  //   // A connection its client reset while it was queued is gone, not a failure of the listener: the next one, as the
-  //   // JDK's accept does.
-  //   while clientFd < 0 && errno.errno == errno.ECONNABORTED do clientFd = Unblocked.accept(serverFd, null, null)
-  //   if clientFd < 0 then {
-  //     val transient = wouldBlock
-  //     if !transient then throw new IOException(s"Failed to accept connection: ${cError()}")
-  //     -1 // no client was accepted
-  //   } else {
-  //     if !(LinktimeInfo.isMac || LinktimeInfo.isFreeBSD) then PosixSockets.setNonBlocking(clientFd)
-  //     clientFd
-  //   }
-  // }
+  /** Accepts a new connection on `serverFd`, which must be non-blocking, and returns it non-blocking too. Returns the
+    * client file descriptor, or -1 if no client was accepted. On macOS and FreeBSD that takes the `accept` alone: an
+    * accepted socket has the listening socket's properties, `O_NONBLOCK` among them (see accept(2)).
+    */
+  def accept(serverFd: Int): Int = {
+    var clientFd = Unblocked.accept(serverFd, null, null)
+    // A connection its client reset while it was queued is gone, not a failure of the listener: the next one, as the
+    // JDK's accept does.
+    while clientFd < 0 && errno.errno == errno.ECONNABORTED do clientFd = Unblocked.accept(serverFd, null, null)
+    if clientFd < 0 then {
+      val transient = wouldBlock
+      if !transient then throw new IOException(s"Failed to accept connection: ${cError()}")
+      -1 // no client was accepted
+    } else {
+      if !(LinktimeInfo.isMac || LinktimeInfo.isFreeBSD) then Descriptors.setNonBlocking(clientFd)
+      clientFd
+    }
+  }
 
   /** Fills `buf` from `fd` between position and limit. Returns the number of bytes read, 0 if the read would block, or
     * -1 at EOF.

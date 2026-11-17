@@ -9,8 +9,14 @@ import _root_.gears.async.io.shareable.HandleState
 abstract class PosixKernelHandle(val fd: Int, owner: HandleOwner) extends AbstractBaseHandle(owner):
   open() // construction is acquisition of the handle
 
+  /** As the handle closes, while its descriptor is still its own: what it leaves outside it is removed, a socket file
+    * it bound for one.
+    */
+  protected def beforeDescriptorCloses(): Unit = ()
+
   final def cleanup()(using ClosePermit): Boolean =
-    Descriptors.closeHandle(fd)
+    try beforeDescriptorCloses()
+    finally Descriptors.closeHandle(fd)
     if !compareAndSetState(HandleState.ClosingState, HandleState.ClosedState) then
       throw new IllegalStateException("Concurrent cleanup detected")
     true

@@ -27,6 +27,7 @@ object KqueueBackend extends Backend {
   private[io] def runOn[T](workers: Int, onStarvation: shareable.Starvation.Handler)(
       program: Io[Interface] ?=> Async.Spawn ?=> T
   ): T = {
+    posix.FileLimit.raised: Unit // a shell's limit on open descriptors is far below what a server's sockets need
     val pool = KqueueScheduler(workers, onStarvation)
     given poolSupport: (AsyncSupport { type Scheduler = pool.Scheduler }) = pool
     given poolScheduler: pool.Scheduler = pool
