@@ -203,6 +203,7 @@ class TimerHeapOpSuite extends munit.FunSuite {
 
   test("a firing for a time limit is a timeout, though the performer has taken the op off the heap meanwhile") {
     val heap = new TimerHeapImpl with MonitorPoller {
+      val handleOwner = new gears.async.io.shareable.HandleOwner
       type Timer = TimerOp
       protected def makeSchedule(nanos: Long, body: Runnable) = throw new UnsupportedOperationException
       protected def id: Int = 0
@@ -231,6 +232,7 @@ class TimerHeapOpSuite extends munit.FunSuite {
 
   test("an op performed again with no time limit forgets the last one") {
     val heap = new TimerHeapImpl with MonitorPoller {
+      val handleOwner = new gears.async.io.shareable.HandleOwner
       type Timer = TimerOp
       protected def makeSchedule(nanos: Long, body: Runnable) = throw new UnsupportedOperationException
       protected def id: Int = 0

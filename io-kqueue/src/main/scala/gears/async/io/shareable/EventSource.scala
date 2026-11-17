@@ -33,6 +33,11 @@ trait EventSource extends TimerSource {
     */
   protected def makeSchedule(nanos: Long, body: Runnable): Timer & Cancellable
 
+  /** The run this source's pool is of: what the handles its ops open belong to, and what a handle is checked against as
+    * an op is performed here.
+    */
+  def handleOwner: HandleOwner
+
   /** `handle` is closing: whatever this source keeps to find it by is dropped, before its descriptor is released. */
   def forgetHandle(handle: BaseHandle): Unit = ()
 }

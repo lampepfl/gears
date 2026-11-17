@@ -5,6 +5,7 @@ import gears.async.io.shareable.AbstractBaseHandle
 import gears.async.io.shareable.BaseHandle
 import gears.async.io.shareable.CloseListener
 import gears.async.io.shareable.EventSource
+import gears.async.io.shareable.HandleOwner
 import gears.async.io.shareable.HandleState
 import gears.async.io.shareable.ReadinessOp
 import gears.async.io.shareable.TimerHeap.TimerOp
@@ -17,7 +18,7 @@ import java.util.concurrent.atomic.AtomicInteger
   */
 class HandleStateSuite extends munit.FunSuite {
 
-  private final class TestHandle(queued: Boolean = false) extends AbstractBaseHandle {
+  private final class TestHandle(queued: Boolean = false) extends AbstractBaseHandle(new HandleOwner) {
     type Source = EventSource
     override protected def queuesWaiters(read: Boolean): Boolean = queued
     val cleanups = AtomicInteger(0)
@@ -92,6 +93,7 @@ class HandleStateSuite extends munit.FunSuite {
   }
 
   private final class FakeSource extends EventSource {
+    val handleOwner = new HandleOwner
     val started = AtomicInteger(0)
     val stopped = AtomicInteger(0)
     type Timer = TimerOp
@@ -382,7 +384,7 @@ class HandleStateSuite extends munit.FunSuite {
     assertNoDiff(
       compileErrors("""
         import gears.async.io.shareable.*
-        abstract class Monitored extends AbstractBaseHandle, BaseReadableHandle { type Source = MonitorPoller }
+        abstract class Monitored extends AbstractBaseHandle(new HandleOwner), BaseReadableHandle { type Source = MonitorPoller }
         abstract class Fits(handle: Monitored, buf: java.nio.ByteBuffer) extends AbstractReadOp[Monitored](handle, buf) {
           def here(source: MonitorPoller)(using gears.async.Async): Unit = performWhenReady(source)
         }
@@ -392,7 +394,7 @@ class HandleStateSuite extends munit.FunSuite {
     // The same op said to be a kqueue worker's is refused: its source is its handle's, and no other.
     val mismatched = compileErrors("""
       import gears.async.io.shareable.*
-      abstract class Monitored extends AbstractBaseHandle, BaseReadableHandle { type Source = MonitorPoller }
+      abstract class Monitored extends AbstractBaseHandle(new HandleOwner), BaseReadableHandle { type Source = MonitorPoller }
       abstract class Misfit(handle: Monitored, buf: java.nio.ByteBuffer) extends AbstractReadOp[Monitored](handle, buf) {
         type Source = gears.async.io.kqueue.KqueuePoller
       }
@@ -401,7 +403,7 @@ class HandleStateSuite extends munit.FunSuite {
     // Nor is it performed on a source that does not listen for its handle.
     val elsewhere = compileErrors("""
       import gears.async.io.shareable.*
-      abstract class Monitored extends AbstractBaseHandle, BaseReadableHandle { type Source = MonitorPoller }
+      abstract class Monitored extends AbstractBaseHandle(new HandleOwner), BaseReadableHandle { type Source = MonitorPoller }
       abstract class Astray(handle: Monitored, buf: java.nio.ByteBuffer) extends AbstractReadOp[Monitored](handle, buf) {
         def there(source: gears.async.io.kqueue.KqueuePoller)(using gears.async.Async): Unit = performWhenReady(source)
       }

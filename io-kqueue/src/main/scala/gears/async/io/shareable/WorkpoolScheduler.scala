@@ -38,10 +38,14 @@ abstract class WorkpoolScheduler[I <: Interface { type Op <: AsyncOp & Reentrant
   /** A worker of this pool: one that performs its interface's ops. */
   type PoolWorker = Worker { type Op = WorkpoolScheduler.this.Op }
 
-  def makeWorker(id: Int): PoolWorker
+  /** A worker of this pool, whose handles belong to `owner`. */
+  def makeWorker(id: Int, owner: HandleOwner): PoolWorker
+
+  /** What this pool's run's handles belong to: its workers', and what closes the ones left open as it shuts down. */
+  private val handleOwner = new HandleOwner
 
   private val workerTicker = new java.util.concurrent.atomic.AtomicInteger(0)
-  private val workerGroup: Array[PoolWorker] = Array.tabulate(workers)(makeWorker)
+  private val workerGroup: Array[PoolWorker] = Array.tabulate(workers)(makeWorker(_, handleOwner))
 
   /** The worker of this pool that `thread` runs, or null: a worker's thread carries its worker, so this is no lookup by
     * thread.
@@ -157,6 +161,7 @@ abstract class WorkpoolScheduler[I <: Interface { type Op <: AsyncOp & Reentrant
     }
   }
 
+
   /** Guards `execute` and `schedule`: work given to a pool that has shut down would never run. */
   @volatile private var isShutDown = false
 
@@ -170,6 +175,8 @@ abstract class WorkpoolScheduler[I <: Interface { type Op <: AsyncOp & Reentrant
   final def shutdown(): Unit = {
     if workerOf(Thread.currentThread()) != null then
       throw new IllegalStateException("Can't shut down a scheduler from one of its workers")
+    // While the workers are still there to drop them.
+    handleOwner.closeAll()
     isShutDown = true
     workerGroup.foreach(_.stop())
     if starvationMonitor != null then starvationMonitor.interrupt()

@@ -1,6 +1,7 @@
 package gears.async.io.kqueue
 
 import gears.async.Async
+import gears.async.io.shareable.HandleOwner
 import gears.async.io.shareable.Starvation
 import gears.async.io.shareable.Worker
 import gears.async.io.shareable.WorkpoolScheduler
@@ -13,9 +14,9 @@ class KqueueScheduler(workers: Int, onStarvation: Starvation.Handler = Starvatio
       NativeSuspend {
   override protected def selectWorker() = workerOfCurrentThread()
 
-  override def makeWorker(id: Int): KqueueWorker = new KqueueWorker(id)
+  override def makeWorker(id: Int, owner: HandleOwner): KqueueWorker = new KqueueWorker(id, owner)
 
-  class KqueueWorker(id: Int) extends Worker(id), KqueuePoller(255) {
+  class KqueueWorker(id: Int, owner: HandleOwner) extends Worker(id, owner), KqueuePoller(255) {
     type Op = KqueueOp
 
     /** either schedules a waiter (false), or completes immediately (true) */
@@ -29,7 +30,7 @@ class KqueueScheduler(workers: Int, onStarvation: Starvation.Handler = Starvatio
           deadline.parkUntilSettled()
         case close: KqueueCloseOp         => close.performClose(this)
         case ready: KqueueReadinessOp     => ready.performWhenReady(this)
-        case immediate: KqueueImmediateOp => immediate.perform()
+        case immediate: KqueueImmediateOp => immediate.perform(handleOwner)
     }
   }
 }

@@ -4,8 +4,10 @@ import gears.async.io.Slot
 
 abstract class ImmediateOp extends SingleUseAbstractTimerHeapOp, TimeoutOnWake {
 
-  /** Does the op, at once. */
-  def perform(): Unit
+  /** Does the op, at once. `owner` is the performing pool's: what a handle it opens belongs to, and a handle it uses
+    * must.
+    */
+  def perform(owner: HandleOwner): Unit
 }
 
 abstract class AbstractCloseOp(val handle: BaseHandle)
@@ -20,6 +22,7 @@ abstract class AbstractCloseOp(val handle: BaseHandle)
     * keep, the performer waits. `self` is the performer's worker.
     */
   final def performClose(self: Source)(using gears.async.Async): Unit =
+    self.handleOwner.check(handle)
     var shouldWait = false
     if hasDeadline then
       holdTimerOn(self)
@@ -46,16 +49,16 @@ abstract class AbstractCloseOp(val handle: BaseHandle)
 /** Opens a pipe and writes its ends into two slots. Performed once. What opens it is the backend's (`_pipe`). */
 abstract class AbstractMakePipeOp[R <: AnyRef, W <: AnyRef](readSlot: Slot[R], writeSlot: Slot[W]) extends ImmediateOp {
 
-  /** Opens a pipe: its read end and its write end. Nothing is left open by one that throws. */
-  def _pipe(): (R, W)
+  /** Opens a pipe, as `owner`'s: its read end and its write end. Nothing is left open by one that throws. */
+  def _pipe(owner: HandleOwner): (R, W)
 
   /** Before anything is opened: an occupied slot could not take its end. */
   override def onEntry(): Unit =
     super.onEntry()
     if !readSlot.isEmpty || !writeSlot.isEmpty then throw new IllegalArgumentException("A pipe needs two empty slots")
 
-  final def perform(): Unit =
-    val (read, write) = _pipe()
+  final def perform(owner: HandleOwner): Unit =
+    val (read, write) = _pipe(owner)
     readSlot.set(read)
     writeSlot.set(write)
 }

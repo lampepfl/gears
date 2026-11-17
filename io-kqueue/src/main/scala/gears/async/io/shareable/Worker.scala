@@ -12,8 +12,11 @@ import scala.util.control.NonFatal
   * an event source of its own, which its poller is. It turns for ever: firing the timers that are due, resuming what is
   * ready, running its tasks, and then waiting on its poller for whichever comes first of an event, a deadline and a
   * wake-up. When it has nothing to do it takes tasks from workers that have too many (`Inbox`).
+  *
+  * @param handleOwner
+  *   what the handles opened on this worker belong to: its pool's, the same for each of the pool's workers.
   */
-abstract class Worker(val id: Int) extends TimerHeapImpl, EventSource {
+abstract class Worker(val id: Int, final val handleOwner: HandleOwner) extends TimerHeapImpl, EventSource {
 
   /** The ops this worker performs: its pool's. */
   type Op <: TimerOp

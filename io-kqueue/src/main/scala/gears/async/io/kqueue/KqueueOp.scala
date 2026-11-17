@@ -15,6 +15,7 @@ import gears.async.io.shareable.AbstractPooledReadOp
 import gears.async.io.shareable.AbstractReadOp
 import gears.async.io.shareable.AbstractScatterReadOp
 import gears.async.io.shareable.AbstractWriteOp
+import gears.async.io.shareable.HandleOwner
 import gears.async.io.shareable.LendingPool
 import gears.async.io.shareable.TimerHeapOp
 
@@ -33,7 +34,7 @@ sealed trait KqueueReadinessOp extends KqueueOp:
 
 /** An op done as it is performed, with nothing to wait for (see `ImmediateOp`). */
 sealed trait KqueueImmediateOp extends KqueueOp:
-  def perform(): Unit
+  def perform(owner: HandleOwner): Unit
 
 sealed trait KqueueReadableOp extends KqueueReadinessOp
 

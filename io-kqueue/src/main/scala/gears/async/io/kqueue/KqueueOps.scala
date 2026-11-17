@@ -8,6 +8,7 @@ import gears.async.io.Pipes
 import gears.async.io.Received
 import gears.async.io.Repeatable
 import gears.async.io.Slot
+import gears.async.io.shareable.HandleOwner
 import gears.async.io.shareable.LendingPool
 
 import java.nio.ByteBuffer

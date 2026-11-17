@@ -66,6 +66,7 @@ trait ReadyWaiting extends AbstractTimerHeapOp, TimeoutOnWake, ReadinessOp {
   protected final def performWhenReadyOn(handle: BaseHandle { type Source = ReadyWaiting.this.Source })(
       self: Source
   )(using Async): Unit =
+    self.handleOwner.check(handle)
     val readiness = handle.readiness(isRead)
     var waiting = false
     var done = false

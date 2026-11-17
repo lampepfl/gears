@@ -5,6 +5,7 @@ import gears.async.Async
 import gears.async.AsyncSupport
 import gears.async.Future
 import gears.async.Future.Promise
+import gears.async.io.shareable.HandleOwner
 import gears.async.io.shareable.MonitorPoller
 import gears.async.io.shareable.RepeatableAbstractTimerHeapOp
 import gears.async.io.shareable.TimerHeapOp.CancelledSentinel
@@ -41,7 +42,7 @@ private[kqueue] final class WaitingScheduler
     extends WorkpoolScheduler[WaitingOps.type](WaitingBackend, WaitingOps, 1)
     with NativeSuspend {
   override protected def selectWorker() = workerOfCurrentThread()
-  override def makeWorker(id: Int) = new Worker(id) with MonitorPoller {
+  override def makeWorker(id: Int, owner: HandleOwner) = new Worker(id, owner) with MonitorPoller {
     type Op = WaitingOp
     override def performOp(op: WaitingOp)(using Async): Unit = {
       if op.hasDeadline then op.holdTimerOn(this)

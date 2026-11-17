@@ -4,6 +4,7 @@ package kqueue
 import gears.async.Async
 import gears.async.AsyncSupport
 import gears.async.Future
+import gears.async.io.shareable.HandleOwner
 
 import java.io.IOException
 import java.nio.ByteBuffer
@@ -23,7 +24,7 @@ class KqueuePollFailureSuite extends munit.FunSuite {
   private final class FailingPool(workers: Int) extends KqueueScheduler(workers) {
     val failing = new AtomicBoolean(false)
     val failedPolls = new AtomicInteger(0)
-    override def makeWorker(id: Int): KqueueWorker = new KqueueWorker(id) {
+    override def makeWorker(id: Int, owner: HandleOwner): KqueueWorker = new KqueueWorker(id, owner) {
       override protected def pollKqueue(timeout: Long): Int =
         if failing.get() then
           failedPolls.incrementAndGet()

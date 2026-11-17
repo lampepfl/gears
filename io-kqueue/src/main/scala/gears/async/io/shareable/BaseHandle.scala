@@ -5,6 +5,9 @@ import java.nio.channels.ClosedChannelException
 import java.util.concurrent.atomic.AtomicReference
 
 trait BaseHandle extends HandleState.Holder:
+
+  /** The run the handle was opened in, as its pool's `HandleOwner`: the only one whose ops may use it. */
+  def owner: HandleOwner
   def open(): Unit
   def requestClose(): Boolean
 
@@ -35,7 +38,7 @@ trait CloseListener:
 object AbstractBaseHandle:
   private[shareable] case object Closed
 
-abstract class AbstractBaseHandle extends BaseHandle:
+abstract class AbstractBaseHandle(val owner: HandleOwner) extends BaseHandle:
   import HandleState.{ClosedState, ClosingState, OpenState, UnenteredState}
 
   opaque type ClosePermit = Unit
@@ -64,6 +67,7 @@ abstract class AbstractBaseHandle extends BaseHandle:
   private val closeListener = AtomicReference[CloseListener | AbstractBaseHandle.Closed.type | Null](null)
 
   protected def completeClose(): Unit =
+    owner.closed(this)
     closeListener.getAndSet(AbstractBaseHandle.Closed) match
       case owner: CloseListener => owner.handleClosed()
       case _                    => ()
@@ -102,7 +106,7 @@ abstract class AbstractBaseHandle extends BaseHandle:
   protected[shareable] def idleReportsLimit: Int = 16
 
   final def open(): Unit =
-    if compareAndSetState(UnenteredState, OpenState) then ()
+    if compareAndSetState(UnenteredState, OpenState) then owner.opened(this)
     else throw new IllegalStateException("Handle is already open or closed")
 
   final def claimWork(): Unit =
