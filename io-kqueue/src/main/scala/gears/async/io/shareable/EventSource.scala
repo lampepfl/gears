@@ -20,6 +20,13 @@ trait EventSource extends TimerSource {
     */
   def stopListening(handle: BaseHandle, read: Boolean): Unit = ()
 
+  /** From any thread: has this source report `handle` ready, for reads or for writes, on its own thread, as it does
+    * what it finds ready itself. For a handle whose readiness something else must find out, where this source's own
+    * facility can't (see `AbstractBaseHandle.waiterWaits`). A source with no thread of its own to do it on does
+    * nothing.
+    */
+  def reportLater(handle: BaseHandle, read: Boolean): Unit = ()
+
   /** From any thread: schedules to run `body` on this source's own thread once `nanos` have passed.
     *
     * Cancellation before the scheduled time prevents the body from running.
@@ -196,6 +203,12 @@ sealed abstract class HandleReadiness[S <: EventSource] private[shareable] (
   /** Whether `source` is the handle's listener. */
   final def listenedBy(source: EventSource): Boolean = synchronized(listener eq source)
 
+  /** The handle's listener now, or null. */
+  final def currentListener: S | Null = synchronized(listener)
+
+  /** Whether an op waits on the handle now. */
+  def isWaitedOn: Boolean
+
   /** For the handle's close: the listener drops the handle. */
   private[shareable] final def forgetListener(): Unit =
     val listening = synchronized(listener)
@@ -210,6 +223,8 @@ private[shareable] final class SingleWaiter[S <: EventSource](handle: AbstractBa
   @volatile private var waiter: ReadinessOp | Null = null
 
   def waitsWithoutTrying(tick: Int): Boolean = drainedTick == tick
+
+  def isWaitedOn: Boolean = waiter != null
 
   def registerWaiter(op: ReadinessOp, sinceTick: Int, tried: Boolean, self: S): S | Null = {
     var start = false
@@ -227,6 +242,7 @@ private[shareable] final class SingleWaiter[S <: EventSource](handle: AbstractBa
     }
     // No report can come before this, and a second op to wait meanwhile is refused, as this one is the waiter.
     if start then startListening(self)(if waiter eq op then waiter = null)
+    if listening != null then handle.waiterWaits(read, listening)
     listening
   }
 
@@ -300,6 +316,8 @@ private[shareable] final class WaiterQueue[S <: EventSource](handle: AbstractBas
 
   def waitsWithoutTrying(tick: Int): Boolean = pending != 0 || drainedTick == tick
 
+  def isWaitedOn: Boolean = pending != 0
+
   def registerWaiter(op: ReadinessOp, sinceTick: Int, tried: Boolean, self: S): S | Null = {
     var start = false
     val listening: S | Null = synchronized {
@@ -330,6 +348,7 @@ private[shareable] final class WaiterQueue[S <: EventSource](handle: AbstractBas
         case failure: Throwable =>
           stranded.foreach(other => if other.claimAtReady() then other.failReady(failure))
           throw failure
+    if listening != null then handle.waiterWaits(read, listening)
     listening
   }
 

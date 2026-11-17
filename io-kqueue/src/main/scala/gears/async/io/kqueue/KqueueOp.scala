@@ -2,35 +2,48 @@ package gears.async.io.kqueue
 
 import gears.async.Async
 import gears.async.io.Deadline
+import gears.async.io.IpAddress
 import gears.async.io.Received
 import gears.async.io.Slot
 import gears.async.io.SocketOption
 import gears.async.io.SocketOptions
+import gears.async.io.posix.Descriptors
 import gears.async.io.posix.PosixDatagrams
+import gears.async.io.posix.PosixFiles
 import gears.async.io.posix.PosixReadOps
+import gears.async.io.posix.PosixResolver
 import gears.async.io.posix.PosixSockets
 import gears.async.io.posix.PosixWriteOps
 import gears.async.io.posix.SocketAddress
 import gears.async.io.posix.UnixBinding
 import gears.async.io.shareable.AbstractAcceptAllOp
 import gears.async.io.shareable.AbstractAcceptOp
+import gears.async.io.shareable.AbstractBlockingOp
+import gears.async.io.shareable.AbstractBlockingValueOp
 import gears.async.io.shareable.AbstractCloseOp
 import gears.async.io.shareable.AbstractConnectOp
+import gears.async.io.shareable.AbstractFilePooledReadOp
+import gears.async.io.shareable.AbstractFileReadOp
+import gears.async.io.shareable.AbstractFileSyncOp
+import gears.async.io.shareable.AbstractFileWriteOp
 import gears.async.io.shareable.AbstractGatherWriteOp
 import gears.async.io.shareable.AbstractHandleCallOp
 import gears.async.io.shareable.AbstractMakeDeadlineOp
 import gears.async.io.shareable.AbstractMakePipeOp
 import gears.async.io.shareable.AbstractMakeTimerOp
+import gears.async.io.shareable.AbstractOpenFileOp
 import gears.async.io.shareable.AbstractOpenOp
 import gears.async.io.shareable.AbstractPooledReadOp
 import gears.async.io.shareable.AbstractReadOp
 import gears.async.io.shareable.AbstractReceiveOp
+import gears.async.io.shareable.AbstractResolveOp
 import gears.async.io.shareable.AbstractScatterReadOp
 import gears.async.io.shareable.AbstractSendOp
 import gears.async.io.shareable.AbstractWriteOp
 import gears.async.io.shareable.HandleOwner
 import gears.async.io.shareable.LendingPool
 import gears.async.io.shareable.TimerHeapOp
+import gears.async.io.shareable.Worker
 
 import java.nio.ByteBuffer
 import scala.concurrent.duration.FiniteDuration
@@ -54,6 +67,10 @@ sealed trait KqueueReadableOp extends KqueueReadinessOp
 sealed trait KqueueWritableOp extends KqueueReadinessOp
 
 sealed trait KqueueAcceptOp extends KqueueReadinessOp
+
+/** An op whose work is done off the workers' threads (see `WorkOffThread`). */
+sealed trait KqueueOffThreadOp extends KqueueOp:
+  def performOffThread(worker: Worker & KqueuePoller)(using Async): Unit
 
 sealed trait KqueueDatagramOp extends KqueueReadinessOp
 
@@ -168,3 +185,63 @@ private[kqueue] final class KqueueSend(socket: KqueueDatagramSocket, bufs: Array
       KqueueDatagramOp:
   def _send(socket: KqueueDatagramSocket, bufs: Array[ByteBuffer]): Boolean =
     PosixDatagrams.send(socket.fd, socket.ipv6, bufs, to)
+
+// ---- Blocking code
+
+private[kqueue] final class KqueueBlocking(body: () => Unit) extends AbstractBlockingOp(body), KqueueOffThreadOp
+
+private[kqueue] final class KqueueBlockingValue[A <: AnyRef](body: () => A, into: Slot[A])
+    extends AbstractBlockingValueOp(body, into),
+      KqueueOffThreadOp
+
+// ---- Regular files: `start` is the offset a positional op begins at, or negative for the file's stream position
+
+private[kqueue] final class KqueueOpenFile(path: String, write: Boolean, into: Slot[KqueueFile])
+    extends AbstractOpenFileOp(path, write, into),
+      KqueueOffThreadOp:
+  def _openFile(path: String, write: Boolean, owner: HandleOwner): KqueueFile =
+    new KqueueFile(Descriptors.openFile(path, write), owner)
+
+private[kqueue] final class KqueueFileRead(file: KqueueFile, bufs: Array[ByteBuffer], start: Long)
+    extends AbstractFileReadOp(file, bufs, start),
+      KqueueOffThreadOp:
+  def _readAt(file: KqueueFile, buf: ByteBuffer, offset: Long): Int = PosixFiles.readAt(file.fd, buf, offset)
+
+private[kqueue] final class KqueueFileWrite(file: KqueueFile, bufs: Array[ByteBuffer], start: Long)
+    extends AbstractFileWriteOp(file, bufs, start),
+      KqueueOffThreadOp:
+  def _writeAt(file: KqueueFile, buf: ByteBuffer, offset: Long): Int = PosixFiles.writeAt(file.fd, buf, offset)
+
+private[kqueue] final class KqueueFilePooledRead(file: KqueueFile, pool: LendingPool, into: Slot[Received])
+    extends AbstractFilePooledReadOp(file, pool, into),
+      KqueueOffThreadOp:
+  def _readAt(file: KqueueFile, buf: ByteBuffer, offset: Long): Int = PosixFiles.readAt(file.fd, buf, offset)
+
+private[kqueue] final class KqueueFileSync(file: KqueueFile) extends AbstractFileSyncOp(file), KqueueOffThreadOp:
+  def _sync(file: KqueueFile): Unit = PosixFiles.sync(file.fd)
+
+// ---- Name resolution
+
+/** There is no `getaddrinfo` that does not block, so the lookup runs off the workers, the way libuv and tokio do it. */
+private[kqueue] final class KqueueResolve(host: String, into: Slot[List[IpAddress]])
+    extends AbstractResolveOp(host, into),
+      KqueueOffThreadOp:
+  def _lookup(host: String): List[IpAddress] = PosixResolver.lookup(host) match
+    case Right(addresses) => addresses
+    case Left(error)      => throw new java.io.IOException(s"Failed to resolve $host: $error")
+
+// ---- FIFOs
+
+/** Opens the FIFO at `path`, without waiting for its other end, as the handle `make` makes of its descriptor. */
+private[kqueue] final class KqueueOpenFifo[K <: KqueueHandle](path: String, write: Boolean, into: Slot[K])(
+    make: (Int, HandleOwner) => K
+) extends AbstractOpenOp(into),
+      KqueueImmediateOp:
+  gears.async.io.shareable.Checks.checkPath(path)
+  def _open(owner: HandleOwner): K =
+    val fd = Descriptors.openFifo(path, write)
+    try make(fd, owner)
+    catch
+      case failure: Throwable =>
+        Descriptors.closeHandle(fd)
+        throw failure

@@ -328,4 +328,134 @@ class KqueueSchedulingSuite extends munit.FunSuite {
     }
     assertEquals(reports.map(_.message), Nil)
   }
+
+  test("what a run opened and left open, of every kind, is closed as the run ends") {
+    given KqueueBackend.type = KqueueBackend
+    val ops = KqueueOps
+    val path = java.nio.file.Files.createTempFile("gears-run-end", ".txt")
+    val left = Io.run { io ?=>
+      // With the `Async` of whichever future performs it: the program's own is not a future's it spawned.
+      def opening[K <: AnyRef](build: Slot[K] => ops.Op)(using Async): K = {
+        val into = Slot[K]()
+        io.perform(build(into))
+        into.clear()
+      }
+      val listener = opening[ops.Listener](ops.listen(IpSocketAddress(IpAddress.IPv4Loopback, 0), _))
+      val address = ops.localAddress(listener).asInstanceOf[IpSocketAddress]
+      val connecting = Future(opening[ops.Connection](ops.connect(address, _)))
+      val accepted = opening[ops.Connection](ops.accept(listener, _))
+      val connected = connecting.await
+      val datagram = opening[ops.BoundDatagram](ops.bindDatagram(IpSocketAddress(IpAddress.IPv4Loopback, 0), _))
+      val file = opening[ops.File](ops.open(path.toString, false, _))
+      val read = Slot[ops.Readable]()
+      val write = Slot[ops.Writable]()
+      io.perform(ops.pipe(read, write))
+      val closedByProgram = opening[ops.BoundDatagram](ops.bindDatagram(IpSocketAddress(IpAddress.IPv4Loopback, 0), _))
+      io.perform(ops.close(closedByProgram))
+      List[ops.Handle](listener, accepted, connected, datagram, file, read.clear(), write.clear(), closedByProgram)
+    }
+    try for handle <- left do assertEquals(handle.getState, shareable.HandleState.ClosedState, handle.toString)
+    finally java.nio.file.Files.deleteIfExists(path): Unit
+  }
+
+  test("a handle is refused by a run other than the one that opened it, while that one still runs") {
+    given KqueueBackend.type = KqueueBackend
+    val ops = KqueueOps
+    val path = java.nio.file.Files.createTempFile("gears-foreign", ".txt")
+    try
+      Io.run { io ?=>
+        def opening[K <: AnyRef](build: Slot[K] => ops.Op)(using Async): K = {
+          val into = Slot[K]()
+          io.perform(build(into))
+          into.clear()
+        }
+        val read = Slot[ops.Readable]()
+        val write = Slot[ops.Writable]()
+        io.perform(ops.pipe(read, write))
+        val (in, out) = (read.clear(), write.clear())
+        val file = opening[ops.File](ops.open(path.toString, false, _))
+        val listener = opening[ops.Listener](ops.listen(IpSocketAddress(IpAddress.IPv4Loopback, 0), _))
+        val buf = java.nio.ByteBuffer.allocateDirect(8)
+        // Each kind of op that uses a handle, built here and performed by another run, on a thread of its own.
+        val foreign = List[(String, ops.Op)](
+          "read" -> ops.read(in, buf),
+          "write" -> ops.write(out, buf),
+          "file read" -> ops.read(file, buf, 0L),
+          "accept" -> ops.accept(listener, Slot[ops.Connection]()),
+          "close" -> ops.close(out)
+        )
+        @volatile var refusals: List[(String, Throwable | Null)] = Nil
+        val other = new Thread(() =>
+          refusals = Io.run { theirs ?=>
+            // No cast is needed: with the backend known, both runs' ops are `KqueueOps`, and their types the same.
+            foreign.map((name, op) =>
+              name -> (try { theirs.perform(op); null }
+              catch case failed: Exception => failed)
+            )
+          }
+        )
+        other.start()
+        io.perform(ops.blocking(() => other.join())) // off the workers
+        for (name, failure) <- refusals do
+          assert(failure.isInstanceOf[IllegalArgumentException], s"$name by another run: $failure")
+        assertEquals(refusals.size, foreign.size)
+        // Refused, they did nothing: the handles are as they were for the run they belong to.
+        buf.clear().limit(1)
+        io.perform(ops.write(out, buf))
+        buf.clear()
+        io.perform(ops.read(in, buf))
+        assertEquals(buf.position(), 1)
+        io.perform(ops.close(out))
+      }
+    finally java.nio.file.Files.deleteIfExists(path): Unit
+  }
+
+  test("an op that uses no handle is no run's: built outside, it is performed by one run and then by another") {
+    given KqueueBackend.type = KqueueBackend
+    val timer = KqueueOps.timer(1) // repeatable
+    val ran = AtomicInteger(0)
+    for _ <- 1 to 2 do
+      Io.run { io ?=>
+        io.perform(timer)
+        io.perform(KqueueOps.blocking(() => ran.incrementAndGet(): Unit))
+      }
+    assertEquals(ran.get(), 2)
+  }
+
+  test("an op being performed in one run is refused by another meanwhile, and is the first run's still") {
+    given KqueueBackend.type = KqueueBackend
+    val timer = KqueueOps.timer(200)
+    Io.run { io ?=>
+      val waiting = Future(io.perform(timer))
+      io.perform(KqueueOps.timer(20)) // so that it waits
+      @volatile var refusal: Throwable | Null = null
+      val other = new Thread(() =>
+        refusal = Io.run { theirs ?=>
+          try { theirs.perform(timer); null }
+          catch case failed: Exception => failed
+        }
+      )
+      other.start()
+      io.perform(KqueueOps.blocking(() => other.join()))
+      assert(refusal.isInstanceOf[IllegalStateException], String.valueOf(refusal))
+      waiting.await // undisturbed
+    }
+  }
+
+  test("a run's Io is refused on a thread that is not one of its pool's workers, another run's among them") {
+    given KqueueBackend.type = KqueueBackend
+    Io.run { io ?=>
+      @volatile var refusal: Throwable | Null = null
+      val other = new Thread(() =>
+        refusal = Io.run { theirs ?=>
+          // The first run's `Io`, from a future of this one: performing with it would run on no worker of its pool.
+          try { io.perform(KqueueOps.timer(1)); null }
+          catch case failed: Exception => failed
+        }
+      )
+      other.start()
+      io.perform(KqueueOps.blocking(() => other.join()))
+      assert(refusal.isInstanceOf[IllegalStateException], String.valueOf(refusal))
+    }
+  }
 }

@@ -98,6 +98,12 @@ abstract class AbstractBaseHandle(val owner: HandleOwner) extends BaseHandle:
   protected[shareable] def acceptsWaiter(read: Boolean, op: ReadinessOp, pending: ReadinessOp | Null): Boolean =
     pending == null || pending.settled
 
+  /** An op has just begun to wait for the handle to be readable, or writable, with `listener` listening for it: for a
+    * handle whose listener may never learn that it is, which then has something else find out, and tell the listener
+    * (`EventSource.reportLater`). Called on the waiting op's thread, with no lock held.
+    */
+  def waiterWaits(read: Boolean, listener: EventSource): Unit = ()
+
   /** How many times in a row the handle is reported ready with no op waiting before it gives up its listener. Until
     * then an op that waits costs no system call; past it, the handle is taken to be one whose ops find it ready, for
     * which the reports only wake the listener for nothing, and tie the handle's next wait to a worker that may by then

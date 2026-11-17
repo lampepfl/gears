@@ -154,6 +154,10 @@ abstract class Worker(val id: Int, final val handleOwner: HandleOwner) extends T
     */
   def performOp(op: Op)(using Async): Unit
 
+  /** As a task of this worker's: the report is made on its thread, where its own are. */
+  override def reportLater(handle: BaseHandle, read: Boolean): Unit =
+    submit(() => handle.readiness(read).report(this, ReadinessOp.Unknown)): Unit
+
   /** As a timer of this worker's. */
   override protected def makeSchedule(nanos: Long, body: Runnable): Worker.DoAfter =
     Worker.DoAfter(this, TimerHeap.deadlineAfter(nanos), body)

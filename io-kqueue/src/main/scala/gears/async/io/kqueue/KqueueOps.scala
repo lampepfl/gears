@@ -1,15 +1,20 @@
 package gears.async.io.kqueue
 
+import gears.async.io.Blocking
 import gears.async.io.BufferPool
 import gears.async.io.ByteStreams
+import gears.async.io.Fifos
 import gears.async.io.Handles
 import gears.async.io.Interface
+import gears.async.io.IpAddress
 import gears.async.io.IpDatagrams
 import gears.async.io.IpSocketAddress
 import gears.async.io.IpStreams
 import gears.async.io.Pipes
 import gears.async.io.Received
+import gears.async.io.RegularFiles
 import gears.async.io.Repeatable
+import gears.async.io.Resolving
 import gears.async.io.Slot
 import gears.async.io.SocketOption
 import gears.async.io.SocketOptionOps
@@ -52,21 +57,30 @@ sealed trait KqueueByteStreams extends ByteStreams { self: KqueueInterface & Kqu
   override type Readable = KqueueReadable
   override type Writable = KqueueWritable
 
-  override def read(handle: Readable, buf: ByteBuffer): KqueueReadableOp & Repeatable =
-    KqueueRead(handle, buf)
+  // A file is not waited for: its reads and writes as a stream are file ops, at the position it carries.
 
-  override def write(handle: Writable, buf: ByteBuffer): KqueueWritableOp & Repeatable =
-    KqueueWrite(handle, buf)
+  override def read(handle: Readable, buf: ByteBuffer): KqueueOp & Repeatable = handle match
+    case file: KqueueFile => KqueueFileRead(file, Array(buf), -1L)
+    case _                => KqueueRead(handle, buf)
 
-  override def read(handle: Readable, bufs: Array[ByteBuffer]): KqueueReadableOp & Repeatable =
-    KqueueScatterRead(handle, bufs)
+  override def write(handle: Writable, buf: ByteBuffer): KqueueOp & Repeatable = handle match
+    case file: KqueueFile => KqueueFileWrite(file, Array(buf), -1L)
+    case _                => KqueueWrite(handle, buf)
 
-  override def write(handle: Writable, bufs: Array[ByteBuffer]): KqueueWritableOp & Repeatable =
-    KqueueGatherWrite(handle, bufs)
+  override def read(handle: Readable, bufs: Array[ByteBuffer]): KqueueOp & Repeatable = handle match
+    case file: KqueueFile => KqueueFileRead(file, bufs, -1L)
+    case _                => KqueueScatterRead(handle, bufs)
 
-  override def read(handle: Readable, pool: BufferPool, into: Slot[Received]): KqueueReadableOp & Repeatable =
+  override def write(handle: Writable, bufs: Array[ByteBuffer]): KqueueOp & Repeatable = handle match
+    case file: KqueueFile => KqueueFileWrite(file, bufs, -1L)
+    case _                => KqueueGatherWrite(handle, bufs)
+
+  override def read(handle: Readable, pool: BufferPool, into: Slot[Received]): KqueueOp & Repeatable =
     pool match
-      case pool: LendingPool => KqueuePooledRead(handle, pool, into)
+      case pool: LendingPool =>
+        handle match
+          case file: KqueueFile => KqueueFilePooledRead(file, pool, into)
+          case _                => KqueuePooledRead(handle, pool, into)
       case _ => throw new IllegalArgumentException("A pooled read takes a pool of this backend's (Backend.pool)")
 }
 
@@ -284,6 +298,42 @@ sealed trait KqueueUnixDatagrams extends UnixDatagrams {
     KqueueSockets.addressOf(handle, peer = true).asInstanceOf[UnixAddress]
 }
 
+sealed trait KqueueBlockingOps extends Blocking { self: KqueueInterface =>
+  override def blocking(body: () => Unit): KqueueOp = KqueueBlocking(body)
+  override def blocking[A <: AnyRef](body: () => A, into: Slot[A]): KqueueOp = KqueueBlockingValue(body, into)
+}
+
+sealed trait KqueueRegularFiles extends RegularFiles {
+  self: KqueueInterface & KqueueHandles & KqueueByteStreams =>
+  override type File = KqueueFile
+
+  override def open(path: String, write: Boolean, into: Slot[KqueueFile]): KqueueOp = KqueueOpenFile(path, write, into)
+
+  override def read(handle: KqueueFile, buf: ByteBuffer, offset: Long): KqueueOp & Repeatable = {
+    Checks.checkOffset(offset)
+    KqueueFileRead(handle, Array(buf), offset)
+  }
+
+  override def write(handle: KqueueFile, buf: ByteBuffer, offset: Long): KqueueOp & Repeatable = {
+    Checks.checkOffset(offset)
+    KqueueFileWrite(handle, Array(buf), offset)
+  }
+
+  override def sync(handle: KqueueFile): KqueueOp & Repeatable = KqueueFileSync(handle)
+}
+
+sealed trait KqueueResolving extends Resolving { self: KqueueInterface =>
+  override def resolve(host: String, into: Slot[List[IpAddress]]): KqueueOp = KqueueResolve(host, into)
+}
+
+sealed trait KqueueFifos extends Fifos { self: KqueueInterface & KqueueHandles & KqueueByteStreams =>
+  override def openFifoForReading(path: String, into: Slot[KqueueReadable]): KqueueOp =
+    KqueueOpenFifo[KqueueReadable](path, write = false, into)(new FifoRead(_, _))
+
+  override def openFifoForWriting(path: String, into: Slot[KqueueWritable]): KqueueOp =
+    KqueueOpenFifo[KqueueWritable](path, write = true, into)(new FifoWrite(_, _))
+}
+
 object KqueueOps
     extends KqueueInterface,
       KqueueHandles,
@@ -294,4 +344,8 @@ object KqueueOps
       KqueueIpStreams,
       KqueueUnixStreams,
       KqueueIpDatagrams,
-      KqueueUnixDatagrams {}
+      KqueueUnixDatagrams,
+      KqueueBlockingOps,
+      KqueueRegularFiles,
+      KqueueResolving,
+      KqueueFifos {}

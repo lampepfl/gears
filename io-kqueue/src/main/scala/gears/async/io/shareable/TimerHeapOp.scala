@@ -25,6 +25,7 @@ object TimerHeapOp {
   case object TimerFired
   case object CloseFired
   case object ReadyFired
+  case object WorkFired
   type State = Try[Unit] | CloseFired.type | TimerFired.type | ReadyFired.type | CancelledSentinel.type | Null
   type Outcome = Try[Unit] | CancelledSentinel.type
 }
@@ -221,6 +222,11 @@ abstract class AbstractTimerHeapOp private[shareable] ()
   }
 
   protected def completeFromReady(result: Outcome): Unit = settleHolding(TimerHeapOp.ReadyFired, result)
+
+  /** Claims the op for the thread that did its work elsewhere (see `WorkOffThread`): as `claimAtDeadline`. */
+  protected final def claimAtWork(): Boolean = claim.compareAndSet(null, TimerHeapOp.WorkFired)
+
+  protected final def completeFromWork(result: Outcome): Unit = settleHolding(TimerHeapOp.WorkFired, result)
 
   /** Gives back a claim made with `claimAtReady`, the handle not having been ready after all: the op waits on, and can
     * be claimed again. A cancel that came while it was claimed could not settle it, so it is settled as cancelled here
