@@ -27,10 +27,16 @@ abstract class Worker(val id: Int, final val handleOwner: HandleOwner) extends T
   /** The tasks given to this worker that it has not come to yet, which a worker with nothing to do may take some of. */
   private val inbox = new Inbox
 
+  /** Whether a wake-up for a task given from another thread is on its way and the worker has not yet begun the turn it
+    * brings: a task given meanwhile needs no wake-up of its own, as it is in the inbox before that turn drains it.
+    * Cleared by the worker as it begins a turn, before it looks at its inbox.
+    */
+  private val wakePending = new java.util.concurrent.atomic.AtomicBoolean(false)
+
   /** Whether the worker has taken `task`, which it refuses once it has left `loop`. */
   def submit(task: Runnable): Boolean = {
     inbox.add(task): Unit
-    wake()
+    if wakePending.compareAndSet(false, true) then wake()
     !exited || !inbox.takeBack(task)
   }
 
@@ -222,6 +228,7 @@ abstract class Worker(val id: Int, final val handleOwner: HandleOwner) extends T
   def loop(): Unit = {
     while !stopped || !isEmpty() do
       turns += 1
+      if wakePending.get() then wakePending.set(false)
       val now = System.nanoTime()
       fireTimers(now)
       runReady()
