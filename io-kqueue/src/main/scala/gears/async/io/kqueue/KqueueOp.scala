@@ -1,5 +1,6 @@
 package gears.async.io.kqueue
 
+import gears.async.Async
 import gears.async.io.Deadline
 import gears.async.io.Received
 import gears.async.io.Slot
@@ -26,50 +27,51 @@ sealed trait KqueueOp extends TimerHeapOp:
   type Source = KqueuePoller
   final def _holdTimer(worker: KqueuePoller): Unit = worker.addTimer(this)
 
-sealed trait KqueueReadableOp extends KqueueOp
+/** An op that waits for its handle to be ready, on the worker that listens for it (see `ReadyWaiting`). */
+sealed trait KqueueReadinessOp extends KqueueOp:
+  def performWhenReady(self: KqueuePoller)(using Async): Unit
 
-sealed trait KqueueWritableOp extends KqueueOp
+/** An op done as it is performed, with nothing to wait for (see `ImmediateOp`). */
+sealed trait KqueueImmediateOp extends KqueueOp:
+  def perform(): Unit
+
+sealed trait KqueueReadableOp extends KqueueReadinessOp
+
+sealed trait KqueueWritableOp extends KqueueReadinessOp
 
 sealed trait KqueueTimerOp extends KqueueOp
 
-sealed trait KqueuePipeOp extends KqueueOp
+sealed trait KqueuePipeOp extends KqueueImmediateOp
 
 sealed trait KqueueDeadlineOp extends KqueueOp with Deadline
 
-sealed trait KqueueCloseOp extends KqueueOp
-
-trait KqueueReadOps extends PosixReadOps:
-  type ReadableHandle = KqueueReadable
-  type WorkerSource = KqueuePoller
-
-trait KqueueWriteOps extends PosixWriteOps:
-  type WriteableHandle = KqueueWritable
-  type WorkerSource = KqueuePoller
+sealed trait KqueueCloseOp extends KqueueOp:
+  def performClose(self: KqueuePoller)(using Async): Unit
 
 private[kqueue] final class KqueueRead(handle: KqueueReadable, buf: ByteBuffer)
-    extends AbstractReadOp[KqueueReadable, KqueuePoller](handle, buf),
+    extends AbstractReadOp(handle, buf),
       KqueueReadableOp,
-      KqueueReadOps
+      PosixReadOps[KqueueReadable]
 
 private[kqueue] final class KqueueWrite(handle: KqueueWritable, buf: ByteBuffer)
-    extends AbstractWriteOp[KqueueWritable, KqueuePoller](handle, buf),
+    extends AbstractWriteOp(handle, buf),
       KqueueWritableOp,
-      KqueueWriteOps
+      PosixWriteOps[KqueueWritable]
 
 private[kqueue] final class KqueueScatterRead(handle: KqueueReadable, bufs: Array[ByteBuffer])
-    extends AbstractScatterReadOp[KqueueReadable, KqueuePoller](handle, bufs),
+    extends AbstractScatterReadOp(handle, bufs),
       KqueueReadableOp,
-      KqueueReadOps
+      PosixReadOps[KqueueReadable]
 
 private[kqueue] final class KqueuePooledRead(handle: KqueueReadable, pool: LendingPool, into: Slot[Received])
-    extends AbstractPooledReadOp[KqueueReadable, KqueuePoller](handle, pool, into),
+    extends AbstractPooledReadOp(handle, pool, into),
       KqueueReadableOp,
-      KqueueReadOps
+      PosixReadOps[KqueueReadable]
 
 private[kqueue] final class KqueueGatherWrite(handle: KqueueWritable, bufs: Array[ByteBuffer])
-    extends AbstractGatherWriteOp[KqueueWritable, KqueuePoller](handle, bufs),
+    extends AbstractGatherWriteOp(handle, bufs),
       KqueueWritableOp,
-      KqueueWriteOps
+      PosixWriteOps[KqueueWritable]
 
 private[kqueue] final class KqueueCloseHandle(handle: KqueueHandle) extends AbstractCloseOp(handle) with KqueueCloseOp
 

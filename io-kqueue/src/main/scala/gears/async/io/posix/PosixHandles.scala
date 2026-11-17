@@ -1,7 +1,5 @@
 package gears.async.io.posix
 
-import gears.async.io.shareable.PipeOpener
-
 import _root_.gears.async.io.shareable.AbstractBaseHandle
 import _root_.gears.async.io.shareable.BaseReadableHandle
 import _root_.gears.async.io.shareable.BaseWritableHandle
@@ -16,13 +14,11 @@ abstract class PosixKernelHandle(val fd: Int) extends AbstractBaseHandle:
       throw new IllegalStateException("Concurrent cleanup detected")
     true
 
-trait PosixPipeOpener extends PipeOpener:
-  type PipeReadable <: PosixKernelHandle & BaseReadableHandle
-  type PipeWritable <: PosixKernelHandle & BaseWritableHandle
+/** Opens a pipe as a backend's handles `R` and `W`, which it makes of the two descriptors: mixed into the op. */
+trait PosixPipeOpener[R, W]:
+  def makeReadableHandle(fd: Int): R
+  def makeWritableHandle(fd: Int): W
 
-  def makeReadableHandle(fd: Int): PipeReadable
-  def makeWritableHandle(fd: Int): PipeWritable
-
-  def pipe(): (read: PipeReadable, write: PipeWritable) =
+  final def _pipe(): (R, W) =
     val (readFd, writeFd) = Descriptors.pipe()
     (makeReadableHandle(readFd), makeWritableHandle(writeFd))

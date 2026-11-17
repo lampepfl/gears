@@ -376,4 +376,36 @@ class HandleStateSuite extends munit.FunSuite {
       assertEquals(handle.claimedWork, 0L)
       assertEquals(handle.cleanups.get(), 1)
   }
+
+  test("an op takes its event source from its handle's type, and can't be given another") {
+    // A read of a handle that `MonitorPoller` listens for is an op whose source is `MonitorPoller`: that compiles.
+    assertNoDiff(
+      compileErrors("""
+        import gears.async.io.shareable.*
+        abstract class Monitored extends AbstractBaseHandle, BaseReadableHandle { type Source = MonitorPoller }
+        abstract class Fits(handle: Monitored, buf: java.nio.ByteBuffer) extends AbstractReadOp[Monitored](handle, buf) {
+          def here(source: MonitorPoller)(using gears.async.Async): Unit = performWhenReady(source)
+        }
+      """),
+      ""
+    )
+    // The same op said to be a kqueue worker's is refused: its source is its handle's, and no other.
+    val mismatched = compileErrors("""
+      import gears.async.io.shareable.*
+      abstract class Monitored extends AbstractBaseHandle, BaseReadableHandle { type Source = MonitorPoller }
+      abstract class Misfit(handle: Monitored, buf: java.nio.ByteBuffer) extends AbstractReadOp[Monitored](handle, buf) {
+        type Source = gears.async.io.kqueue.KqueuePoller
+      }
+    """)
+    assert(mismatched.contains("Source"), mismatched)
+    // Nor is it performed on a source that does not listen for its handle.
+    val elsewhere = compileErrors("""
+      import gears.async.io.shareable.*
+      abstract class Monitored extends AbstractBaseHandle, BaseReadableHandle { type Source = MonitorPoller }
+      abstract class Astray(handle: Monitored, buf: java.nio.ByteBuffer) extends AbstractReadOp[Monitored](handle, buf) {
+        def there(source: gears.async.io.kqueue.KqueuePoller)(using gears.async.Async): Unit = performWhenReady(source)
+      }
+    """)
+    assert(elsewhere.nonEmpty, "performed on a source that is not its handle's")
+  }
 }

@@ -15,9 +15,6 @@ sealed trait KqueueWritable extends KqueueHandle, BaseWritableHandle
 final class PipeRead(fd: Int) extends PosixKernelHandle(fd) with KqueueReadable
 final class PipeWrite(fd: Int) extends PosixKernelHandle(fd) with KqueueWritable
 
-trait KqueuePipeOpener extends PosixPipeOpener:
-  type PipeReadable = PipeRead
-  type PipeWritable = PipeWrite
-
-  final def makeReadableHandle(fd: Int): PipeReadable = new PipeRead(fd)
-  final def makeWritableHandle(fd: Int): PipeWritable = new PipeWrite(fd)
+trait KqueuePipeOpener extends PosixPipeOpener[KqueueReadable, KqueueWritable]:
+  final def makeReadableHandle(fd: Int): PipeRead = new PipeRead(fd)
+  final def makeWritableHandle(fd: Int): PipeWrite = new PipeWrite(fd)

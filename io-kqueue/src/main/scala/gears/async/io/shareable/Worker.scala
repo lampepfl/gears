@@ -21,9 +21,6 @@ abstract class Worker(val id: Int) extends TimerHeapImpl, EventSource {
   /** Its pool's ops, and what its scheduler is asked to run later. */
   type Timer = Op | Worker.DoAfter
 
-  type ThisWorkerSource <: EventSource
-  def asThisWorkerSource: this.type & ThisWorkerSource
-
   /** The tasks given to this worker that it has not come to yet, which a worker with nothing to do may take some of. */
   private val inbox = new Inbox
 
@@ -147,18 +144,6 @@ abstract class Worker(val id: Int) extends TimerHeapImpl, EventSource {
   /** Does the core work of performing an operation, when it returns the operation is guaranteed to have been processed.
     */
   def performOp(op: Op)(using Async): Unit
-
-  def performClose(op: Op & AbstractCloseOp { type Source >: ThisWorkerSource })(using Async): Unit =
-    var shouldWait = false
-    if op.hasDeadline then
-      op.holdTimerOn(asThisWorkerSource)
-      shouldWait = true
-    if !op.pollClose() then shouldWait = true
-    if shouldWait then op.parkUntilSettled()
-
-  /** Does a read or a write at once, or has it wait for its handle to be ready (see `performWhenReady`). */
-  def performWhenReady(op: Op & AbstractReadinessOp[?, ThisWorkerSource])(using Async): Unit =
-    op.performWhenReady(asThisWorkerSource)
 
   /** As a timer of this worker's. */
   override protected def makeSchedule(nanos: Long, body: Runnable): Worker.DoAfter =

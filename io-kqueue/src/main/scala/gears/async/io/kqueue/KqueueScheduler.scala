@@ -27,15 +27,9 @@ class KqueueScheduler(workers: Int, onStarvation: Starvation.Handler = Starvatio
         case deadline: KqueueMakeDeadline =>
           deadline.holdTimerOn(this)
           deadline.parkUntilSettled()
-        case pipe: KqueueMakePipe =>
-          pipe.perform()
-        case close: KqueueCloseHandle =>
-          performClose(close)
-        case read: KqueueRead         => performWhenReady(read)
-        case read: KqueueScatterRead  => performWhenReady(read)
-        case read: KqueuePooledRead   => performWhenReady(read)
-        case write: KqueueWrite       => performWhenReady(write)
-        case write: KqueueGatherWrite => performWhenReady(write)
+        case close: KqueueCloseOp         => close.performClose(this)
+        case ready: KqueueReadinessOp     => ready.performWhenReady(this)
+        case immediate: KqueueImmediateOp => immediate.perform()
     }
   }
 }

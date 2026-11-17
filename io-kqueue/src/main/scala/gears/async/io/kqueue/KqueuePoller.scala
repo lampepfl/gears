@@ -20,9 +20,6 @@ trait KqueuePoller(maxEvents: Int) extends Poller, EventSource {
 
   val events = KqueueLoop.allocateQueue(maxEvents)(using zone)
 
-  type ThisWorkerSource = KqueuePoller
-  def asThisWorkerSource: this.type & ThisWorkerSource = this
-
   private val WakeEvent = 0.toUSize
   KqueueLoop.createAndRegisterEvents(kq, 1) { events =>
     KqueueLoop.addUser(events(0), WakeEvent) // edge-triggered, registered once
