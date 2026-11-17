@@ -135,6 +135,20 @@ lazy val ioShareable =
     .nativeSettings(nativeConfig ~= { _.withMultithreading(true) })
     .dependsOn(root)
 
+// The JVM backend: the JDK's channels over selectors, on the pool of workers the kqueue backend runs on.
+lazy val ioNio =
+  (project in file("io-nio"))
+    .settings(
+      name := "gears-io-nio",
+      publish / skip := false,
+      versionScheme := Some("early-semver"),
+      scalacOptions += "-release:21",
+      libraryDependencies += munit % Test,
+      testFrameworks += MUnitFramework,
+      Test / fork := true
+    )
+    .dependsOn(root.jvm, ioShareable.jvm, ioTestkit.jvm % Test)
+
 // A high performance native backend for macOS and FreeBSD. Its native resources override `setjmp` and `longjmp` in
 // every program that links it with `_setjmp` and `_longjmp`, which leave the signal mask alone (see setjmp_override.S).
 lazy val ioKqueue =
