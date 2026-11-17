@@ -26,3 +26,29 @@ object NioBackend extends Backend {
       program: Io[Interface] ?=> Async.Spawn ?=> T
   ): T = shareable.WorkpoolScheduler.run(new NioThreadsScheduler(workers, onStarvation))(program)
 }
+
+/** The JVM backend with its futures carried by the pool's own workers, in place of the JDK's scheduler: `NioBackend`'s
+  * ops and handles, on a pool that runs the program as the kqueue backend's does on Scala Native. A future woken by a
+  * worker goes on on that worker's thread, with no hand-over to another, and the pool reports and relieves a worker
+  * that is kept from its tasks (see `Starvation`).
+  *
+  * The JDK lets nothing but itself schedule virtual threads: a program run over this backend needs
+  * `--add-opens java.base/java.lang=ALL-UNNAMED`, and fails to start without it, saying so.
+  */
+object NioPoolBackend extends Backend {
+  type Interface = NioOps.type
+
+  def pool(bufferSize: Int, buffers: Int): BufferPool = new DirectPool(bufferSize, buffers)
+
+  /** Runs `program` on a pool of one worker for each processor, shutting it down afterwards. */
+  private[io] def run[T](program: Io[Interface] ?=> Async.Spawn ?=> T): T =
+    runOn(Runtime.getRuntime.availableProcessors, shareable.Starvation.printWarning)(program)
+
+  /** As `run`, on a pool of `workers` workers whose reports of starved workers go to `onStarvation`. */
+  private[io] def runOn[T](workers: Int, onStarvation: shareable.Starvation.Handler)(
+      program: Io[Interface] ?=> Async.Spawn ?=> T
+  ): T = {
+    VirtualCarriers.check()
+    shareable.WorkpoolScheduler.run(new NioPoolScheduler(workers, onStarvation))(program)
+  }
+}

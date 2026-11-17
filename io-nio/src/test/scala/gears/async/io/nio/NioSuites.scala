@@ -20,3 +20,21 @@ class NioPipeSuite extends PipeContract {
 class NioSimpleIOSuite extends SimpleIOChecks with PipeFixture {
   val backend: NioBackend.type = NioBackend
 }
+
+// The same contracts with the futures carried by the pool's workers.
+
+class NioPoolContractSuite extends OpsContract {
+  val backend: Backend = NioPoolBackend
+}
+
+class NioPoolThreadedTimerSuite extends ThreadedTimerContract {
+  val backend: Backend = NioPoolBackend
+}
+
+class NioPoolPipeSuite extends PipeContract {
+  val backend: NioPoolBackend.type = NioPoolBackend
+}
+
+class NioPoolSimpleIOSuite extends SimpleIOChecks with PipeFixture {
+  val backend: NioPoolBackend.type = NioPoolBackend
+}

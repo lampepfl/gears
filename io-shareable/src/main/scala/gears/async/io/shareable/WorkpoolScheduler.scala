@@ -50,6 +50,11 @@ abstract class WorkpoolScheduler[I <: Interface { type Op <: AsyncOp & Reentrant
   /** The worker of this pool that `thread` runs, or null: a worker's thread carries its worker, so this is no lookup by
     * thread.
     */
+  /** The platform thread running the caller, which is the caller's own unless something else carries it, as a JVM
+    * pool's workers may carry virtual threads.
+    */
+  protected def callerThread(): Thread = Thread.currentThread()
+
   protected final def workerOf(thread: Thread): PoolWorker | Null = thread match
     case thread: WorkpoolScheduler.WorkerThread =>
       val worker = thread.worker
@@ -170,7 +175,7 @@ abstract class WorkpoolScheduler[I <: Interface { type Op <: AsyncOp & Reentrant
   )
 
   protected final def workerOfCurrentThread(): PoolWorker =
-    val worker = workerOf(Thread.currentThread())
+    val worker = workerOf(callerThread())
     if worker == null then throw new IllegalStateException("Current thread is not a worker")
     worker
 
@@ -239,7 +244,7 @@ abstract class WorkpoolScheduler[I <: Interface { type Op <: AsyncOp & Reentrant
   /** Gives `body` to a worker to run, as `execute` does for a pool whose futures are its workers' tasks. */
   protected final def runOnWorker(body: Runnable): Unit =
     checkRunning()
-    val current = workerOf(Thread.currentThread())
+    val current = workerOf(callerThread())
     if current != null then current.spawnLocal(body)
     // The check alone can pass just before the workers leave.
     else if !nextWorker().submit(body) then throw new IllegalStateException("Scheduler has shut down")

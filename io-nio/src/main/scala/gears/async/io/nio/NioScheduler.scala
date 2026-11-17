@@ -79,3 +79,31 @@ final class NioThreadsScheduler(workers: Int, onStarvation: Starvation.Handler =
   /** The futures are not the workers' tasks: one that never waits keeps nothing of a worker's. */
   override protected def budgetSpent(worker: PoolWorker): Boolean = false
 }
+
+/** The pool of a program whose virtual threads the workers carry, in place of the JDK's scheduler: a future runs on a
+  * worker's thread, as on Scala Native, and one woken by a worker goes on there, with no other thread to hand it to. An
+  * op that waits goes to the worker carrying the future performing it. It needs what `VirtualCarriers` does of the JDK.
+  *
+  * A future is not tied to its worker: one that blocks on a monitor, or is woken by a thread of the JDK's, may go on
+  * elsewhere, between any two steps of an op. So nothing here relies on the caller being on a worker's own thread, any
+  * more than the pool on the JDK's threads does; the worker is where the op's wait is cheapest, not where it must be.
+  */
+final class NioPoolScheduler(workers: Int, onStarvation: Starvation.Handler = Starvation.printWarning)
+    extends NioScheduler(NioPoolBackend, workers, onStarvation) {
+
+  /** A thread's continuation is a task of the worker carrying whoever made it ready to run, or of the workers in turn.
+    */
+  protected val threads: ThreadFactory = VirtualCarriers.factory { continuation =>
+    try runOnWorker(continuation)
+    catch
+      case shutDown: IllegalStateException =>
+        throw new java.util.concurrent.RejectedExecutionException(shutDown.getMessage)
+  }
+
+  override protected def callerThread(): Thread = VirtualCarriers.currentCarrier()
+
+  override protected def selectWorker(): PoolWorker = {
+    val carrying = workerOf(callerThread())
+    if carrying != null then carrying else workerFor(Thread.currentThread().threadId())
+  }
+}

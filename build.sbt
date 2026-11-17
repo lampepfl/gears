@@ -145,7 +145,9 @@ lazy val ioNio =
       scalacOptions += "-release:21",
       libraryDependencies += munit % Test,
       testFrameworks += MUnitFramework,
-      Test / fork := true
+      Test / fork := true,
+      // For `NioPoolBackend`, whose pool carries the virtual threads.
+      Test / javaOptions += "--add-opens=java.base/java.lang=ALL-UNNAMED"
     )
     .dependsOn(root.jvm, ioShareable.jvm, ioTestkit.jvm % Test)
 
