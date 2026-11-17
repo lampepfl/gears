@@ -1,15 +1,19 @@
 package gears.async.io.nio
 
+import gears.async.io.Blocking
 import gears.async.io.BufferPool
 import gears.async.io.ByteStreams
 import gears.async.io.Handles
 import gears.async.io.Interface
+import gears.async.io.IpAddress
 import gears.async.io.IpDatagrams
 import gears.async.io.IpSocketAddress
 import gears.async.io.IpStreams
 import gears.async.io.Pipes
 import gears.async.io.Received
+import gears.async.io.RegularFiles
 import gears.async.io.Repeatable
+import gears.async.io.Resolving
 import gears.async.io.Slot
 import gears.async.io.SocketOption
 import gears.async.io.SocketOptionOps
@@ -49,17 +53,30 @@ sealed trait NioByteStreams extends ByteStreams { self: NioInterface & NioHandle
   override type Readable = NioReadable
   override type Writable = NioWritable
 
-  override def read(handle: Readable, buf: ByteBuffer): NioOp & Repeatable = NioRead(handle, buf)
+  // A file is not waited for: its reads and writes as a stream are file ops, at the position it carries.
 
-  override def write(handle: Writable, buf: ByteBuffer): NioOp & Repeatable = NioWrite(handle, buf)
+  override def read(handle: Readable, buf: ByteBuffer): NioOp & Repeatable = handle match
+    case file: NioFile => NioFileRead(file, Array(buf), -1L)
+    case _             => NioRead(handle, buf)
 
-  override def read(handle: Readable, bufs: Array[ByteBuffer]): NioOp & Repeatable = NioScatterRead(handle, bufs)
+  override def write(handle: Writable, buf: ByteBuffer): NioOp & Repeatable = handle match
+    case file: NioFile => NioFileWrite(file, Array(buf), -1L)
+    case _             => NioWrite(handle, buf)
 
-  override def write(handle: Writable, bufs: Array[ByteBuffer]): NioOp & Repeatable = NioGatherWrite(handle, bufs)
+  override def read(handle: Readable, bufs: Array[ByteBuffer]): NioOp & Repeatable = handle match
+    case file: NioFile => NioFileRead(file, bufs, -1L)
+    case _             => NioScatterRead(handle, bufs)
+
+  override def write(handle: Writable, bufs: Array[ByteBuffer]): NioOp & Repeatable = handle match
+    case file: NioFile => NioFileWrite(file, bufs, -1L)
+    case _             => NioGatherWrite(handle, bufs)
 
   override def read(handle: Readable, pool: BufferPool, into: Slot[Received]): NioOp & Repeatable =
     pool match
-      case pool: LendingPool => NioPooledRead(handle, pool, into)
+      case pool: LendingPool =>
+        handle match
+          case file: NioFile => NioFilePooledRead(file, pool, into)
+          case _             => NioPooledRead(handle, pool, into)
       case _ => throw new IllegalArgumentException("A pooled read takes a pool of this backend's (Backend.pool)")
 }
 
@@ -193,6 +210,34 @@ sealed trait NioIpDatagrams extends IpDatagrams { self: NioInterface & NioHandle
     NioSockets.addressOf(handle, peer = true).asInstanceOf[IpSocketAddress]
 }
 
+sealed trait NioBlockingOps extends Blocking { self: NioInterface =>
+  override def blocking(body: () => Unit): NioOp = NioBlocking(body)
+  override def blocking[A <: AnyRef](body: () => A, into: Slot[A]): NioOp = NioBlockingValue(body, into)
+}
+
+sealed trait NioRegularFiles extends RegularFiles {
+  self: NioInterface & NioHandles & NioByteStreams =>
+  override type File = NioFile
+
+  override def open(path: String, write: Boolean, into: Slot[NioFile]): NioOp = NioOpenFile(path, write, into)
+
+  override def read(handle: NioFile, buf: ByteBuffer, offset: Long): NioOp & Repeatable = {
+    Checks.checkOffset(offset)
+    NioFileRead(handle, Array(buf), offset)
+  }
+
+  override def write(handle: NioFile, buf: ByteBuffer, offset: Long): NioOp & Repeatable = {
+    Checks.checkOffset(offset)
+    NioFileWrite(handle, Array(buf), offset)
+  }
+
+  override def sync(handle: NioFile): NioOp & Repeatable = NioFileSync(handle)
+}
+
+sealed trait NioResolving extends Resolving { self: NioInterface =>
+  override def resolve(host: String, into: Slot[List[IpAddress]]): NioOp = NioResolve(host, into)
+}
+
 object NioOps
     extends NioInterface,
       NioHandles,
@@ -202,4 +247,7 @@ object NioOps
       NioStreamSockets,
       NioIpStreams,
       NioUnixStreams,
-      NioIpDatagrams {}
+      NioIpDatagrams,
+      NioBlockingOps,
+      NioRegularFiles,
+      NioResolving {}

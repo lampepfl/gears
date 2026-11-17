@@ -4,6 +4,33 @@ package nio
 import gears.async.io.testkit.*
 import gears.io.testkit.SimpleIOChecks
 import gears.io.testkit.SimpleIOIpStreamChecks
+import gears.io.testkit.SimpleIOResolveChecks
+
+import java.net.Inet6Address
+import java.net.NetworkInterface
+import scala.jdk.CollectionConverters.*
+
+/** The names a link-local IPv6 address of this machine has with its interface's name for a scope. */
+private[nio] object ScopedNames {
+  def addresses: List[(String, IpAddress)] =
+    NetworkInterface
+      .getNetworkInterfaces()
+      .asScala
+      .flatMap(interface =>
+        interface.getInetAddresses().asScala.collect {
+          case address: Inet6Address if address.isLinkLocalAddress() && address.getScopeId() > 0 =>
+            (interface.getName(), address)
+        }
+      )
+      .nextOption()
+      .toList
+      .flatMap { (name, address) =>
+        val expected = IpAddress.fromBytes(Protocol.IPv6, address.getAddress(), address.getScopeId())
+        val compressed = expected.toString.takeWhile(_ != '%')
+        val expanded = address.getHostAddress().takeWhile(_ != '%')
+        List(s"$compressed%$name", s"$expanded%$name", s"[$compressed%$name]").map(_ -> expected)
+      }
+}
 
 /** Each suite sees only the capabilities required by its contracts. */
 class NioContractSuite extends OpsContract {
@@ -12,6 +39,10 @@ class NioContractSuite extends OpsContract {
 
 class NioThreadedTimerSuite extends ThreadedTimerContract {
   val backend: Backend = NioBackend
+}
+
+class NioBlockingSuite extends BlockingContract {
+  val backend: Backend { type Interface <: Blocking } = NioBackend
 }
 
 class NioPipeSuite extends PipeContract {
@@ -39,6 +70,19 @@ class NioUnixStreamSuite extends UnixStreamContract {
   val backend: Backend { type Interface <: UnixStreams } = NioBackend
 }
 
+class NioFileSuite extends FileContract {
+  val backend: Backend { type Interface <: RegularFiles } = NioBackend
+}
+
+class NioResolveSuite extends ResolveContract {
+  val backend: Backend { type Interface <: Resolving } = NioBackend
+  override protected def namedScopedAddresses: List[(String, IpAddress)] = ScopedNames.addresses
+}
+
+class NioSimpleIOResolveSuite extends SimpleIOResolveChecks {
+  val backend: Backend { type Interface <: Resolving } = NioBackend
+}
+
 class NioSimpleIOSocketSuite extends SimpleIOChecks with IpStreamFixture {
   val backend: Backend { type Interface <: IpStreams } = NioBackend
 }
@@ -55,6 +99,10 @@ class NioPoolContractSuite extends OpsContract {
 
 class NioPoolThreadedTimerSuite extends ThreadedTimerContract {
   val backend: Backend = NioPoolBackend
+}
+
+class NioPoolBlockingSuite extends BlockingContract {
+  val backend: Backend { type Interface <: Blocking } = NioPoolBackend
 }
 
 class NioPoolPipeSuite extends PipeContract {
@@ -79,6 +127,19 @@ class NioPoolIpDatagramSuite extends IpDatagramContract {
 
 class NioPoolUnixStreamSuite extends UnixStreamContract {
   val backend: Backend { type Interface <: UnixStreams } = NioPoolBackend
+}
+
+class NioPoolFileSuite extends FileContract {
+  val backend: Backend { type Interface <: RegularFiles } = NioPoolBackend
+}
+
+class NioPoolResolveSuite extends ResolveContract {
+  val backend: Backend { type Interface <: Resolving } = NioPoolBackend
+  override protected def namedScopedAddresses: List[(String, IpAddress)] = ScopedNames.addresses
+}
+
+class NioPoolSimpleIOResolveSuite extends SimpleIOResolveChecks {
+  val backend: Backend { type Interface <: Resolving } = NioPoolBackend
 }
 
 class NioPoolSimpleIOSocketSuite extends SimpleIOChecks with IpStreamFixture {

@@ -2,6 +2,7 @@ package gears.async.io.nio
 
 import gears.async.Async
 import gears.async.io.Deadline
+import gears.async.io.IpAddress
 import gears.async.io.IpSocketAddress
 import gears.async.io.Received
 import gears.async.io.Slot
@@ -9,23 +10,32 @@ import gears.async.io.SocketOption
 import gears.async.io.SocketOptions
 import gears.async.io.shareable.AbstractAcceptAllOp
 import gears.async.io.shareable.AbstractAcceptOp
+import gears.async.io.shareable.AbstractBlockingOp
+import gears.async.io.shareable.AbstractBlockingValueOp
 import gears.async.io.shareable.AbstractCloseOp
 import gears.async.io.shareable.AbstractConnectOp
+import gears.async.io.shareable.AbstractFilePooledReadOp
+import gears.async.io.shareable.AbstractFileReadOp
+import gears.async.io.shareable.AbstractFileSyncOp
+import gears.async.io.shareable.AbstractFileWriteOp
 import gears.async.io.shareable.AbstractGatherWriteOp
 import gears.async.io.shareable.AbstractHandleCallOp
 import gears.async.io.shareable.AbstractMakeDeadlineOp
 import gears.async.io.shareable.AbstractMakePipeOp
 import gears.async.io.shareable.AbstractMakeTimerOp
+import gears.async.io.shareable.AbstractOpenFileOp
 import gears.async.io.shareable.AbstractOpenOp
 import gears.async.io.shareable.AbstractPooledReadOp
 import gears.async.io.shareable.AbstractReadOp
 import gears.async.io.shareable.AbstractReceiveOp
+import gears.async.io.shareable.AbstractResolveOp
 import gears.async.io.shareable.AbstractScatterReadOp
 import gears.async.io.shareable.AbstractSendOp
 import gears.async.io.shareable.AbstractWriteOp
 import gears.async.io.shareable.HandleOwner
 import gears.async.io.shareable.LendingPool
 import gears.async.io.shareable.TimerHeapOp
+import gears.async.io.shareable.Worker
 
 import java.nio.ByteBuffer
 import java.nio.channels.DatagramChannel
@@ -45,6 +55,10 @@ sealed trait NioReadinessOp extends NioOp:
 /** An op done as it is performed, with nothing to wait for (see `ImmediateOp`). */
 sealed trait NioImmediateOp extends NioOp:
   def perform(owner: HandleOwner): Unit
+
+/** An op whose work is done off the workers' threads (see `WorkOffThread`). */
+sealed trait NioOffThreadOp extends NioOp:
+  def performOffThread(worker: Worker & NioPoller)(using Async): Unit
 
 sealed trait NioConnectOp extends NioOp:
   def performConnect(self: NioPoller)(using Async): Unit
@@ -171,3 +185,47 @@ private[nio] final class NioSend(socket: NioDatagramSocket, bufs: Array[ByteBuff
       NioReadinessOp:
   def _send(socket: NioDatagramSocket, bufs: Array[ByteBuffer]): Boolean =
     NioDatagrams.send(socket.datagrams, bufs, to)
+
+// ---- Blocking code
+
+private[nio] final class NioBlocking(body: () => Unit) extends AbstractBlockingOp(body), NioOffThreadOp
+
+private[nio] final class NioBlockingValue[A <: AnyRef](body: () => A, into: Slot[A])
+    extends AbstractBlockingValueOp(body, into),
+      NioOffThreadOp
+
+// ---- Regular files: `start` is the offset a positional op begins at, or negative for the file's stream position
+
+private[nio] final class NioOpenFile(path: String, write: Boolean, into: Slot[NioFile])
+    extends AbstractOpenFileOp(path, write, into),
+      NioOffThreadOp:
+  def _openFile(path: String, write: Boolean, owner: HandleOwner): NioFile = NioFiles.open(path, write, owner)
+
+private[nio] final class NioFileRead(file: NioFile, bufs: Array[ByteBuffer], start: Long)
+    extends AbstractFileReadOp(file, bufs, start),
+      NioOffThreadOp:
+  def _readAt(file: NioFile, buf: ByteBuffer, offset: Long): Int = NioFiles.readAt(file, buf, offset)
+
+private[nio] final class NioFileWrite(file: NioFile, bufs: Array[ByteBuffer], start: Long)
+    extends AbstractFileWriteOp(file, bufs, start),
+      NioOffThreadOp:
+  def _writeAt(file: NioFile, buf: ByteBuffer, offset: Long): Int = NioFiles.writeAt(file, buf, offset)
+
+private[nio] final class NioFilePooledRead(file: NioFile, pool: LendingPool, into: Slot[Received])
+    extends AbstractFilePooledReadOp(file, pool, into),
+      NioOffThreadOp:
+  def _readAt(file: NioFile, buf: ByteBuffer, offset: Long): Int = NioFiles.readAt(file, buf, offset)
+
+private[nio] final class NioFileSync(file: NioFile) extends AbstractFileSyncOp(file), NioOffThreadOp:
+  def _sync(file: NioFile): Unit = NioFiles.sync(file)
+
+// ---- Name resolution
+
+/** The JDK's lookup blocks, so it runs off the workers. An unknown host is the JDK's `UnknownHostException`, which is
+  * an `IOException`.
+  */
+private[nio] final class NioResolve(host: String, into: Slot[List[IpAddress]])
+    extends AbstractResolveOp(host, into),
+      NioOffThreadOp:
+  def _lookup(host: String): List[IpAddress] =
+    java.net.InetAddress.getAllByName(host).toList.map(NioAddresses.ip).distinct

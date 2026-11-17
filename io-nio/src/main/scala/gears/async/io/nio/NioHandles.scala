@@ -7,10 +7,12 @@ import gears.async.io.shareable.BaseHandle
 import gears.async.io.shareable.BaseReadableHandle
 import gears.async.io.shareable.BaseWritableHandle
 import gears.async.io.shareable.EventSource
+import gears.async.io.shareable.FilePosition
 import gears.async.io.shareable.HandleOwner
 import gears.async.io.shareable.HandleState
 
 import java.nio.channels.DatagramChannel
+import java.nio.channels.FileChannel
 import java.nio.channels.GatheringByteChannel
 import java.nio.channels.NetworkChannel
 import java.nio.channels.Pipe
@@ -150,3 +152,22 @@ final class NioBoundDatagram(datagrams: DatagramChannel, owner: HandleOwner)
 
 final class NioConnectedDatagram(datagrams: DatagramChannel, owner: HandleOwner)
     extends NioDatagramSocket(datagrams, SocketOption.Kind.ConnectedDatagram, owner)
+
+/** A regular file: read and written at offsets, and as a stream at the position it carries. Its ops are done off the
+  * workers, never waited for on a selector, which takes no file: its channel is closed as the handle is.
+  */
+final class NioFile(private[nio] val file: FileChannel, owner: HandleOwner)
+    extends AbstractBaseHandle(owner),
+      NioReadable,
+      NioWritable,
+      FilePosition:
+  open() // construction is acquisition of the handle
+
+  def reads: ScatteringByteChannel = file
+  def writes: GatheringByteChannel = file
+
+  final def cleanup()(using ClosePermit): Boolean =
+    file.close()
+    if !compareAndSetState(HandleState.ClosingState, HandleState.ClosedState) then
+      throw new IllegalStateException("Concurrent cleanup detected")
+    true

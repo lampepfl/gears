@@ -151,6 +151,19 @@ lazy val ioNio =
     )
     .dependsOn(root.jvm, ioShareable.jvm, ioTestkit.jvm % Test)
 
+// The JVM backends' demo application: the testkit's gears demos over them, as `ioNioDemos/run <command>`.
+lazy val ioNioDemos =
+  (project in file("io-nio/demos"))
+    .settings(
+      publish / skip := true,
+      scalacOptions += "-release:21",
+      Compile / mainClass := Some("niodemos.NioDemos"),
+      run / fork := true,
+      // For `--backend nio-pool`.
+      run / javaOptions += "--add-opens=java.base/java.lang=ALL-UNNAMED"
+    )
+    .dependsOn(ioNio, ioTestkit.jvm)
+
 // A high performance native backend for macOS and FreeBSD. Its native resources override `setjmp` and `longjmp` in
 // every program that links it with `_setjmp` and `_longjmp`, which leave the signal mask alone (see setjmp_override.S).
 lazy val ioKqueue =
