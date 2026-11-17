@@ -119,6 +119,22 @@ lazy val ioReferenceDemos =
     )
     .dependsOn(ioReference, ioTestkit.jvm)
 
+// What the backends that run on a pool of workers share (`gears.async.io.shareable`): the workers, their timers and
+// inboxes, handles and the ops that wait on them, with nothing of a platform's own. A backend adds its poller, its
+// handles and what its ops call.
+lazy val ioShareable =
+  crossProject(JVMPlatform, NativePlatform)
+    .crossType(CrossType.Pure)
+    .in(file("io-shareable"))
+    .settings(
+      name := "gears-io-shareable",
+      publish / skip := false,
+      versionScheme := Some("early-semver"),
+      scalacOptions += "-release:21"
+    )
+    .nativeSettings(nativeConfig ~= { _.withMultithreading(true) })
+    .dependsOn(root)
+
 // A high performance native backend for macOS and FreeBSD. Its native resources override `setjmp` and `longjmp` in
 // every program that links it with `_setjmp` and `_longjmp`, which leave the signal mask alone (see setjmp_override.S).
 lazy val ioKqueue =
@@ -162,7 +178,7 @@ lazy val ioKqueue =
         }
       }
     )
-    .dependsOn(root.native, ioTestkit.native % Test)
+    .dependsOn(root.native, ioShareable.native, ioTestkit.native % Test)
 
 // The kqueue backend's demo application: the testkit's gears demos over it, as `ioKqueueDemos/run <command>`.
 lazy val ioKqueueDemos =

@@ -50,7 +50,7 @@ abstract class WorkpoolScheduler[I <: Interface { type Op <: AsyncOp & Reentrant
   /** The worker of this pool that `thread` runs, or null: a worker's thread carries its worker, so this is no lookup by
     * thread.
     */
-  private def workerOf(thread: Thread): PoolWorker | Null = thread match
+  protected final def workerOf(thread: Thread): PoolWorker | Null = thread match
     case thread: WorkpoolScheduler.WorkerThread =>
       val worker = thread.worker
       if worker.id < workerGroup.length && (workerGroup(worker.id) eq worker) then worker.asInstanceOf[PoolWorker]
@@ -155,10 +155,20 @@ abstract class WorkpoolScheduler[I <: Interface { type Op <: AsyncOp & Reentrant
     moved
   }
   if starvationMonitor != null then starvationMonitor.start()
-  private def nextWorker(): PoolWorker = {
+
+  /** The workers in turn: for what comes from outside them. */
+  protected final def nextWorker(): PoolWorker = {
     val index = Math.floorMod(workerTicker.getAndIncrement(), workerGroup.length)
     workerGroup(index)
   }
+
+  /** The same worker for the same `key`, with the keys spread over the workers: for a caller that is on no worker, and
+    * has something of its own to be told apart by.
+    */
+  protected final def workerFor(key: Long): PoolWorker = workerGroup(
+    Math.floorMod(key, workerGroup.length.toLong).toInt
+  )
+
   protected final def workerOfCurrentThread(): PoolWorker =
     val worker = workerOf(Thread.currentThread())
     if worker == null then throw new IllegalStateException("Current thread is not a worker")
@@ -181,7 +191,7 @@ abstract class WorkpoolScheduler[I <: Interface { type Op <: AsyncOp & Reentrant
       var worker = selectWorker()
       // An op that is done as it is tried never gives its worker up: a future whose ops are always ready, a read at
       // the end of a stream for one, would keep it from every other task, its timers and its handles' events.
-      if worker.opBudgetSpent() then
+      if budgetSpent(worker) then
         `yield`()
         worker = selectWorker() // the future may go on elsewhere
       op.setTimeout(timeoutMillis)
@@ -192,6 +202,11 @@ abstract class WorkpoolScheduler[I <: Interface { type Op <: AsyncOp & Reentrant
       }
     }
   }
+
+  /** Whether the future performing an op on `worker` now should yield first (see `Worker.opBudgetSpent`): for a pool
+    * whose futures run on its workers, which is what the budget is for.
+    */
+  protected def budgetSpent(worker: PoolWorker): Boolean = worker.opBudgetSpent()
 
   /** Guards `execute` and `schedule`: work given to a pool that has shut down would never run. */
   @volatile private var isShutDown = false
@@ -219,7 +234,10 @@ abstract class WorkpoolScheduler[I <: Interface { type Op <: AsyncOp & Reentrant
     * not tied there: a worker with nothing to do takes it (`stealFor`). A task from any other thread goes to the
     * workers in turn.
     */
-  override def execute(body: Runnable): Unit =
+  override def execute(body: Runnable): Unit = runOnWorker(body)
+
+  /** Gives `body` to a worker to run, as `execute` does for a pool whose futures are its workers' tasks. */
+  protected final def runOnWorker(body: Runnable): Unit =
     checkRunning()
     val current = workerOf(Thread.currentThread())
     if current != null then current.spawnLocal(body)
@@ -257,6 +275,25 @@ abstract class WorkpoolScheduler[I <: Interface { type Op <: AsyncOp & Reentrant
 }
 
 object WorkpoolScheduler {
+
+  /** Runs `program` on `pool`, as its backend's `run` does, and shuts the pool down afterwards. The program runs as a
+    * future of the pool's, under the pool's group: a fatal error in a worker cancels it, and is thrown from here once
+    * it has unwound. The caller's thread waits, and runs nothing of the program.
+    */
+  def run[I <: Interface { type Op <: AsyncOp & ReentrantOp }, T](pool: WorkpoolScheduler[I])(
+      program: Io[I] ?=> Async.Spawn ?=> T
+  ): T = {
+    given poolSupport: (AsyncSupport { type Scheduler = pool.Scheduler }) = pool
+    given poolScheduler: pool.Scheduler = pool
+    try
+      val outcome = Async.blocking({
+        Async.withNewCompletionGroup(pool.rootGroup)(gears.async.Future(program(using pool)).awaitResult)
+      })
+      val fatal = pool.fatalFailure
+      if fatal != null then throw fatal
+      outcome.get
+    finally pool.shutdown()
+  }
 
   trait AsyncOp extends TimerOp {
     def setTimeout(timeoutMillis: Long): Unit

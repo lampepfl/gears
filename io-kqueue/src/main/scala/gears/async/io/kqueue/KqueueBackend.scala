@@ -2,8 +2,6 @@ package gears.async.io
 package kqueue
 
 import gears.async.Async
-import gears.async.AsyncSupport
-import gears.async.Future
 
 /** The kqueue backend, for macOS and FreeBSD.
   *
@@ -36,17 +34,6 @@ object KqueueBackend extends Backend {
       program: Io[Interface] ?=> Async.Spawn ?=> T
   ): T = {
     posix.FileLimit.raised: Unit // a shell's limit on open descriptors is far below what a server's sockets need
-    val pool = KqueueScheduler(workers, onStarvation)
-    given poolSupport: (AsyncSupport { type Scheduler = pool.Scheduler }) = pool
-    given poolScheduler: pool.Scheduler = pool
-    // `Async.blocking` runs its body on the calling thread.
-    try
-      val outcome = Async.blocking({
-        Async.withNewCompletionGroup(pool.rootGroup)(Future(program(using pool)).awaitResult)
-      })
-      val fatal = pool.fatalFailure
-      if fatal != null then throw fatal
-      outcome.get
-    finally pool.shutdown()
+    shareable.WorkpoolScheduler.run(KqueueScheduler(workers, onStarvation))(program)
   }
 }
