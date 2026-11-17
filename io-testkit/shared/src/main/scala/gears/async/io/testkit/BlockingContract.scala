@@ -54,14 +54,15 @@ trait BlockingContract extends ContractSuite {
     running { io ?=>
       val started = new CountDownLatch(1)
       val returned = new AtomicBoolean
-      val op = io.ops.blocking { () =>
-        started.countDown()
-        try Thread.sleep(10_000)
-        catch case _: InterruptedException => ()
-        returned.set(true)
+      val performing = Future {
+        io.perform(io.ops.blocking { () =>
+          started.countDown()
+          try Thread.sleep(10_000)
+          catch case _: InterruptedException => ()
+          returned.set(true)
+        })
       }
-      val performing = Future(io.perform(op))
-      started.await()
+      io.perform(io.ops.blocking { () => started.await() })
       performing.cancel()
       val failure = failureOf(performing)
       assert(failure.isInstanceOf[CancellationException], String.valueOf(failure))
@@ -81,8 +82,8 @@ trait BlockingContract extends ContractSuite {
         into
       )
       val performing = Future(io.perform(op))
-      returning.await()
-      Thread.sleep(50) // for the value to be written once the body returns
+      io.perform(io.ops.blocking(() => returning.await())) // off the workers: one of them is to run `performing`
+      io.perform(io.ops.timer(50)) // for the value to be written once the body returns
       performing.cancel()
       assertEquals(failureOf(performing), null)
       assertEquals(into.clear(), "value")
