@@ -80,11 +80,13 @@ abstract class WorkpoolScheduler[I <: Interface { type Op <: AsyncOp & Reentrant
   // Only now: a worker's thread started as the worker was made would run it before its subclass had its fields.
   workerGroup.foreach(_.thread.start())
 
-  /** Looks at the workers every half of `Starvation.thresholdNanos`, and reports one that has had tasks in its inbox,
-    * or a timer due, for that long without beginning a turn, to `onStarvation` (see `Starvation`). It only reports:
-    * nothing is taken from the worker, so a program that blocks a worker on what that worker is to run still hangs,
-    * having been told why. A thread of its own, as the workers may all be the ones kept. Null, with no thread, if the
-    * reports are turned off.
+  /** Looks at the workers every half of `Starvation.thresholdNanos`, and finds starved one that has had tasks in its
+    * inbox, or a timer due, for that long without beginning a turn (see `Starvation`). The tasks in its inbox are moved
+    * to a worker that is not kept itself, if there is one, as are those that come after, at each look, for as long as
+    * it stays on that turn: a program that blocks a worker on what that worker was to run then goes on. Its timers and
+    * the events of its handles can't be moved, and wait for it. Whether or not anything was moved, the worker is
+    * reported to `onStarvation`, once for each time it is kept. A thread of its own, as the workers may all be the ones
+    * kept. Null, with no thread, if the reports are turned off.
     */
   private val starvationMonitor: Thread | Null =
     if Starvation.thresholdNanos <= 0 then null
@@ -100,6 +102,8 @@ abstract class WorkpoolScheduler[I <: Interface { type Op <: AsyncOp & Reentrant
     val seenTurn = Array.fill(count)(-1L)
     val seenSince = new Array[Long](count)
     val reported = new Array[Boolean](count)
+    // Whether each worker, at this look, has something waiting and is on the turn it was on at the last.
+    val stuck = new Array[Boolean](count)
     val threshold = Starvation.thresholdNanos
     try
       while !isShutDown do
@@ -109,18 +113,46 @@ abstract class WorkpoolScheduler[I <: Interface { type Op <: AsyncOp & Reentrant
         while i < count do
           val worker = workerGroup(i)
           val turn = worker.turnsBegun
-          val kept = worker.hasWaiting(now)
-          if !kept || turn != seenTurn(i) then
-            seenTurn(i) = if kept then turn else -1L
+          val waiting = worker.hasWaiting(now)
+          if turn != seenTurn(i) then
+            seenTurn(i) = turn
             seenSince(i) = now
             reported(i) = false
-          else if !reported(i) && now - seenSince(i) >= threshold then
-            reported(i) = true // once for each time it is kept
-            // A handler that throws must not end the monitor.
-            try onStarvation(new Starvation.Report(worker.thread, now - seenSince(i)))
-            catch case _: Throwable => ()
+            stuck(i) = false
+          else
+            stuck(i) = waiting
+            // With nothing waiting it keeps nothing, however long its turn: counted from when something next does.
+            if !waiting && !reported(i) then seenSince(i) = now
+          i += 1
+        i = 0
+        while i < count do
+          if stuck(i) && (reported(i) || now - seenSince(i) >= threshold) then
+            val worker = workerGroup(i)
+            val moved = relieve(worker, stuck, reported)
+            if !reported(i) then
+              reported(i) = true // once for each time it is kept
+              // A handler that throws must not end the monitor.
+              try onStarvation(new Starvation.Report(worker.thread, now - seenSince(i), moved))
+              catch case _: Throwable => ()
           i += 1
     catch case _: InterruptedException => () // shut down
+  }
+
+  /** Moves the tasks in `starved`'s inbox to the next worker that is neither `stuck` itself nor still on a turn it was
+    * `reported` for, which has nothing waiting only because it was relieved of it: how many, none if there is no such
+    * worker.
+    */
+  private def relieve(starved: PoolWorker, stuck: Array[Boolean], reported: Array[Boolean]): Int = {
+    val count = workerGroup.length
+    var moved = 0
+    var i = 1
+    while i < count do
+      val other = workerGroup((starved.id + i) % count)
+      if !stuck(other.id) && !reported(other.id) then
+        moved = if starved.hasQueued then starved.moveQueuedTo(other) else 0
+        i = count
+      else i += 1
+    moved
   }
   if starvationMonitor != null then starvationMonitor.start()
   private def nextWorker(): PoolWorker = {
@@ -160,7 +192,6 @@ abstract class WorkpoolScheduler[I <: Interface { type Op <: AsyncOp & Reentrant
       }
     }
   }
-
 
   /** Guards `execute` and `schedule`: work given to a pool that has shut down would never run. */
   @volatile private var isShutDown = false

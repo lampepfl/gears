@@ -300,7 +300,62 @@ class KqueueSchedulingSuite extends munit.FunSuite {
       assertEquals(reports.map(_.worker), List(blocked.nn), s"on $workers workers")
       assert(reports.head.keptNanos >= shareable.Starvation.thresholdNanos, reports.head.message)
       assert(reports.head.message.contains("io.ops.blocking"), reports.head.message)
+      // The task that waited was moved if there was a worker to move it to, and the report says which.
+      assertEquals(reports.head.movedTasks, if workers == 1 then 0 else 1, reports.head.message)
+      val caveat = if workers == 1 then "Nothing could be moved" else "still wait"
+      assert(reports.head.message.contains(caveat), reports.head.message)
     }
+  }
+
+  test("a future that blocks its worker's thread on one it spawned is not left waiting for it, and is reported") {
+    // What it spawned is in its own worker's inbox, alone, which calls for no thief: the monitor moves it.
+    val reports = reportsDuring { handler =>
+      onPool(4, handler) {
+        val blocked = Thread.currentThread()
+        val started = new java.util.concurrent.CountDownLatch(1)
+        val spawned = Future {
+          started.countDown()
+          Thread.currentThread()
+        }
+        assert(started.await(5, java.util.concurrent.TimeUnit.SECONDS), "the spawned future never ran")
+        assert(spawned.await ne blocked)
+      }
+    }
+    assertEquals(reports.map(_.movedTasks), List(1))
+  }
+
+  test("tasks that come to a worker after it was found starved are moved as well, with no second report") {
+    val reports = reportsDuring { handler =>
+      onPool(2, handler) {
+        val blocked = Thread.currentThread()
+        val first = new java.util.concurrent.CountDownLatch(1)
+        Future(first.countDown())
+        assert(first.await(5, java.util.concurrent.TimeUnit.SECONDS), "the first future never ran")
+        // Reported by now, and still on the same turn: what is spawned here is behind a worker known to be kept.
+        val later = new java.util.concurrent.CountDownLatch(2)
+        val threads = java.util.concurrent.ConcurrentHashMap.newKeySet[Thread]()
+        for _ <- 1 to 2 do
+          Future {
+            threads.add(Thread.currentThread()): Unit
+            later.countDown()
+          }
+        assert(later.await(5, java.util.concurrent.TimeUnit.SECONDS), "the later futures never ran")
+        assert(!threads.contains(blocked))
+      }
+    }
+    assertEquals(reports.size, 1, reports.map(_.message).mkString("\n"))
+  }
+
+  test("on one worker nothing can be moved: the task waits until the worker comes back to it") {
+    val reports = reportsDuring { handler =>
+      onPool(1, handler) {
+        val started = new java.util.concurrent.CountDownLatch(1)
+        val spawned = Future(started.countDown())
+        assert(!started.await(400, java.util.concurrent.TimeUnit.MILLISECONDS), "ran while its only worker was blocked")
+        spawned.await
+      }
+    }
+    assertEquals(reports.map(_.movedTasks), List(0))
   }
 
   test("a worker whose thread is blocked while a timer of its own is due is reported, with nothing in its inbox") {

@@ -1,17 +1,26 @@
 package gears.async.io.shareable
 
-/** What a pool does about a worker that is kept from its tasks and its timers: it reports it, and nothing more.
+/** What a pool does about a worker that is kept from its tasks and its timers: it moves the tasks elsewhere if it can,
+  * and reports the worker either way.
   *
   * A worker runs its tasks one at a time, and comes to the next when the one it runs waits (in `perform`, or an
   * `await`) or ends. A task that blocks its worker's thread, or computes on without yielding, keeps every other task of
-  * that worker waiting, with its timers and its handles' events. That is a mistake in the program, which the pool does
-  * not paper over by moving the tasks elsewhere: it tells whoever made the pool, through the handler the pool was
-  * given, which by default prints a warning (`printWarning`). Tests give their pools one that fails them.
+  * that worker waiting, with its timers and its handles' events. That is a mistake in the program. So that it does not
+  * hang the program where it need not, the pool gives the tasks waiting in that worker's inbox to a worker that is not
+  * kept, for as long as the first is; the worker's timers and the events of the handles it listens for can't be given
+  * away, and wait. And it tells whoever made the pool, through the handler the pool was given, which by default prints
+  * a warning (`printWarning`), saying whether tasks were moved. Tests give their pools one that fails them.
   */
 object Starvation {
 
-  /** A worker kept from its tasks or its timers: its thread, and for how long they had waited when it was noticed. */
-  final class Report(val worker: Thread, val keptNanos: Long) {
+  /** A worker kept from its tasks or its timers: its thread, for how long they had waited when it was noticed, and how
+    * many tasks were then moved from its inbox to another worker, which is none if only its timers waited, if every
+    * other worker was kept too, or if the pool has one worker.
+    */
+  final class Report(val worker: Thread, val keptNanos: Long, val movedTasks: Int = 0) {
+
+    /** Whether tasks were moved to another worker, as those that come to this one will be while it is kept. */
+    def relieved: Boolean = movedTasks > 0
 
     /** Where the worker's thread was when it was noticed, if the platform can say: empty otherwise. */
     val stack: Array[StackTraceElement] =
@@ -20,11 +29,11 @@ object Starvation {
 
     def message: String = {
       val text = new StringBuilder
-      text.append(worker.getName())
-      text.append(" has had tasks or due timers waiting for ").append(keptNanos / 1_000_000L)
-      text.append(" ms without coming to them: what it is running blocks its thread, or computes without yielding. ")
-      text.append("Code that blocks belongs in a blocking op (`io.ops.blocking`), which runs it off the workers; ")
-      text.append("a long computation should yield now and then (`AsyncOperations.yield`).")
+      text.append(worker.getName()).append(" was blocked for ").append(keptNanos / 1_000_000L)
+      text.append(" ms with work waiting. Use `io.ops.blocking` for blocking code, or `AsyncOperations.yield` in a")
+      text.append(" long computation. ")
+      if relieved then text.append("Waiting tasks were moved to another worker; its timers and handles still wait.")
+      else text.append("Nothing could be moved to another worker.")
       stack.foreach(frame => text.append("\n\tat ").append(frame))
       text.toString
     }

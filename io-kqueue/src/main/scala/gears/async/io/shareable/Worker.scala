@@ -74,6 +74,25 @@ abstract class Worker(val id: Int, final val handleOwner: HandleOwner) extends T
       deadline >= 0 && deadline - now <= 0
     }
 
+  /** For the pool's starvation monitor, on its thread, this worker being kept from its inbox: the tasks there now are
+    * given to `other`, in their order. How many were. Its timers, and what it is about to resume, stay its own.
+    */
+  private[shareable] def moveQueuedTo(other: Worker): Int = {
+    var moved = 0
+    var more = inbox.size
+    while more > 0 do
+      val task = inbox.take()
+      if task == null then more = 0
+      else if other.submit(task) then
+        moved += 1
+        more -= 1
+      else
+        // The pool is shutting down, and `other` has left: back where it was, for this worker to run as it leaves.
+        inbox.add(task): Unit
+        more = 0
+    moved
+  }
+
   /** Set by the scheduler before the worker's thread starts: a task from another worker's inbox, or null. */
   private[shareable] var steal: () => Runnable | Null = () => null
 
