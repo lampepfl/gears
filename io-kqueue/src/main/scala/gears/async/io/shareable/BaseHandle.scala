@@ -48,8 +48,8 @@ abstract class AbstractBaseHandle extends BaseHandle:
   final private def closeHandle()(using ClosePermit): Boolean =
     // First, before anything is released: whoever waits fails. Then the listeners drop the handle, while its
     // descriptor is still its own; what they registered with the kernel goes as the descriptor is closed.
-    reads.failWaiter()
-    writes.failWaiter()
+    reads.failWaiters()
+    writes.failWaiters()
     reads.forgetListener()
     writes.forgetListener()
     val closedSync = cleanup()
@@ -74,8 +74,17 @@ abstract class AbstractBaseHandle extends BaseHandle:
         case AbstractBaseHandle.Closed => owner.handleClosed()
         case _                         => throw new IllegalStateException("A close already has its owner waiting")
 
-  private val reads = HandleReadiness[Source](this, read = true)
-  private val writes = HandleReadiness[Source](this, read = false)
+  /** Whether the ops that wait for this handle to be readable, or to be writable, take turns in a queue, as a
+    * listener's accepts and a datagram socket's receives and sends do, rather than one being allowed at a time, as of a
+    * stream's reads and of its writes. Asked once for each direction, as the handle is made: a constant.
+    */
+  protected def queuesWaiters(read: Boolean): Boolean = false
+
+  private def readinessOf(read: Boolean): HandleReadiness[Source] =
+    if queuesWaiters(read) then WaiterQueue[Source](this, read) else SingleWaiter[Source](this, read)
+
+  private val reads = readinessOf(read = true)
+  private val writes = readinessOf(read = false)
 
   final def readiness(read: Boolean): HandleReadiness[Source] = if read then reads else writes
 

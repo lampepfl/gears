@@ -17,7 +17,7 @@ import scala.util.Try
 import scala.util.control.NonFatal
 
 object TimerHeapOp {
-  sealed trait Hooks {
+  trait Hooks {
     def onEntry(): Unit = ()
   }
 
@@ -45,7 +45,10 @@ trait TimerHeapOp extends WorkpoolScheduler.AsyncOp, WorkpoolScheduler.Reentrant
   def holdTimerOn(source: Source): Unit
 }
 
-sealed abstract class AbstractTimerHeapOp extends Async.Source[Outcome] with TimerHeapOp with TimerHeapOp.Hooks {
+abstract class AbstractTimerHeapOp private[shareable] ()
+    extends Async.Source[Outcome]
+    with TimerHeapOp
+    with TimerHeapOp.Hooks {
 
   /** Perform work after a timer has woken and there was no timeout. Result will be used to complete the operation.
     */

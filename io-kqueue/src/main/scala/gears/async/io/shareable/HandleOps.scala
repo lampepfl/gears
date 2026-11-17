@@ -2,7 +2,7 @@ package gears.async.io.shareable
 
 import gears.async.io.Slot
 
-sealed abstract class ImmediateOp extends SingleUseAbstractTimerHeapOp, TimeoutOnWake {
+abstract class ImmediateOp extends SingleUseAbstractTimerHeapOp, TimeoutOnWake {
   def perform(): Unit
 }
 

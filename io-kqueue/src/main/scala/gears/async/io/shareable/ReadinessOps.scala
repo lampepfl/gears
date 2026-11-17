@@ -11,12 +11,16 @@ import scala.util.Failure
 import scala.util.control.NonFatal
 
 /** An op that does its work when its handle is ready for it: tried at once by its performer and, if the handle was not
-  * ready, again by the worker whose event source reports that it is. `W` is that event source.
+  * ready, again by the worker whose event source reports that it is. `W` is that event source. A trait, so that both
+  * the ops performed again and again, a read or an accept, and those performed once, a connect, are such ops.
   */
-abstract class AbstractReadinessOp[H <: BaseHandle { type Source = W }, W <: EventSource](handle: H)
-    extends RepeatableAbstractTimerHeapOp,
+trait ReadyWaiting[H <: BaseHandle { type Source = W }, W <: EventSource]
+    extends AbstractTimerHeapOp,
       TimeoutOnWake,
-      ReadinessOp { op =>
+      ReadinessOp {
+
+  /** The handle the op waits for. */
+  protected def waitsOn: H
 
   /** One attempt at the work, which must not block, with the handle's work claimed: how many bytes it moved, which may
     * be none, as at the end of a stream, or `Blocked` if the handle was not ready, and nothing was done.
@@ -32,13 +36,15 @@ abstract class AbstractReadinessOp[H <: BaseHandle { type Source = W }, W <: Eve
   final def handleClosing(): Unit =
     if claimAtReady() then completeFromReady(Failure(new ClosedChannelException()))
 
+  final def failReady(failure: Throwable): Unit = completeFromReady(Failure(failure))
+
   final def readyWakeup(): Int =
     var moved = ReadinessOp.SettledOtherwise
     val result: Outcome | Null =
       try
         if cancelledDuringWork then TimerHeapOp.CancelledSentinel
         else
-          // Without claiming the handle's work: its lock for this direction is held, which a close waits for.
+          // Without claiming the handle's work: whoever claimed the op for its handle keeps a close away.
           moved = attempt()
           if moved == AbstractReadinessOp.Blocked then null else WorkpoolScheduler.SuccessUnit
       catch
@@ -57,9 +63,11 @@ abstract class AbstractReadinessOp[H <: BaseHandle { type Source = W }, W <: Eve
   /** Does the work at once, which most often does it, or else waits for the handle's listener to find the handle ready
     * and do it, for the handle to close, or for the op's time limit or cancel. The listener is `self`, the performer's
     * worker, if the handle had none, and from then on whichever worker that was: it does the work and resumes the
-    * performer, which goes on from there on that worker.
+    * performer, which goes on from there on that worker. On a handle whose ops take turns, an op performed while others
+    * wait goes behind them without trying.
     */
   final def performWhenReady(self: W)(using Async): Unit =
+    val handle = waitsOn
     val readiness = handle.readiness(isRead)
     var waiting = false
     var done = false
@@ -68,11 +76,12 @@ abstract class AbstractReadinessOp[H <: BaseHandle { type Source = W }, W <: Eve
       handle.claimWork()
       try
         // A handle known to be drained is not tried: its listener reports it when there is something again.
-        if !readiness.drainedAt(tick) && attempt() != AbstractReadinessOp.Blocked then done = true
+        val tried = !readiness.waitsWithoutTrying(tick)
+        if tried && attempt() != AbstractReadinessOp.Blocked then done = true
         else
           expose()
-          val listening = readiness.registerWaiter(this, tick, self)
-          if listening != null then // else reported ready since the tick was read: again
+          val listening = readiness.registerWaiter(this, tick, tried, self)
+          if listening != null then // else it may be ready for all the handle knows: again
             val listener = listening.nn
             waiting = true
             try
@@ -87,6 +96,13 @@ abstract class AbstractReadinessOp[H <: BaseHandle { type Source = W }, W <: Eve
     if waiting then
       try parkUntilSettled()
       finally readiness.clearWaiter(this): Unit
+}
+
+/** A `ReadyWaiting` op that may be performed again and again, on the handle it was built with. */
+abstract class AbstractReadinessOp[H <: BaseHandle { type Source = W }, W <: EventSource](handle: H)
+    extends RepeatableAbstractTimerHeapOp,
+      ReadyWaiting[H, W] {
+  protected final def waitsOn: H = handle
 }
 
 object AbstractReadinessOp:

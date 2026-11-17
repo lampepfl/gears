@@ -17,8 +17,9 @@ import java.util.concurrent.atomic.AtomicInteger
   */
 class HandleStateSuite extends munit.FunSuite {
 
-  private final class TestHandle extends AbstractBaseHandle {
+  private final class TestHandle(queued: Boolean = false) extends AbstractBaseHandle {
     type Source = EventSource
+    override protected def queuesWaiters(read: Boolean): Boolean = queued
     val cleanups = AtomicInteger(0)
     open()
     def cleanup()(using ClosePermit): Boolean = {
@@ -97,7 +98,10 @@ class HandleStateSuite extends munit.FunSuite {
     def addTimer(op: TimerOp): Unit = throw new UnsupportedOperationException
     def removeTimer(op: TimerOp): Boolean = false
     def notifyDeadlineChange(op: TimerOp): Unit = ()
-    def startListening(handle: BaseHandle, read: Boolean): Unit = started.incrementAndGet(): Unit
+    var onStart: () => Unit = () => ()
+    def startListening(handle: BaseHandle, read: Boolean): Unit =
+      started.incrementAndGet()
+      onStart()
     override def stopListening(handle: BaseHandle, read: Boolean): Unit = stopped.incrementAndGet(): Unit
   }
 
@@ -107,10 +111,14 @@ class HandleStateSuite extends munit.FunSuite {
     var woken = 0
     var released = 0
     def settled: Boolean = false
-    def claimAtReady(): Boolean = true
+    def claimAtReady(): Boolean = claimable
     def readyWakeup(): Int = { woken += 1; moves }
     def releaseReady(): Boolean = { released += 1; true }
-    def handleClosing(): Unit = ()
+    var failed: Throwable | Null = null
+    def failReady(failure: Throwable): Unit = failed = failure
+    def handleClosing(): Unit = closed += 1
+    var closed = 0
+    var claimable = true
   }
 
   test("a source starts listening once, however many ops wait, and again only after it was given up") {
@@ -119,7 +127,7 @@ class HandleStateSuite extends munit.FunSuite {
     val op = FakeOp()
     for _ <- 1 to 3 do
       val tick = handle.readiness(read = true).tick
-      assert(handle.readiness(read = true).registerWaiter(op, tick, source) eq source)
+      assert(handle.readiness(read = true).registerWaiter(op, tick, tried = true, source) eq source)
       handle.readiness(read = true).report(source, ReadinessOp.Unknown)
       assert(!handle.readiness(read = true).clearWaiter(op), "an op that did its work is no longer the waiter")
     assertEquals(op.woken, 3)
@@ -127,7 +135,11 @@ class HandleStateSuite extends munit.FunSuite {
     // Reported ready with no op waiting, time after time: the handle gives the source up.
     while source.stopped.get() == 0 do handle.readiness(read = true).report(source, ReadinessOp.Unknown)
     assert(!handle.readiness(read = true).listenedBy(source))
-    assert(handle.readiness(read = true).registerWaiter(op, handle.readiness(read = true).tick, source) eq source)
+    assert(
+      handle
+        .readiness(read = true)
+        .registerWaiter(op, handle.readiness(read = true).tick, tried = true, source) eq source
+    )
     assertEquals(source.started.get(), 2)
   }
 
@@ -137,7 +149,7 @@ class HandleStateSuite extends munit.FunSuite {
     val op = FakeOp()
     def tick = handle.readiness(read = true).tick
     def drained = handle.readiness(read = true).drainedAt(tick)
-    def waitNow(): Unit = assert(handle.readiness(read = true).registerWaiter(op, tick, source) eq source)
+    def waitNow(): Unit = assert(handle.readiness(read = true).registerWaiter(op, tick, tried = true, source) eq source)
     assert(!drained)
 
     waitNow()
@@ -152,7 +164,7 @@ class HandleStateSuite extends munit.FunSuite {
     val stale = tick
     handle.readiness(read = true).report(source, available = 4)
     assert(!drained)
-    assert(handle.readiness(read = true).registerWaiter(op, stale, source) == null)
+    assert(handle.readiness(read = true).registerWaiter(op, stale, tried = true, source) == null)
 
     waitNow()
     op.moves = 4
@@ -180,6 +192,129 @@ class HandleStateSuite extends munit.FunSuite {
     assert(!drained, "no listener would report anything new")
   }
 
+  test("ops on a handle that queues its waiters take turns, in the order they came") {
+    val handle = TestHandle(queued = true)
+    val source = FakeSource()
+    val readiness = handle.readiness(read = true)
+    val first, second, third = FakeOp()
+    assert(!readiness.waitsWithoutTrying(readiness.tick), "with no queue an op tries its work")
+    assert(readiness.registerWaiter(first, readiness.tick, tried = true, source) eq source)
+    // Behind another, an op waits without trying, whatever it knows of the handle.
+    assert(readiness.waitsWithoutTrying(readiness.tick))
+    assert(readiness.registerWaiter(second, readiness.tick, tried = false, source) eq source)
+    assert(readiness.registerWaiter(third, readiness.tick - 7, tried = false, source) eq source)
+    assertEquals(source.started.get(), 1)
+
+    // One report serves them from the head until the handle is not ready any more.
+    second.moves = ReadinessOp.Blocked
+    readiness.report(source, ReadinessOp.Unknown)
+    assertEquals((first.woken, second.woken, third.woken), (1, 1, 0))
+    assertEquals(second.released, 1)
+    assert(!readiness.clearWaiter(first), "an op that did its work has left the queue")
+
+    // The op that found it not ready is still at the head, and the next report begins with it.
+    second.moves = 1
+    readiness.report(source, ReadinessOp.Unknown)
+    assertEquals((second.woken, third.woken), (2, 1))
+    assert(!readiness.waitsWithoutTrying(readiness.tick), "the queue is empty, and the handle may have more")
+  }
+
+  test("an op that leaves a queue, or was settled otherwise, is passed over") {
+    val handle = TestHandle(queued = true)
+    val source = FakeSource()
+    val readiness = handle.readiness(read = true)
+    val cancelled, timedOut, last = FakeOp()
+    for op <- List(cancelled, timedOut, last) do
+      assert(readiness.registerWaiter(op, readiness.tick, tried = true, source) eq source)
+    assert(readiness.clearWaiter(cancelled))
+    assert(!readiness.clearWaiter(cancelled))
+    timedOut.claimable = false // settled by its time limit, its performer yet to clear it
+    readiness.report(source, ReadinessOp.Unknown)
+    assertEquals((cancelled.woken, timedOut.woken, last.woken), (0, 0, 1))
+    assert(!readiness.clearWaiter(timedOut))
+  }
+
+  test("an op that never tried its work does not join an empty queue unless the handle is known drained") {
+    val handle = TestHandle(queued = true)
+    val source = FakeSource()
+    val readiness = handle.readiness(read = true)
+    val op = FakeOp()
+    // It saw a queue, which has gone by now: it must look for itself.
+    assert(readiness.registerWaiter(op, readiness.tick, tried = false, source) == null)
+    // An op that tried, and found the handle not ready, leaves it known drained, even once it has left.
+    assert(readiness.registerWaiter(op, readiness.tick, tried = true, source) eq source)
+    assert(readiness.clearWaiter(op))
+    assert(readiness.waitsWithoutTrying(readiness.tick))
+    assert(readiness.registerWaiter(op, readiness.tick, tried = false, source) eq source)
+    // Reported since: there may be something.
+    assert(readiness.clearWaiter(op))
+    val stale = readiness.tick
+    readiness.report(source, ReadinessOp.Unknown)
+    assert(readiness.registerWaiter(op, stale, tried = true, source) == null)
+  }
+
+  test("a queue's listener that can't start fails the ops that came to wait meanwhile, and the queue starts afresh") {
+    val handle = TestHandle(queued = true)
+    val readiness = handle.readiness(read = true)
+    val source = FakeSource()
+    val first, second = FakeOp()
+    val refused = new java.io.IOException("expected: a source that can't listen")
+    source.onStart = () =>
+      // Another op comes to wait while the source is starting: behind the first, on the listener there seems to be.
+      assert(readiness.registerWaiter(second, readiness.tick, tried = false, source) eq source)
+      throw refused
+    val thrown = intercept[java.io.IOException](readiness.registerWaiter(first, readiness.tick, tried = true, source))
+    assert(thrown eq refused)
+    assert(second.failed eq refused, "the op behind it was left waiting on no listener")
+    assert(first.failed == null, "the op whose wait it was is told by the throw, not failed as well")
+    assert(!readiness.clearWaiter(first) && !readiness.clearWaiter(second), "an op was left in the queue")
+    assert(!readiness.listenedBy(source))
+    // With nothing left over, the next op to wait starts a listener as the first did.
+    source.onStart = () => ()
+    assert(readiness.registerWaiter(first, readiness.tick, tried = true, source) eq source)
+    assertEquals(source.started.get(), 2)
+    readiness.report(source, ReadinessOp.Unknown)
+    assertEquals(first.woken, 1)
+  }
+
+  test("a close fails every op in a queue, and a report after it serves none") {
+    val handle = TestHandle(queued = true)
+    val source = FakeSource()
+    val readiness = handle.readiness(read = true)
+    val ops = List.fill(3)(FakeOp())
+    for op <- ops do assert(readiness.registerWaiter(op, readiness.tick, tried = true, source) eq source)
+    assert(handle.requestClose())
+    assertEquals(ops.map(_.closed), List(1, 1, 1))
+    readiness.report(source, ReadinessOp.Unknown)
+    assertEquals(ops.map(_.woken), List(0, 0, 0))
+  }
+
+  test("a queued op is served with the handle's work claimed, so a close waits for it") {
+    val handle = TestHandle(queued = true)
+    val source = FakeSource()
+    val readiness = handle.readiness(read = true)
+    var claimedDuring = -1L
+    var closedInside = true
+    val op = new ReadinessOp {
+      def settled: Boolean = false
+      def claimAtReady(): Boolean = true
+      def readyWakeup(): Int = {
+        claimedDuring = handle.claimedWork
+        closedInside = handle.requestClose() // begins the close, which the work under way holds back
+        assertEquals(handle.cleanups.get(), 0)
+        1
+      }
+      def releaseReady(): Boolean = true
+      def failReady(failure: Throwable): Unit = ()
+      def handleClosing(): Unit = ()
+    }
+    assert(readiness.registerWaiter(op, readiness.tick, tried = true, source) eq source)
+    readiness.report(source, ReadinessOp.Unknown)
+    assertEquals(claimedDuring, 1L)
+    assert(!closedInside)
+    assertEquals(handle.cleanups.get(), 1, "the work's release closed the handle")
+  }
+
   test("a close waits for work a report has under way, and no report does work once the handle has closed") {
     for _ <- 1 to 300 do
       val handle = TestHandle()
@@ -198,9 +333,14 @@ class HandleStateSuite extends munit.FunSuite {
           ReadinessOp.Blocked // so that it stays the waiter, report after report
         }
         def releaseReady(): Boolean = true
+        def failReady(failure: Throwable): Unit = ()
         def handleClosing(): Unit = ()
       }
-      assert(handle.readiness(read = true).registerWaiter(op, handle.readiness(read = true).tick, source) eq source)
+      assert(
+        handle
+          .readiness(read = true)
+          .registerWaiter(op, handle.readiness(read = true).tick, tried = true, source) eq source
+      )
       val reporter = new Thread(() => {
         while handle.getState != HandleState.ClosedState do
           handle.readiness(read = true).report(source, ReadinessOp.Unknown)
