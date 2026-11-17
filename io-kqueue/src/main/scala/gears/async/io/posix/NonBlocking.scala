@@ -2,11 +2,8 @@ package gears.async.io.posix
 
 import java.io.IOException
 import java.nio.ByteBuffer
-import scala.scalanative.meta.LinktimeInfo
 import scala.scalanative.posix.errno
-import scala.scalanative.posix.sys.socket
 import scala.scalanative.posix.sys.uio
-import scala.scalanative.posix.unistd
 import scala.scalanative.unsafe.*
 import scala.scalanative.unsigned.*
 
@@ -73,7 +70,7 @@ object NonBlocking {
 
   private def readvAddressable(fd: Int, bufs: Array[java.nio.ByteBuffer]): Int = {
     val vectors = stackalloc[uio.iovec](math.min(bufs.length, MaxBuffers))
-    val count = fill(vectors, bufs, room = true)
+    val count = fill(vectors, bufs)
     val read = Unblocked.readv(fd, vectors, count)
     if read < 0 then
       if !wouldBlock then throw new IOException(s"Failed to read from descriptor $fd: ${cError()}")
@@ -92,7 +89,7 @@ object NonBlocking {
 
   private def writevAddressable(fd: Int, bufs: Array[java.nio.ByteBuffer]): Int = {
     val vectors = stackalloc[uio.iovec](math.min(bufs.length, MaxBuffers))
-    val count = fill(vectors, bufs, room = false)
+    val count = fill(vectors, bufs)
     val written = Unblocked.writev(fd, vectors, count)
     if written < 0 then {
       if !wouldBlock then throw new IOException(s"Failed to write to descriptor $fd: ${cError()}")
@@ -104,7 +101,7 @@ object NonBlocking {
   }
 
   /** Points `vectors` at `bufs`, those with room or bytes remaining, in order, at most `MaxBuffers`: their count. */
-  def fill(vectors: Ptr[uio.iovec], bufs: Array[java.nio.ByteBuffer], room: Boolean): Int = {
+  def fill(vectors: Ptr[uio.iovec], bufs: Array[java.nio.ByteBuffer]): Int = {
     var count = 0
     var i = 0
     while i < bufs.length && count < MaxBuffers do {

@@ -3,8 +3,8 @@ package kqueue
 
 import gears.async.io.shareable.MonitorPoller
 import gears.async.io.shareable.TimerHeap
-import gears.async.io.shareable.TimerHeapImpl
 import gears.async.io.shareable.TimerHeap.TimerOp
+import gears.async.io.shareable.TimerHeapImpl
 
 import scala.collection.mutable
 
@@ -17,7 +17,8 @@ class TimerHeapSuite extends munit.FunSuite {
     def timerWakeup(actAfter: Long): Unit = ()
   }
 
-  private class Heap extends TimerHeapImpl[FakeTimer] with MonitorPoller {
+  private class Heap extends TimerHeapImpl with MonitorPoller {
+    type Timer = FakeTimer
     protected def id: Int = 0
     override protected def isEmpty(): Boolean = true
   }

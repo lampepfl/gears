@@ -3,35 +3,36 @@ package gears.async.io.shareable
 import gears.async.Cancellable
 import gears.async.io.shareable.Poller
 
-import scala.util.Try
-
-import TimerHeap.{TimerHeap, TimerOp, TimerSource}
+import TimerHeap.{TimerHeap, TimerOp}
 
 object TimerHeap {
 
-  trait TimerHeap[A <: TimerOp] extends TimerSource[A] {
+  trait TimerHeap extends TimerSource {
 
     def debugTimerState(): String
 
     /** Takes the next timer due by `now` out of the heap, or gives null if none is. A non-null result is guaranteed to
       * have succeeded `claimAtDeadline` before returning. A due timer that could not be claimed is dropped.
       */
-    def nextReadyTimer(now: Long): A | Null
+    def nextReadyTimer(now: Long): Timer | Null
 
     /** When to look at the heap next, which may be before anything is due, or -1 if it is empty. */
     def peekNextDeadline(): Long
   }
 
-  trait TimerSource[A <: TimerOp] {
+  trait TimerSource {
+
+    /** The timers this source accepts: for a worker, its pool's ops and what its scheduler runs later. */
+    type Timer <: TimerOp
 
     /** `timerOp` has a deadline earlier than the heap knows of. A later one needs no call: see `nextReadyTimer`. */
     def notifyDeadlineChange(timerOp: TimerOp): Unit
-    def addTimer(timerOp: A): Unit
+    def addTimer(timerOp: Timer): Unit
 
     /** Whether `timerOp` was taken out of the heap, and so is guaranteed to not fire. If false then it was not in the
       * heap to begin with.
       */
-    def removeTimer[A1 >: A <: TimerOp](timerOp: A1): Boolean
+    def removeTimer(timerOp: TimerOp): Boolean
   }
 
   trait TimerOp extends Cancellable {
@@ -72,7 +73,7 @@ object TimerHeap {
 /** A binary heap of timers, each knowing its place, so that removing a timer or bringing it forward takes logarithmic
   * time. Its order is by `heapKey` and never by a deadline read afresh, as a deadline can move at any moment.
   */
-abstract class TimerHeapImpl[A <: TimerOp] extends Poller with TimerHeap[A] {
+abstract class TimerHeapImpl extends Poller with TimerHeap {
   private object timerLock
 
   private var heap = new Array[TimerOp](16)
@@ -135,8 +136,8 @@ abstract class TimerHeapImpl[A <: TimerOp] extends Poller with TimerHeap[A] {
   }
 
   /** A timer moved later is still at its old place. It is put right here, once that place comes up. */
-  final def nextReadyTimer(now: Long): A | Null = timerLock.synchronized {
-    var next: A | Null = null
+  final def nextReadyTimer(now: Long): Timer | Null = timerLock.synchronized {
+    var next: Timer | Null = null
     var looking = true
     while looking do
       var head: TimerOp | Null = null
@@ -145,7 +146,7 @@ abstract class TimerHeapImpl[A <: TimerOp] extends Poller with TimerHeap[A] {
       else
         takeAt(0)
         if head.claimAtDeadline() then
-          next = head.asInstanceOf[A]
+          next = head.asInstanceOf[Timer] // only what `addTimer` took is in the heap
           looking = false
     next
   }
@@ -159,7 +160,7 @@ abstract class TimerHeapImpl[A <: TimerOp] extends Poller with TimerHeap[A] {
   }
 
   /** Wakes the worker only for a new earliest deadline: otherwise it wakes in time as it is. */
-  final def addTimer(timerOp: A): Unit = {
+  final def addTimer(timerOp: Timer): Unit = {
     if !timerOp.hasDeadline then throw new IllegalArgumentException("Only an op with a deadline goes on the heap")
     val isNext = timerLock.synchronized {
       if size == heap.length then heap = java.util.Arrays.copyOf(heap, 2 * size)
@@ -171,14 +172,8 @@ abstract class TimerHeapImpl[A <: TimerOp] extends Poller with TimerHeap[A] {
     if isNext then wake()
   }
 
-  /** `EventSource.holdTimer`, for a heap that is one: the op is one of this heap's own kind, as its performer has it. */
-  final def holdTimer(timerOp: TimerOp): TimerSource[?] = {
-    addTimer(timerOp.asInstanceOf[A])
-    this
-  }
-
   /** Doesn't wake the worker, which at worst wakes for a timer no longer there, and finds nothing to do. */
-  final override def removeTimer[A1 >: A <: TimerOp](timerOp: A1): Boolean = timerLock.synchronized {
+  final override def removeTimer(timerOp: TimerOp): Boolean = timerLock.synchronized {
     val held = holds(timerOp)
     if held then takeAt(timerOp.heapIndex)
     held

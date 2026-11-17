@@ -1,6 +1,6 @@
 package gears.async.io.kqueue.internal
 
-import gears.async.io.posix.{PosixErr, Unblocked}
+import gears.async.io.posix.PosixErr
 
 import java.io.IOException
 import scala.scalanative.annotation.alwaysinline
@@ -11,8 +11,8 @@ import scala.scalanative.posix.time.timespec
 import scala.scalanative.posix.timeOps.*
 import scala.scalanative.posix.unistd
 import scala.scalanative.unsafe.*
+import scala.scalanative.unsigned.*
 import scala.scalanative.unsigned.USize
-import scala.scalanative.unsigned.{*, given}
 
 import PosixErr.cError
 
@@ -31,19 +31,6 @@ object KqueueLoop {
 
   @alwaysinline def eventAt(events: EventQueue, index: Int): Event =
     events + eventSize * index.toCSize
-
-  def debugEvent(evt: Event): Unit = {
-    val ident = stackalloc[USize]()
-    val filter = stackalloc[CShort]()
-    val flags = stackalloc[CUnsignedShort]()
-    val fflags = stackalloc[CUnsignedInt]()
-    val data = stackalloc[Size]()
-    val udata = stackalloc[CVoidPtr]()
-    kevent.scalanative_kevent_get(evt, 0, ident, filter, flags, fflags, data, udata)
-    println(
-      s"kevent{ident=${!ident}, filter=${!filter}, flags=${!flags}, fflags=${!fflags}, data=${!data}, udata=${!udata}}"
-    )
-  }
 
   @alwaysinline
   def ident(evt: Event): USize = {
@@ -80,12 +67,6 @@ object KqueueLoop {
   def isEOF(evt: Event): Boolean = (flags(evt).toInt & kevent.EV_EOF) != 0
 
   @alwaysinline
-  def errno(evt: Event): CInt = data(evt).toInt
-
-  @alwaysinline
-  def rwAvailable(evt: Event): CInt = data(evt).toInt
-
-  @alwaysinline
   def isReadEvent(evt: Event): Boolean = filter(evt) == kevent.EVFILT_READ
 
   @alwaysinline
@@ -105,18 +86,9 @@ object KqueueLoop {
     op(events)
   }
 
-  /** posixlib does not expose EVFILT_TIMER. Its value is -7 on macOS and FreeBSD. */
-  inline val EVFILT_TIMER = -7
-
-  @alwaysinline
-  def isTimerEvent(evt: Event): Boolean = filter(evt) == EVFILT_TIMER
-
   /** posixlib does not expose EVFILT_USER, a filter that only fires when triggered with `NOTE_TRIGGER`. */
   val EVFILT_USER: CShort = if LinktimeInfo.isFreeBSD then -11 else -10
   private val NOTE_TRIGGER: CUnsignedInt = 0x01000000.toUInt
-
-  @alwaysinline
-  def isUserEvent(evt: Event): Boolean = filter(evt) == EVFILT_USER
 
   /** Registers user event `id`, edge-triggered: each trigger is reported once. */
   def addUser(evt: Event, id: USize): Unit =
@@ -144,24 +116,6 @@ object KqueueLoop {
       null // user data
     )
 
-  /** Register a one-shot timer using kqueue's default millisecond units. */
-  def addTimerOneShot(evt: Event, id: USize, milliseconds: Size): Unit = {
-    if (LinktimeInfo.isMac || LinktimeInfo.isFreeBSD) {
-      kevent.scalanative_kevent_set(
-        evt,
-        0, // index within the event buffer
-        id, // timer ID
-        EVFILT_TIMER, // filter type
-        (kevent.EV_ADD | kevent.EV_ONESHOT).toUShort, // flags
-        0.toUInt, // default units: milliseconds
-        milliseconds, // timeout
-        null // user data
-      )
-    } else {
-      throw new UnsupportedOperationException("Kqueue timers require macOS or FreeBSD")
-    }
-  }
-
   def addFile(evt: Event, fd: Int, read: Boolean, clear: Boolean, oneShot: Boolean = false): Unit = {
     var flags = kevent.EV_ADD | kevent.EV_ENABLE
     if (clear) {
@@ -181,19 +135,6 @@ object KqueueLoop {
       null // user data
     )
   }
-
-  /** Removes a timer registered with `addTimerOneShot` before it fires. */
-  def deleteTimer(evt: Event, id: USize): Unit =
-    kevent.scalanative_kevent_set(
-      evt,
-      0, // index within the event buffer
-      id, // timer ID
-      EVFILT_TIMER, // filter type
-      kevent.EV_DELETE.toUShort, // flags
-      0.toUInt, // fflags
-      0, // filter-specific data
-      null // user data
-    )
 
   def deleteFile(evt: Event, fd: Int, read: Boolean): Unit = {
     kevent.scalanative_kevent_set(

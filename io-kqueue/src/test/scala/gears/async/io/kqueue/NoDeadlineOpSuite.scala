@@ -5,9 +5,10 @@ import gears.async.Async
 import gears.async.AsyncSupport
 import gears.async.Future
 import gears.async.Future.Promise
+import gears.async.io.shareable.MonitorPoller
 import gears.async.io.shareable.RepeatableAbstractTimerHeapOp
 import gears.async.io.shareable.TimerHeapOp.CancelledSentinel
-import gears.async.io.shareable.MonitorPoller
+import gears.async.io.shareable.Worker
 import gears.async.io.shareable.WorkpoolScheduler
 import gears.async.native.NativeSuspend
 
@@ -19,7 +20,7 @@ import scala.util.Success
 import scala.util.Try
 
 /** An op like a read: it has no deadline of its own, and only a time limit puts it on the heap. */
-private[kqueue] final class WaitingOp extends RepeatableAbstractTimerHeapOp {
+private[kqueue] final class WaitingOp extends RepeatableAbstractTimerHeapOp, HeldOnOwnKind[WaitingOp] {
   def wakeup(resumedAt: Long): Try[Unit] = WorkpoolScheduler.SuccessUnit
 }
 
@@ -37,12 +38,13 @@ private[kqueue] object WaitingBackend extends Backend {
 
 /** One worker, so that a task runs until it suspends, and in the order it was submitted. */
 private[kqueue] final class WaitingScheduler
-    extends WorkpoolScheduler[WaitingOp, WaitingOps.type](WaitingBackend, WaitingOps, 1)
+    extends WorkpoolScheduler[WaitingOps.type](WaitingBackend, WaitingOps, 1)
     with NativeSuspend {
   override protected def selectWorker() = workerOfCurrentThread()
-  override def makeWorker(id: Int) = new WorkpoolScheduler.Worker[WaitingOp](id) with MonitorPoller {
+  override def makeWorker(id: Int) = new Worker(id) with MonitorPoller {
+    type Op = WaitingOp
     override def performOp(op: WaitingOp)(using Async): Unit = {
-      if op.hasDeadline then addTimer(op)
+      if op.hasDeadline then op.holdTimerOn(this)
       op.parkUntilSettled()
     }
   }

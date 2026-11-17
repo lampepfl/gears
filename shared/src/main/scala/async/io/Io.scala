@@ -51,18 +51,6 @@ trait Io[+I <: Interface] extends AsyncOperations {
   /** Performs `op` with a time limit of `timeoutMillis`, none if it is negative: what each backend's `Io` does. */
   private[io] def performWithin(op: Op, timeoutMillis: Long)(using Async): Unit
 
-  /** A hint that `body` is best run on one thread: the calling future is kept on the worker it is on for as long as
-    * `body` runs, whatever it waits for meanwhile. For the stretches of a future that work with handles, which are
-    * cheapest used from the one thread that listens for them. Outside any such scope a backend is free to move a
-    * future between its workers whenever it waits, and one that does offers the future to a worker with nothing to do
-    * as `body` ends: so what a future computes between its stretches of I/O can run wherever there is room. Moving has
-    * a cost, a wake-up each way on a backend with a pool of workers, so the hint pays where that work is well above
-    * it, some tens of microseconds. A scope inside another changes nothing.
-    *
-    * A backend with no workers to choose between runs `body` as it is, which is the default.
-    */
-  def pinned[T](body: Async ?=> T)(using Async): T = body
-
   /** Sleeps on a timer op of the backend's. */
   override def sleep(millis: Long)(using Async): Unit = {
     require(

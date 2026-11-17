@@ -2,7 +2,6 @@ package gears.async.io.kqueue
 
 import gears.async.io.BufferPool
 import gears.async.io.ByteStreams
-import gears.async.io.Deadline
 import gears.async.io.Handles
 import gears.async.io.Interface
 import gears.async.io.Pipes

@@ -127,20 +127,21 @@ class KqueueReadinessSuite extends munit.FunSuite {
     }
   }
 
-  for workers <- List(1, 4) do test(s"a second read pending on a handle is refused, and the first reads on ($workers workers)") {
-    onPool(workers) { io ?=>
-      val (in, out) = pipe()
-      val buf = ByteBuffer.allocate(64)
-      val reader = Future(io.perform(KqueueOps.read(in, buf)))
-      AsyncOperations.sleep(50)
-      intercept[IllegalArgumentException](io.perform(KqueueOps.read(in, ByteBuffer.allocate(64))))
-      io.perform(KqueueOps.write(out, bytes("first")))
-      reader.await
-      assertEquals(text(buf), "first")
-      io.perform(KqueueOps.close(in))
-      io.perform(KqueueOps.close(out))
+  for workers <- List(1, 4) do
+    test(s"a second read pending on a handle is refused, and the first reads on ($workers workers)") {
+      onPool(workers) { io ?=>
+        val (in, out) = pipe()
+        val buf = ByteBuffer.allocate(64)
+        val reader = Future(io.perform(KqueueOps.read(in, buf)))
+        AsyncOperations.sleep(50)
+        intercept[IllegalArgumentException](io.perform(KqueueOps.read(in, ByteBuffer.allocate(64))))
+        io.perform(KqueueOps.write(out, bytes("first")))
+        reader.await
+        assertEquals(text(buf), "first")
+        io.perform(KqueueOps.close(in))
+        io.perform(KqueueOps.close(out))
+      }
     }
-  }
 
   test("a write to a full pipe waits for a read to make room") {
     onPool(2) { io ?=>

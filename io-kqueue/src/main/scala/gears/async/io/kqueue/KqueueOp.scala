@@ -1,41 +1,30 @@
 package gears.async.io.kqueue
 
-import gears.async.Async
-import gears.async.Listener
 import gears.async.io.Deadline
-import gears.async.io.Io
-import gears.async.io.Repeatable
+import gears.async.io.Received
 import gears.async.io.Slot
-import gears.async.io.posix.PosixKernelHandle
-import gears.async.io.posix.PosixPipeOpener
 import gears.async.io.posix.PosixReadOps
 import gears.async.io.posix.PosixWriteOps
-import gears.async.io.Received
 import gears.async.io.shareable.AbstractCloseOp
 import gears.async.io.shareable.AbstractGatherWriteOp
-import gears.async.io.shareable.AbstractPooledReadOp
-import gears.async.io.shareable.AbstractScatterReadOp
-import gears.async.io.shareable.LendingPool
 import gears.async.io.shareable.AbstractMakeDeadlineOp
 import gears.async.io.shareable.AbstractMakePipeOp
 import gears.async.io.shareable.AbstractMakeTimerOp
+import gears.async.io.shareable.AbstractPooledReadOp
 import gears.async.io.shareable.AbstractReadOp
+import gears.async.io.shareable.AbstractScatterReadOp
 import gears.async.io.shareable.AbstractWriteOp
-import gears.async.io.shareable.RepeatableAbstractTimerHeapOp
-import gears.async.io.shareable.SingleUseAbstractTimerHeapOp
-import gears.async.io.shareable.TimerHeap
+import gears.async.io.shareable.LendingPool
 import gears.async.io.shareable.TimerHeapOp
-import gears.async.io.shareable.TimerHeapOp.Outcome
-import gears.async.io.shareable.WorkpoolScheduler
 
 import java.nio.ByteBuffer
-import java.util.concurrent.atomic.AtomicReference
-import scala.concurrent.TimeoutException
 import scala.concurrent.duration.FiniteDuration
-import scala.util.Failure
-import scala.util.Try
 
-sealed trait KqueueOp extends TimerHeapOp
+sealed trait KqueueOp extends TimerHeapOp:
+
+  /** A kqueue worker takes any kqueue op among its timers (see `KqueuePoller.Timer`). */
+  type Source = KqueuePoller
+  final def _holdTimer(worker: KqueuePoller): Unit = worker.addTimer(this)
 
 sealed trait KqueueReadableOp extends KqueueOp
 

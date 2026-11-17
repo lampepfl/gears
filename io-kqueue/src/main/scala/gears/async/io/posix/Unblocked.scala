@@ -1,7 +1,6 @@
 package gears.async.io.posix
 
 import scala.scalanative.posix.sys.socket
-import scala.scalanative.posix.time
 import scala.scalanative.unsafe.*
 
 /** The system calls the loop makes where they cannot block, bound without posixlib's `@blocking`: reads, writes,
