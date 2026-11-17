@@ -20,8 +20,14 @@ object KqueueBackend extends Backend {
   /** Runs `program` on a pool of one worker for each processor, shutting it down afterwards. The program runs under the
     * pool's group: a fatal error in a worker cancels it, and is thrown from here once it has unwound.
     */
-  private[io] def run[T](program: Io[Interface] ?=> Async.Spawn ?=> T): T = {
-    val pool = KqueueScheduler(Runtime.getRuntime.availableProcessors)
+  private[io] def run[T](program: Io[Interface] ?=> Async.Spawn ?=> T): T =
+    runOn(Runtime.getRuntime.availableProcessors, shareable.Starvation.printWarning)(program)
+
+  /** As `run`, on a pool of `workers` workers whose reports of starved workers go to `onStarvation`. */
+  private[io] def runOn[T](workers: Int, onStarvation: shareable.Starvation.Handler)(
+      program: Io[Interface] ?=> Async.Spawn ?=> T
+  ): T = {
+    val pool = KqueueScheduler(workers, onStarvation)
     given poolSupport: (AsyncSupport { type Scheduler = pool.Scheduler }) = pool
     given poolScheduler: pool.Scheduler = pool
     // `Async.blocking` runs its body on the calling thread.

@@ -25,8 +25,10 @@ class KqueueSchedulingSuite extends munit.FunSuite {
   }
 
   /** `Io.run` on a pool of the given size. */
-  private def onPool[T](workers: Int)(program: Io[KqueueOps.type] ?=> Async.Spawn ?=> T): T = {
-    val pool = KqueueScheduler(workers)
+  private def onPool[T](workers: Int, onStarvation: shareable.Starvation.Handler = shareable.Starvation.printWarning)(
+      program: Io[KqueueOps.type] ?=> Async.Spawn ?=> T
+  ): T = {
+    val pool = KqueueScheduler(workers, onStarvation)
     given poolSupport: (AsyncSupport { type Scheduler = pool.Scheduler }) = pool
     given poolScheduler: pool.Scheduler = pool
     try Async.blocking(Future(program(using pool)).await)
@@ -275,5 +277,55 @@ class KqueueSchedulingSuite extends munit.FunSuite {
       assert(threads.distinct.size > 1, s"all ran on ${threads.distinct}")
       assert(took < 16 * work, s"took ${took}ms, as long as one worker alone")
     }
+  }
+
+  /** The reports of starved workers made by the pool `body` runs its program on, with the handler it is given. */
+  private def reportsDuring(body: shareable.Starvation.Handler => Unit): List[shareable.Starvation.Report] = {
+    val reports = new java.util.concurrent.ConcurrentLinkedQueue[shareable.Starvation.Report]
+    body(report => reports.add(report): Unit)
+    reports.toArray(Array.empty[shareable.Starvation.Report]).toList
+  }
+
+  test("a worker whose thread is blocked while a task waits for it is reported, once") {
+    for workers <- List(1, 4) do {
+      var blocked: Thread | Null = null
+      val reports = reportsDuring { handler =>
+        onPool(workers, handler) {
+          blocked = Thread.currentThread()
+          val spawned = Future(1) // in this worker's inbox, alone, which calls for no thief
+          Thread.sleep(400)
+          assertEquals(spawned.await, 1)
+        }
+      }
+      assertEquals(reports.map(_.worker), List(blocked.nn), s"on $workers workers")
+      assert(reports.head.keptNanos >= shareable.Starvation.thresholdNanos, reports.head.message)
+      assert(reports.head.message.contains("io.ops.blocking"), reports.head.message)
+    }
+  }
+
+  test("a worker whose thread is blocked while a timer of its own is due is reported, with nothing in its inbox") {
+    var blocked: Thread | Null = null
+    val reports = reportsDuring { handler =>
+      onPool(1, handler) { io ?=>
+        blocked = Thread.currentThread()
+        val sleeping = Future(io.perform(io.ops.timer(20))) // waits on this worker's heap, not in its inbox
+        io.perform(io.ops.timer(1)) // so that it has begun its wait
+        Thread.sleep(400)
+        sleeping.await
+      }
+    }
+    assertEquals(reports.map(_.worker), List(blocked.nn))
+  }
+
+  test("a worker that waits in its ops, or blocks with nothing waiting for it, is not reported") {
+    val reports = reportsDuring { handler =>
+      onPool(1, handler) { io ?=>
+        val ticking = Future { for _ <- 1 to 30 do io.perform(io.ops.timer(10)) }
+        io.perform(io.ops.timer(250)) // a long wait, with the other future's tasks coming and going
+        ticking.await
+        Thread.sleep(250) // blocked, but keeping nothing
+      }
+    }
+    assertEquals(reports.map(_.message), Nil)
   }
 }

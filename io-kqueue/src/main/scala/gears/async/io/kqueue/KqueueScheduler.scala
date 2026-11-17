@@ -1,12 +1,15 @@
 package gears.async.io.kqueue
 
 import gears.async.Async
+import gears.async.io.shareable.Starvation
 import gears.async.io.shareable.Worker
 import gears.async.io.shareable.WorkpoolScheduler
 import gears.async.native.NativeSuspend
 
-class KqueueScheduler(workers: Int)
-    extends WorkpoolScheduler[KqueueOps.type](KqueueBackend, KqueueOps, workers),
+/** A pool of `workers` kqueue workers. A worker kept from its tasks is reported to `onStarvation` (see `Starvation`).
+  */
+class KqueueScheduler(workers: Int, onStarvation: Starvation.Handler = Starvation.printWarning)
+    extends WorkpoolScheduler[KqueueOps.type](KqueueBackend, KqueueOps, workers, onStarvation),
       NativeSuspend {
   override protected def selectWorker() = workerOfCurrentThread()
 

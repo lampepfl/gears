@@ -21,7 +21,8 @@ import WorkpoolScheduler.{AsyncOp, ReentrantOp}
 abstract class WorkpoolScheduler[I <: Interface { type Op <: AsyncOp & ReentrantOp }](
     val backend: Backend { type Interface <: I },
     val ops: I,
-    workers: Int
+    workers: Int,
+    onStarvation: Starvation.Handler = Starvation.printWarning
 ) extends Scheduler
     with AsyncSupport
     with AsyncOperations
@@ -74,6 +75,50 @@ abstract class WorkpoolScheduler[I <: Interface { type Op <: AsyncOp & Reentrant
   }
   // Only now: a worker's thread started as the worker was made would run it before its subclass had its fields.
   workerGroup.foreach(_.thread.start())
+
+  /** Looks at the workers every half of `Starvation.thresholdNanos`, and reports one that has had tasks in its inbox,
+    * or a timer due, for that long without beginning a turn, to `onStarvation` (see `Starvation`). It only reports:
+    * nothing is taken from the worker, so a program that blocks a worker on what that worker is to run still hangs,
+    * having been told why. A thread of its own, as the workers may all be the ones kept. Null, with no thread, if the
+    * reports are turned off.
+    */
+  private val starvationMonitor: Thread | Null =
+    if Starvation.thresholdNanos <= 0 then null
+    else {
+      val thread = new Thread(() => watchForStarvation())
+      thread.setName("WorkpoolSchedulerStarvationMonitor")
+      thread.setDaemon(true)
+      thread
+    }
+
+  private def watchForStarvation(): Unit = {
+    val count = workerGroup.length
+    val seenTurn = Array.fill(count)(-1L)
+    val seenSince = new Array[Long](count)
+    val reported = new Array[Boolean](count)
+    val threshold = Starvation.thresholdNanos
+    try
+      while !isShutDown do
+        Thread.sleep(Math.max(1L, threshold / 2_000_000L))
+        val now = System.nanoTime()
+        var i = 0
+        while i < count do
+          val worker = workerGroup(i)
+          val turn = worker.turnsBegun
+          val kept = worker.hasWaiting(now)
+          if !kept || turn != seenTurn(i) then
+            seenTurn(i) = if kept then turn else -1L
+            seenSince(i) = now
+            reported(i) = false
+          else if !reported(i) && now - seenSince(i) >= threshold then
+            reported(i) = true // once for each time it is kept
+            // A handler that throws must not end the monitor.
+            try onStarvation(new Starvation.Report(worker.thread, now - seenSince(i)))
+            catch case _: Throwable => ()
+          i += 1
+    catch case _: InterruptedException => () // shut down
+  }
+  if starvationMonitor != null then starvationMonitor.start()
   private def nextWorker(): PoolWorker = {
     val index = Math.floorMod(workerTicker.getAndIncrement(), workerGroup.length)
     workerGroup(index)
@@ -127,6 +172,7 @@ abstract class WorkpoolScheduler[I <: Interface { type Op <: AsyncOp & Reentrant
       throw new IllegalStateException("Can't shut down a scheduler from one of its workers")
     isShutDown = true
     workerGroup.foreach(_.stop())
+    if starvationMonitor != null then starvationMonitor.interrupt()
     workerGroup.foreach(_.thread.join())
   }
 

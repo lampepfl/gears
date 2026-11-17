@@ -48,6 +48,26 @@ abstract class Worker(val id: Int) extends TimerHeapImpl, EventSource {
     */
   private[shareable] def takeHalfFor(thief: Worker): Runnable | Null = inbox.takeHalfInto(thief.inbox)
 
+  /** How many turns the worker has begun. Read by the pool's starvation monitor, to tell a worker that is not coming to
+    * its inbox: written by the worker's thread only, and read there a look at a time, so it is not volatile.
+    */
+  private var turns = 0L
+
+  private[shareable] def turnsBegun: Long = turns
+
+  /** Whether tasks wait in the inbox. */
+  private[shareable] def hasQueued: Boolean = !inbox.isEmpty
+
+  /** Whether something waits for the worker's next turn that another thread can see: a task in its inbox, or a timer
+    * due at `now`. Events of its handles that its poller has not yet been asked for, and futures it is about to resume,
+    * can't be seen from outside it.
+    */
+  private[shareable] def hasWaiting(now: Long): Boolean =
+    hasQueued || {
+      val deadline = peekNextDeadline()
+      deadline >= 0 && deadline - now <= 0
+    }
+
   /** Set by the scheduler before the worker's thread starts: a task from another worker's inbox, or null. */
   private[shareable] var steal: () => Runnable | Null = () => null
 
@@ -213,6 +233,7 @@ abstract class Worker(val id: Int) extends TimerHeapImpl, EventSource {
 
   def loop(): Unit = {
     while !stopped || !isEmpty() do
+      turns += 1
       val now = System.nanoTime()
       fireTimers(now)
       runReady()
