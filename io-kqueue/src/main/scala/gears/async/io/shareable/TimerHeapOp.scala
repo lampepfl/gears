@@ -68,8 +68,7 @@ abstract class AbstractTimerHeapOp private[shareable] ()
           try async.await(this)
           catch
             case _: CancellationException =>
-              _cancelLater = true // for a worker that has claimed it, to see before it does the work
-              if settleCancelled() then TimerHeapOp.CancelledSentinel
+              if cancelByPerformer() then TimerHeapOp.CancelledSentinel
               else async.withGroup(CompletionGroup.Unlinked).await(this) // claimed: its outcome is the op's
         case outcome => outcome
     out match
@@ -78,6 +77,14 @@ abstract class AbstractTimerHeapOp private[shareable] ()
   }
 
   // async state management
+
+  /** What a performer that is cancelled does to its op, as `parkUntilSettled` does it, which is the only way an op is
+    * cancelled: word is left for whoever has claimed the op, to see before it does the work, and the op is settled as
+    * cancelled if nobody has. Whether it was settled here.
+    */
+  private[io] final def cancelByPerformer(): Boolean =
+    _cancelLater = true
+    settleCancelled()
 
   /** A cancel that came while the op was claimed, which whoever claimed it looks for before working. */
   @volatile private var _cancelLater: Boolean = false
@@ -138,20 +145,6 @@ abstract class AbstractTimerHeapOp private[shareable] ()
     if cancelledDuringWork then TimerHeapOp.CancelledSentinel
     else body
   }
-
-  /** Whether a performer is in the op now. */
-  protected def performing: Boolean
-
-  /** Settles the performance under way as cancelled if nothing has claimed it; otherwise leaves word for whoever has.
-    * Outside a performance it does nothing. A performer that is cancelled does the same itself, in `parkUntilSettled`,
-    * which is the only way an op is cancelled by the scheduler: it links no op to a group. Whoever links one takes on
-    * that a group cancels the members it had as its cancel began, so that this may come after the performance it was
-    * meant for, into the next.
-    */
-  final def cancel(): Unit =
-    if performing then
-      _cancelLater = true
-      settleCancelled(): Unit
 
   private def settleCancelled(): Boolean =
     if claim.compareAndSet(null, TimerHeapOp.CancelledSentinel) then
@@ -303,7 +296,6 @@ abstract class AbstractTimerHeapOp private[shareable] ()
 
 abstract class SingleUseAbstractTimerHeapOp extends AbstractTimerHeapOp {
   private val spentState = AtomicInteger(0)
-  final protected def performing: Boolean = spentState.get() == 1
   final def requestEntry()(using Async): Unit = {
     if !spentState.compareAndSet(0, 1) then throw new IllegalStateException("Already consumed")
     try onEntry()
@@ -325,7 +317,6 @@ abstract class SingleUseAbstractTimerHeapOp extends AbstractTimerHeapOp {
 
 abstract class RepeatableAbstractTimerHeapOp extends AbstractTimerHeapOp with Repeatable {
   private val entered = AtomicBoolean(false)
-  final protected def performing: Boolean = entered.get()
   final def requestEntry()(using Async): Unit = {
     if !entered.compareAndSet(false, true) then throw new IllegalStateException("Concurrent entry not allowed")
     try {

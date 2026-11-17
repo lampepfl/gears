@@ -11,7 +11,6 @@ import gears.async.io.Interface
 import gears.async.io.Io
 import gears.async.io.shareable.TimerHeap
 import gears.async.io.shareable.TimerHeap.TimerOp
-import gears.async.io.shareable.WorkpoolScheduler.DoAfter
 
 import scala.concurrent.duration.FiniteDuration
 import scala.util.Success
@@ -168,10 +167,7 @@ abstract class WorkpoolScheduler[I <: Interface { type Op <: AsyncOp & Reentrant
 
   override def schedule(delay: FiniteDuration, body: Runnable): Cancellable = {
     checkRunning()
-    val worker = nextWorker()
-    val timerOp = new WorkpoolScheduler.DoAfter(worker, TimerHeap.deadlineAfter(delay.toNanos), body)
-    worker.addTimer(timerOp)
-    timerOp
+    nextWorker().runAfter(delay.toNanos, body)
   }
 
 }
@@ -181,10 +177,10 @@ object WorkpoolScheduler {
   trait AsyncOp extends TimerOp {
     def setTimeout(timeoutMillis: Long): Unit
 
-    /** Suspends until the op is settled, and returns or throws its outcome. Only the op ends the wait: cancelled
-      * through the group it is linked to, it settles at once as cancelled if no worker has claimed it, and otherwise
-      * keeps the performer waiting for the worker that claimed it, which should test for cancellation as soon as
-      * possible or resolve with a complete outcome.
+    /** Suspends until the op is settled, and returns or throws its outcome. Only the op ends the wait: a performer that
+      * is cancelled as it waits settles the op at once as cancelled if no worker has claimed it, and otherwise waits on
+      * for the worker that claimed it, which should test for cancellation as soon as possible or resolve with a
+      * complete outcome. Nothing links the op itself to a group.
       */
     def parkUntilSettled()(using Async): Unit
 
@@ -199,10 +195,10 @@ object WorkpoolScheduler {
   /** A worker's thread, which carries its worker for whoever asks which worker the current thread is. */
   final class WorkerThread(val worker: Worker, body: Runnable) extends Thread(body)
 
-  trait ReentrantOp extends Cancellable {
+  trait ReentrantOp {
 
-    /** The op is not linked to the performer's group here: it links itself for as long as it waits, in
-      * `parkUntilSettled`, and an op that is done as it is tried never does.
+    /** The op is linked to no group, here or as it waits: a cancel reaches it through its performer's wait, in
+      * `parkUntilSettled`.
       */
     inline final def performWith(inline fn: Async ?=> Unit)(using Async): Unit =
       requestEntry()
@@ -212,21 +208,7 @@ object WorkpoolScheduler {
     /** Aquires an entry permit. */
     def requestEntry()(using Async): Unit
 
-    /** Potentially resets the entry permit. The op is unlinked by then. */
+    /** Potentially resets the entry permit. */
     def requestExit()(using Async): Unit
-  }
-
-  final class DoAfter(val owner: Worker, val deadlineNow: Long, body: Runnable) extends TimerOp {
-    @volatile private var cancelled = false
-    def timerWakeup(actAfter: Long): Unit = {
-      if !cancelled then body.run()
-    }
-    def cancel(): Unit = {
-      cancelled = true
-      owner.removeTimer(this): Unit
-    }
-
-    /** called under the heap's lock when retrieved. If true then the heap now owns the claim for this timer. */
-    def claimAtDeadline(): Boolean = !cancelled
   }
 }

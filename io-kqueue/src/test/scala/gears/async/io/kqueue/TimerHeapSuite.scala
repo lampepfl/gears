@@ -19,6 +19,7 @@ class TimerHeapSuite extends munit.FunSuite {
 
   private class Heap extends TimerHeapImpl with MonitorPoller {
     type Timer = FakeTimer
+    protected def makeSchedule(nanos: Long, body: Runnable) = throw new UnsupportedOperationException
     protected def id: Int = 0
     override protected def isEmpty(): Boolean = true
   }

@@ -96,6 +96,7 @@ class HandleStateSuite extends munit.FunSuite {
     val stopped = AtomicInteger(0)
     type Timer = TimerOp
     def addTimer(op: TimerOp): Unit = throw new UnsupportedOperationException
+    protected def makeSchedule(nanos: Long, body: Runnable) = throw new UnsupportedOperationException
     def removeTimer(op: TimerOp): Boolean = false
     def notifyDeadlineChange(op: TimerOp): Unit = ()
     var onStart: () => Unit = () => ()

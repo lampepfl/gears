@@ -1,9 +1,10 @@
 package gears.async.io.shareable
 
 import gears.async.Async
+import gears.async.Cancellable
 import gears.async.Suspension
 import gears.async.io.shareable.TimerHeap.TimerOp
-import gears.async.io.shareable.WorkpoolScheduler.{DoAfter, WorkerThread}
+import gears.async.io.shareable.WorkpoolScheduler.WorkerThread
 
 import scala.util.control.NonFatal
 
@@ -18,7 +19,7 @@ abstract class Worker(val id: Int) extends TimerHeapImpl, EventSource {
   type Op <: TimerOp
 
   /** Its pool's ops, and what its scheduler is asked to run later. */
-  type Timer = Op | DoAfter
+  type Timer = Op | Worker.DoAfter
 
   type ThisWorkerSource <: EventSource
   def asThisWorkerSource: this.type & ThisWorkerSource
@@ -139,6 +140,10 @@ abstract class Worker(val id: Int) extends TimerHeapImpl, EventSource {
   def performWhenReady(op: Op & AbstractReadinessOp[?, ThisWorkerSource])(using Async): Unit =
     op.performWhenReady(asThisWorkerSource)
 
+  /** As a timer of this worker's. */
+  override protected def makeSchedule(nanos: Long, body: Runnable): Worker.DoAfter =
+    Worker.DoAfter(this, TimerHeap.deadlineAfter(nanos), body)
+
   def isEmpty(): Boolean = inbox.isEmpty && ready.isEmpty() && !pollOnly
 
   /** A worker outlives what it runs, as event loops do: it can't be replaced, and its timers and inbox would be lost
@@ -237,5 +242,21 @@ abstract class Worker(val id: Int) extends TimerHeapImpl, EventSource {
       drainInbox()
       runReady()
     close()
+  }
+}
+
+object Worker {
+  final class DoAfter(val owner: Worker, val deadlineNow: Long, body: Runnable) extends TimerOp, Cancellable {
+    @volatile private var cancelled = false
+    def timerWakeup(actAfter: Long): Unit = {
+      if !cancelled then body.run()
+    }
+    def cancel(): Unit = {
+      cancelled = true
+      owner.removeTimer(this): Unit
+    }
+
+    /** called under the heap's lock when retrieved. If true then the heap now owns the claim for this timer. */
+    def claimAtDeadline(): Boolean = !cancelled
   }
 }

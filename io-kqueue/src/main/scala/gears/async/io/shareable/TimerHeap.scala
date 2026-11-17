@@ -35,7 +35,7 @@ object TimerHeap {
     def removeTimer(timerOp: TimerOp): Boolean
   }
 
-  trait TimerOp extends Cancellable {
+  trait TimerOp {
     def deadlineNow: Long
 
     /** called under the heap's lock when retrieved. If true then the heap now owns the claim for this timer. If false

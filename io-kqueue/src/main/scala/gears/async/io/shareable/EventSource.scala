@@ -1,5 +1,6 @@
 package gears.async.io.shareable
 
+import gears.async.Cancellable
 import gears.async.io.shareable.TimerHeap.TimerSource
 
 /** What reports that handles are ready, a worker's kqueue for one, as the handles and their ops know it. It is a source
@@ -18,6 +19,19 @@ trait EventSource extends TimerSource {
     * source's own thread, by the handle, from `HandleReadiness.report`.
     */
   def stopListening(handle: BaseHandle, read: Boolean): Unit = ()
+
+  /** From any thread: schedules to run `body` on this source's own thread once `nanos` have passed.
+    *
+    * Cancellation before the scheduled time prevents the body from running.
+    */
+  final def runAfter(nanos: Long, body: Runnable): Cancellable =
+    val timer = makeSchedule(nanos, body)
+    addTimer(timer)
+    timer
+
+  /** Creates a cancellable timer (unscheduled) that upon firing will run `body` unless cancelled.
+    */
+  protected def makeSchedule(nanos: Long, body: Runnable): Timer & Cancellable
 
   /** `handle` is closing: whatever this source keeps to find it by is dropped, before its descriptor is released. */
   def forgetHandle(handle: BaseHandle): Unit = ()
