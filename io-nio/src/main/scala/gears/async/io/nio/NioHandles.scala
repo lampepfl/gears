@@ -1,5 +1,7 @@
 package gears.async.io.nio
 
+import gears.async.io.SocketOption
+import gears.async.io.SocketOptions
 import gears.async.io.shareable.AbstractBaseHandle
 import gears.async.io.shareable.BaseHandle
 import gears.async.io.shareable.BaseReadableHandle
@@ -8,11 +10,15 @@ import gears.async.io.shareable.EventSource
 import gears.async.io.shareable.HandleOwner
 import gears.async.io.shareable.HandleState
 
+import java.nio.channels.DatagramChannel
 import java.nio.channels.GatheringByteChannel
+import java.nio.channels.NetworkChannel
 import java.nio.channels.Pipe
 import java.nio.channels.ScatteringByteChannel
 import java.nio.channels.SelectableChannel
 import java.nio.channels.SelectionKey
+import java.nio.channels.ServerSocketChannel
+import java.nio.channels.SocketChannel
 
 sealed trait NioHandle extends BaseHandle:
   type Source = NioPoller
@@ -90,3 +96,57 @@ final class PipeRead(source: Pipe.SourceChannel, owner: HandleOwner)
 final class PipeWrite(sink: Pipe.SinkChannel, owner: HandleOwner) extends NioChannelHandle(sink, owner), NioWritable:
   def writes: GatheringByteChannel = sink
   private[nio] def interest(read: Boolean): Int = SelectionKey.OP_WRITE
+
+/** A socket: what its options and addresses are asked of. */
+sealed trait NioSocket extends NioHandle:
+  def network: NetworkChannel
+
+  /** The kind of socket it is, which says what options apply to it. */
+  def kind: SocketOption.Kind
+
+/** A connected stream socket, IP or Unix: one read and one write at a time, as any stream. While its connect is under
+  * way it is waited for as one to write to, which the JDK reports as its connect being ready to finish.
+  */
+final class NioConnection(private[nio] val socket: SocketChannel, val kind: SocketOption.Kind, owner: HandleOwner)
+    extends NioChannelHandle(socket, owner),
+      NioReadable,
+      NioWritable,
+      NioSocket:
+  def reads: ScatteringByteChannel = socket
+  def writes: GatheringByteChannel = socket
+  def network: NetworkChannel = socket
+  private[nio] def interest(read: Boolean): Int =
+    if read then SelectionKey.OP_READ else SelectionKey.OP_WRITE | SelectionKey.OP_CONNECT
+
+/** A listening stream socket, IP or Unix, whose accepts take turns. A Unix one removes the socket file it bound as it
+  * closes.
+  */
+final class NioListener(
+    private[nio] val server: ServerSocketChannel,
+    val kind: SocketOption.Kind,
+    private[nio] val accepting: SocketOptions,
+    bound: UnixBinding | Null,
+    owner: HandleOwner
+) extends NioChannelHandle(server, owner),
+      NioSocket:
+  def network: NetworkChannel = server
+  private[nio] def interest(read: Boolean): Int = SelectionKey.OP_ACCEPT
+  override protected def queuesWaiters(read: Boolean): Boolean = true
+  override protected def beforeChannelCloses(): Unit = if bound != null then bound.remove()
+
+/** An IP datagram socket, whose receives take turns, as do its sends. */
+sealed abstract class NioDatagramSocket(
+    private[nio] val datagrams: DatagramChannel,
+    val kind: SocketOption.Kind,
+    owner: HandleOwner
+) extends NioChannelHandle(datagrams, owner),
+      NioSocket:
+  def network: NetworkChannel = datagrams
+  private[nio] def interest(read: Boolean): Int = if read then SelectionKey.OP_READ else SelectionKey.OP_WRITE
+  override protected def queuesWaiters(read: Boolean): Boolean = true
+
+final class NioBoundDatagram(datagrams: DatagramChannel, owner: HandleOwner)
+    extends NioDatagramSocket(datagrams, SocketOption.Kind.BoundDatagram, owner)
+
+final class NioConnectedDatagram(datagrams: DatagramChannel, owner: HandleOwner)
+    extends NioDatagramSocket(datagrams, SocketOption.Kind.ConnectedDatagram, owner)

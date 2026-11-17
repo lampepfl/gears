@@ -2,22 +2,33 @@ package gears.async.io.nio
 
 import gears.async.Async
 import gears.async.io.Deadline
+import gears.async.io.IpSocketAddress
 import gears.async.io.Received
 import gears.async.io.Slot
+import gears.async.io.SocketOption
+import gears.async.io.SocketOptions
+import gears.async.io.shareable.AbstractAcceptAllOp
+import gears.async.io.shareable.AbstractAcceptOp
 import gears.async.io.shareable.AbstractCloseOp
+import gears.async.io.shareable.AbstractConnectOp
 import gears.async.io.shareable.AbstractGatherWriteOp
+import gears.async.io.shareable.AbstractHandleCallOp
 import gears.async.io.shareable.AbstractMakeDeadlineOp
 import gears.async.io.shareable.AbstractMakePipeOp
 import gears.async.io.shareable.AbstractMakeTimerOp
+import gears.async.io.shareable.AbstractOpenOp
 import gears.async.io.shareable.AbstractPooledReadOp
 import gears.async.io.shareable.AbstractReadOp
+import gears.async.io.shareable.AbstractReceiveOp
 import gears.async.io.shareable.AbstractScatterReadOp
+import gears.async.io.shareable.AbstractSendOp
 import gears.async.io.shareable.AbstractWriteOp
 import gears.async.io.shareable.HandleOwner
 import gears.async.io.shareable.LendingPool
 import gears.async.io.shareable.TimerHeapOp
 
 import java.nio.ByteBuffer
+import java.nio.channels.DatagramChannel
 import java.nio.channels.Pipe
 import scala.concurrent.duration.FiniteDuration
 
@@ -34,6 +45,9 @@ sealed trait NioReadinessOp extends NioOp:
 /** An op done as it is performed, with nothing to wait for (see `ImmediateOp`). */
 sealed trait NioImmediateOp extends NioOp:
   def perform(owner: HandleOwner): Unit
+
+sealed trait NioConnectOp extends NioOp:
+  def performConnect(self: NioPoller)(using Async): Unit
 
 sealed trait NioTimerOp extends NioOp
 
@@ -100,3 +114,60 @@ private[nio] final class NioMakePipe(readSlot: Slot[NioReadable], writeSlot: Slo
 private[nio] final class NioMakeTimer(duration: FiniteDuration) extends AbstractMakeTimerOp(duration) with NioTimerOp
 
 private[nio] final class NioMakeDeadline(initial: Long) extends AbstractMakeDeadlineOp(initial) with NioDeadlineOp
+
+// ---- Stream sockets
+
+private[nio] final class NioConnect(address: SocketAddress, options: SocketOptions, into: Slot[NioConnection])
+    extends AbstractConnectOp(into),
+      NioConnectOp:
+  def _startConnect(owner: HandleOwner): NioConnection = NioSockets.startConnect(address, options, owner)
+  def _finishConnect(socket: NioConnection): Boolean = NioSockets.finishConnect(socket)
+
+private[nio] final class NioListen(address: SocketAddress, options: SocketOptions, into: Slot[NioListener])
+    extends AbstractOpenOp(into),
+      NioImmediateOp:
+  def _open(owner: HandleOwner): NioListener = NioSockets.listen(address, options, owner)
+
+private[nio] final class NioAccept(listener: NioListener, into: Slot[NioConnection])
+    extends AbstractAcceptOp(listener, into),
+      NioReadinessOp:
+  def _accept(listener: NioListener): NioConnection | Null = NioSockets.accept(listener)
+
+private[nio] final class NioAcceptAll(listener: NioListener, into: Slot[Array[NioConnection]], max: Int)
+    extends AbstractAcceptAllOp(listener, into, max),
+      NioReadinessOp:
+  def _accept(listener: NioListener): NioConnection | Null = NioSockets.accept(listener)
+
+private[nio] final class NioShutdownOutput(connection: NioConnection)
+    extends AbstractHandleCallOp(connection),
+      NioImmediateOp:
+  def _call(connection: NioConnection): Unit = connection.socket.shutdownOutput(): Unit
+
+// ---- Datagram sockets
+
+/** Opens a datagram socket of kind `kind`, bound to `local` and connected to `remote` where given, as the handle `make`
+  * makes of it.
+  */
+private[nio] final class NioOpenDatagram[D <: NioDatagramSocket](
+    local: IpSocketAddress | Null,
+    remote: IpSocketAddress | Null,
+    options: SocketOptions,
+    kind: SocketOption.Kind,
+    into: Slot[D]
+)(make: (DatagramChannel, HandleOwner) => D)
+    extends AbstractOpenOp(into),
+      NioImmediateOp:
+  def _open(owner: HandleOwner): D = NioDatagrams.open(local, remote, options, kind, owner)(make)
+
+private[nio] final class NioReceive[A <: AnyRef](socket: NioDatagramSocket, buf: ByteBuffer, from: Slot[A] | Null)
+    extends AbstractReceiveOp(socket, buf, from),
+      NioReadinessOp:
+  def _receive(socket: NioDatagramSocket, buf: ByteBuffer, from: Slot[A] | Null): Boolean =
+    NioDatagrams.receive(socket.datagrams, buf, from)
+
+/** Sends to `to`, or to the socket's peer if it is null, which a connected socket's send has it. */
+private[nio] final class NioSend(socket: NioDatagramSocket, bufs: Array[ByteBuffer], to: IpSocketAddress | Null)
+    extends AbstractSendOp(socket, bufs, connected = to == null),
+      NioReadinessOp:
+  def _send(socket: NioDatagramSocket, bufs: Array[ByteBuffer]): Boolean =
+    NioDatagrams.send(socket.datagrams, bufs, to)

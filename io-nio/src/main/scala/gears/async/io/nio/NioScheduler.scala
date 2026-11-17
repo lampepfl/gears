@@ -62,6 +62,7 @@ abstract class NioScheduler(
         case close: NioCloseOp         => close.performClose(this)
         case ready: NioReadinessOp     => ready.performWhenReady(this)
         case immediate: NioImmediateOp => immediate.perform(handleOwner)
+        case connect: NioConnectOp     => connect.performConnect(this)
   }
 }
 
