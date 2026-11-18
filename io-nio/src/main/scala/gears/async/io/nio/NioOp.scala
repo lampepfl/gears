@@ -48,6 +48,14 @@ sealed trait NioOp extends TimerHeapOp:
   type Source = NioPoller
   final def _holdTimer(worker: NioPoller): Unit = worker.addTimer(this)
 
+object NioOp:
+
+  /** What a channel says it moved between several buffers, as the count an op gives: a channel counts in a `Long`, and
+    * buffers that hold more than an `Int` counts between them would wrap it, to nothing moved, or to the end of the
+    * stream. The bytes are moved whatever is said of them, so the count is held at the most an `Int` says.
+    */
+  private[nio] def count(moved: Long): Int = if moved > Int.MaxValue then Int.MaxValue else moved.toInt
+
 /** An op that waits for its handle to be ready, on the worker that listens for it (see `ReadyWaiting`). */
 sealed trait NioReadinessOp extends NioOp:
   def performWhenReady(self: NioPoller)(using Async): Unit
@@ -74,7 +82,7 @@ sealed trait NioCloseOp extends NioOp:
 /** A stream read's calls on the JDK's channels: mixed into the op. A channel that has nothing to read reads nothing. */
 trait NioReadOps[H <: NioReadable]:
   final def _readHandle(handle: H, buf: ByteBuffer): Int = handle.reads.read(buf)
-  final def _readvHandle(handle: H, bufs: Array[ByteBuffer]): Int = handle.reads.read(bufs).toInt
+  final def _readvHandle(handle: H, bufs: Array[ByteBuffer]): Int = NioOp.count(handle.reads.read(bufs))
 
 /** A stream write's calls, as `NioReadOps` has a read's. A channel with no room writes nothing, which is a write that
   * would block.
@@ -84,7 +92,7 @@ trait NioWriteOps[H <: NioWritable]:
     val written = handle.writes.write(buf)
     if written == 0 then -1 else written
   final def _writevHandle(handle: H, bufs: Array[ByteBuffer]): Int =
-    val written = handle.writes.write(bufs).toInt
+    val written = NioOp.count(handle.writes.write(bufs))
     if written == 0 then -1 else written
 
 private[nio] final class NioRead(handle: NioChannelReadable, buf: ByteBuffer)

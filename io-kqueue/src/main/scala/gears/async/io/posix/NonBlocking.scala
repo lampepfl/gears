@@ -41,6 +41,12 @@ object NonBlocking {
     }
   }
 
+  /** What a vectored call moved, as the count an op gives: the system counts in a `ssize_t`, and buffers that hold more
+    * than an `Int` counts between them would wrap it, to nothing moved or to a failure. The bytes are moved whatever is
+    * said of them, so the count is held at the most an `Int` says.
+    */
+  private def counted(moved: Long): Int = if moved > Int.MaxValue then Int.MaxValue else moved.toInt
+
   /** Fills `buf` from `fd` between position and limit. Returns the number of bytes read, 0 if the read would block, or
     * -1 at EOF.
     */
@@ -79,7 +85,7 @@ object NonBlocking {
     else if read == 0 then EOF
     else
       advance(bufs, read.toLong)
-      read.toInt
+      counted(read.toLong)
   }
 
   /** Drains `bufs` into `fd` in order, as `write` drains one, with one `writev`: the bytes written, or -1 if it would
@@ -97,7 +103,7 @@ object NonBlocking {
       -1
     } else {
       advance(bufs, written.toLong)
-      written.toInt
+      counted(written.toLong)
     }
   }
 

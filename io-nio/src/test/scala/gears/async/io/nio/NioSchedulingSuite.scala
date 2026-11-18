@@ -270,4 +270,12 @@ class NioSchedulingSuite extends munit.FunSuite {
       assert(!Future(Thread.currentThread().isInterrupted()).await)
     }
   }
+
+  test("what a channel moved between several buffers is counted in an Int, held at its most, never wrapped") {
+    assertEquals(NioOp.count(0L), 0)
+    assertEquals(NioOp.count(-1L), -1) // the end of the stream
+    assertEquals(NioOp.count(Int.MaxValue.toLong), Int.MaxValue)
+    assertEquals(NioOp.count(Int.MaxValue.toLong + 1), Int.MaxValue) // wrapped, this would be negative
+    assertEquals(NioOp.count(1L << 32), Int.MaxValue) // wrapped, this would be nothing moved
+  }
 }
