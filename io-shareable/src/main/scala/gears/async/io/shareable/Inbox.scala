@@ -44,6 +44,9 @@ private[shareable] final class Inbox {
 
   def clearSurplus(): Unit = if surplus then surplus = false
 
+  /** How many tasks a thief may take half of now: none unless the worker has said it has some to spare. */
+  def spare: Int = if surplus then queued.get() else 0
+
   /** For a worker with nothing to do, on its own thread, whose inbox `thief` is: half of the tasks here, the oldest, if
     * the worker has said it has some to spare. One is returned for the thief to run now, and the rest are put in
     * `thief`; null if there is nothing to take. Half at once, not one at a time: a thief that came back for each would

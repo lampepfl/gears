@@ -279,6 +279,53 @@ class KqueueSchedulingSuite extends munit.FunSuite {
     }
   }
 
+  test("a burst of futures from one worker reaches every worker, not one more a turn") {
+    onPool(4) {
+      val work = 10L // ms each, keeping its worker
+      val start = System.nanoTime()
+      val threads = List.fill(32)(Future { Thread.sleep(work); Thread.currentThread().getName() }).map(_.await)
+      val took = (System.nanoTime() - start) / 1_000_000L
+      assertEquals(threads.distinct.size, 4, threads.distinct.toString)
+      assert(took < 32 * work / 2, s"took ${took}ms, as long as two workers")
+    }
+  }
+
+  test("futures one worker has to resume, more than it comes to, go on on workers with nothing to do") {
+    onPool(4) { io ?=>
+      val count = 16
+      val work = 10L // ms each, keeping its worker
+      val pipes = List.fill(count) {
+        val read = Slot[io.ops.Readable]()
+        val write = Slot[io.ops.Writable]()
+        io.perform(io.ops.pipe(read, write))
+        (read.clear(), write.clear())
+      }
+      // This future's worker is the first to wait on each pipe, so it is the one that listens for them all.
+      for (read, _) <- pipes do
+        intercept[java.util.concurrent.TimeoutException](
+          io.perform(io.ops.read(read, java.nio.ByteBuffer.allocateDirect(1)), 1.millis)
+        )
+      val readers = pipes.map { (read, _) =>
+        Future {
+          io.perform(io.ops.read(read, java.nio.ByteBuffer.allocateDirect(1)))
+          val resumedOn = Thread.currentThread().getName()
+          Thread.sleep(work)
+          resumedOn
+        }
+      }
+      io.perform(io.ops.timer(50)) // until every reader waits
+      val start = System.nanoTime()
+      for (_, write) <- pipes do io.perform(io.ops.write(write, java.nio.ByteBuffer.allocateDirect(1)))
+      val threads = readers.map(_.await)
+      val took = (System.nanoTime() - start) / 1_000_000L
+      assert(threads.distinct.size > 1, s"all went on on ${threads.distinct}")
+      assert(took < count * work, s"took ${took}ms, as long as one worker alone")
+      for (read, write) <- pipes do
+        io.perform(io.ops.close(read))
+        io.perform(io.ops.close(write))
+    }
+  }
+
   /** The reports of starved workers made by the pool `body` runs its program on, with the handler it is given. */
   private def reportsDuring(body: shareable.Starvation.Handler => Unit): List[shareable.Starvation.Report] = {
     val reports = new java.util.concurrent.ConcurrentLinkedQueue[shareable.Starvation.Report]
