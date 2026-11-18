@@ -59,6 +59,7 @@ sealed trait NioImmediateOp extends NioOp:
 /** An op whose work is done off the workers' threads (see `WorkOffThread`). */
 sealed trait NioOffThreadOp extends NioOp:
   def performOffThread(worker: Worker & NioPoller)(using Async): Unit
+  def performOnCaller(worker: Worker & NioPoller)(using Async): Unit
 
 sealed trait NioConnectOp extends NioOp:
   def performConnect(self: NioPoller)(using Async): Unit

@@ -51,6 +51,13 @@ trait EventSource extends TimerSource {
     */
   def handleOwner: HandleOwner
 
+  /** How many times an op that found its handle not ready gives up its thread (`Thread.yield`) and tries again before
+    * it waits here. None where the ops are performed on this source's own thread, which a yield would not leave. Where
+    * they are performed on threads of their own, a reply to what was just sent is often there within microseconds, and
+    * a wait costs a wake-up of this source's thread and another of the performer's.
+    */
+  def retriesBeforeWaiting: Int = 0
+
   /** `handle` is closing: whatever this source keeps to find it by is dropped, before its descriptor is released. */
   def forgetHandle(handle: Handle): Unit = ()
 }
@@ -129,6 +136,28 @@ sealed abstract class HandleReadiness[S <: EventSource] private[shareable] (
 
   /** Reports with no op waiting since one last was. */
   private var idleReports = 0
+
+  /** How many ops are still to wait without yielding first, since one last yielded as often as it might and found the
+    * handle no readier: a handle whose answers take longer than a few yields is then not yielded for, but for one op in
+    * `RetryRest + 1`, which finds out whether that has changed. Read and written with no lock: a count lost between
+    * threads costs a yield or saves one.
+    */
+  private var retriesResting = 0
+
+  /** How many times an op that has just found the handle not ready yields and tries again before it waits, of the
+    * `most` its listener allows (`EventSource.retriesBeforeWaiting`).
+    */
+  final def retriesNow(most: Int): Int =
+    if most <= 0 then 0
+    else
+      val resting = retriesResting
+      if resting > 0 then
+        retriesResting = resting - 1
+        0
+      else most
+
+  /** An op used every retry it was given, and waits all the same. */
+  final def retriesSpent(): Unit = retriesResting = HandleReadiness.RetryRest
 
   /** No listener, so nothing would report the handle ready: whether it is drained is not known. */
   protected final def forgetDrained(): Unit = drainedTick = reports - 1
@@ -219,6 +248,12 @@ sealed abstract class HandleReadiness[S <: EventSource] private[shareable] (
   private[shareable] final def forgetListener(): Unit =
     val listening = synchronized(listener)
     if listening != null then handle.forgottenBy(listening.nn)
+}
+
+object HandleReadiness {
+
+  /** How many ops wait without yielding first after one whose yields were all in vain. */
+  inline val RetryRest = 15
 }
 
 /** The readiness of a stream, for one direction: one op waits at a time. */

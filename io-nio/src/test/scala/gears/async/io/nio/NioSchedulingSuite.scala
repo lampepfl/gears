@@ -232,4 +232,42 @@ class NioSchedulingSuite extends munit.FunSuite {
       compileErrors("def read(file: NioFile, buf: java.nio.ByteBuffer): NioOp = new NioRead(file, buf)").nonEmpty
     )
   }
+
+  test("on the JDK's threads blocking code and a file's calls run on the future's own thread; on the pool, off it") {
+    def bodyThread(backend: Backend { type Interface = NioOps.type }): (Thread, Thread) =
+      Io.run(using backend) { io ?=>
+        Future {
+          var body: Thread | Null = null
+          io.perform(io.ops.blocking(() => body = Thread.currentThread()))
+          (Thread.currentThread(), body.nn)
+        }.await
+      }
+    val (future, body) = bodyThread(NioBackend)
+    assert(future eq body)
+    val (carried, off) = bodyThread(NioPoolBackend)
+    assert(carried ne off)
+  }
+
+  test("on the JDK's threads a blocking op's time limit and its cancel still interrupt the body, and wait for it") {
+    given NioBackend.type = NioBackend
+    Io.run { io ?=>
+      val returned = new java.util.concurrent.atomic.AtomicInteger(0)
+      def sleeper = io.ops.blocking { () =>
+        try Thread.sleep(10_000)
+        catch case _: InterruptedException => ()
+        returned.incrementAndGet(): Unit
+      }
+      val started = System.nanoTime()
+      intercept[java.util.concurrent.TimeoutException](io.perform(sleeper, 50.millis))
+      assertEquals(returned.get(), 1, "the time limit returned before the body had")
+      val cancelled = Future(io.perform(sleeper))
+      io.perform(io.ops.timer(50))
+      cancelled.cancel()
+      assert(cancelled.awaitResult.isFailure)
+      assertEquals(returned.get(), 2, "the cancel returned before the body had")
+      assert((System.nanoTime() - started) < 5_000_000_000L, "the bodies were not interrupted")
+      // The future's thread is left with no interrupt of the op's.
+      assert(!Future(Thread.currentThread().isInterrupted()).await)
+    }
+  }
 }

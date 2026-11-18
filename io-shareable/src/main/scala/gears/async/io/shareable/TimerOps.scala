@@ -25,6 +25,11 @@ abstract class AbstractMakeTimerOp(duration: FiniteDuration) extends RepeatableA
 
   override def ownDeadline: Long = initialDeadline
 
+  /** Whether this performance's time is up already, as a timer of no time's is: for a performer that then need not wait
+    * on a heap for it.
+    */
+  final def isDue: Boolean = initialDeadline - System.nanoTime() <= 0
+
   override protected def hasOwnDeadline: Boolean = true
 
   def wakeup(resumedAt: Long): Try[Unit] | CancelledSentinel.type =

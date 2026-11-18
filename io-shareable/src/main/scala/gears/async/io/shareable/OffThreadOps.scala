@@ -196,6 +196,72 @@ trait WorkOffThread extends AbstractTimerHeapOp, TimeoutOnWake {
         // A cancel, the time limit, or the work's own failure, by when it has returned and there is nothing to stop.
         if run.stop(interruptible) && waits then run.awaitReturned()
         throw stopped
+
+  /** One performance's work, done on the performer's own thread (see `performOnCaller`): what cancels it, and what its
+    * time limit does.
+    */
+  private final class Here(thread: Thread) extends gears.async.Cancellable {
+    private var running = false // guarded by this run's monitor
+
+    def run(): Unit =
+      // Settled already by a cancel that came first: the work is skipped, as work not yet begun is.
+      if !settled then
+        synchronized { running = true }
+        var failure: Throwable | Null = null
+        try work()
+        catch case thrown: Throwable => failure = thrown
+          // No interrupt comes after this, and one that came too late for the work is not the performer's to keep.
+        synchronized { running = false }
+        Thread.interrupted(): Unit
+        if claimAtWork() then
+          val outcome =
+            if failure != null then Failure(failure)
+            else
+              try
+                commit()
+                WorkpoolScheduler.SuccessUnit
+              catch case NonFatal(thrown) => Failure(thrown)
+          completeFromWork(outcome)
+        else if failure == null then
+          try discard()
+          catch case NonFatal(_) => ()
+
+    private def interruptWork(): Unit =
+      if interruptible then synchronized { if running then thread.interrupt() }
+
+    /** The performer's group is cancelled: the op is settled as cancelled, unless its work is done, and the work
+      * interrupted.
+      */
+    def cancel(): Unit = if cancelByPerformer() then interruptWork()
+
+    /** The op's time limit is up: it is settled as timed out, unless its work is done, and the work interrupted. */
+    def expire(): Unit =
+      if claimAtDeadline() then
+        timerWakeup(System.nanoTime())
+        interruptWork()
+  }
+
+  /** As `performOffThread`, for a performer whose own thread may block, as a virtual thread may: the work is done here
+    * and now, with no thread to hand it to and none to be woken by. A cancel or the time limit still settles the op at
+    * once and interrupts work that is `interruptible`, but the performer, being the one at work, returns only once the
+    * work has. So an op that does not wait for its work (`waits`) is handed to the pool all the same, since here it
+    * could not leave it behind. `worker` fires the op's time limit.
+    */
+  final def performOnCaller(worker: Worker & Source)(using async: Async): Unit =
+    if !waits then performOffThread(worker)
+    else
+      val owner = worker.handleOwner
+      val on = worksOn
+      if on != null then owner.check(on)
+      performerOwner = owner
+      val here = new Here(Thread.currentThread())
+      expose()
+      val limit =
+        if hasDeadline then worker.runAfter(Math.max(deadlineNow - System.nanoTime(), 0L), () => here.expire())
+        else null
+      try gears.async.cancellationScope(here)(here.run())
+      finally if limit != null then limit.cancel()
+      parkUntilSettled() // settled by now: this returns its outcome, or throws it
 }
 
 /** Blocking code as an op (`Blocking.blocking`): interrupted by a cancel or its time limit, which wait for it. */

@@ -57,6 +57,14 @@ trait ReadyWaiting extends AbstractTimerHeapOp, TimeoutOnWake, ReadinessOp {
       completeFromReady(result)
       moved
 
+  /** Whether the op is worth yielding for before it waits (see `EventSource.retriesBeforeWaiting`): one whose handle is
+    * never ready within a few yields, as a connect under way is not, says no.
+    */
+  protected def yieldsBeforeWaiting: Boolean = true
+
+  private def retriesFor(readiness: HandleReadiness[Source], self: Source): Int =
+    if yieldsBeforeWaiting then readiness.retriesNow(self.retriesBeforeWaiting) else 0
+
   /** Does the work at once, which most often does it, or else waits for the handle's listener to find the handle ready
     * and do it, for the handle to close, or for the op's time limit or cancel. The listener is `self`, the performer's
     * worker, if the handle had none, and from then on whichever worker that was: it does the work and resumes the
@@ -65,19 +73,29 @@ trait ReadyWaiting extends AbstractTimerHeapOp, TimeoutOnWake, ReadinessOp {
     */
   protected final def performWhenReadyOn(handle: ReadinessHandle { type Source = ReadyWaiting.this.Source })(
       self: Source
-  )(using Async): Unit =
+  )(using async: Async): Unit =
     self.handleOwner.check(handle)
     val readiness = handle.readiness(isRead)
     var waiting = false
     var done = false
+    // How many yields are left before waiting: asked of the handle when first needed, which knows how the last went.
+    var retries = -1
+    var retried = false
     while !done && !waiting do
+      var retry = false
       val tick = readiness.tick
       handle.claimWork()
       try
         // A handle known to be drained is not tried: its listener reports it when there is something again.
         val tried = !readiness.waitsWithoutTrying(tick)
         if tried && attempt() != AbstractReadinessOp.Blocked then done = true
+        else if tried && { if retries < 0 then retries = retriesFor(readiness, self); retries > 0 }
+        then
+          retries -= 1
+          retried = true
+          retry = true
         else
+          if retried then readiness.retriesSpent()
           expose()
           val listening = readiness.registerWaiter(this, tick, tried, self)
           if listening != null then // else it may be ready for all the handle knows: again
@@ -92,6 +110,10 @@ trait ReadyWaiting extends AbstractTimerHeapOp, TimeoutOnWake, ReadinessOp {
                 readiness.clearWaiter(this): Unit
                 throw failure
       finally handle.releaseWork()
+      if retry then
+        // Behind every other thread ready to run, with nothing of the handle's held meanwhile.
+        Thread.`yield`()
+        if async.group.isCancelled then throw new java.util.concurrent.CancellationException()
     if waiting then
       try parkUntilSettled()
       finally readiness.clearWaiter(this): Unit
