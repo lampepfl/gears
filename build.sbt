@@ -4,6 +4,10 @@ import sbtcrossproject.CrossPlugin.autoImport.{CrossType, crossProject}
 
 scalaVersion := "3.9.0"
 
+// The Scala Native nightly selected in project/plugins.sbt brings its libraries from the snapshot repository.
+ThisBuild / resolvers ++= (if (sys.env.get("SCALA_NATIVE_NIGHTLY").contains("1")) Seq(Resolver.sonatypeCentralSnapshots)
+                           else Nil)
+
 LocalRootProject / publish / skip := true
 
 val MUnitFramework = new TestFramework("munit.Framework")
@@ -220,3 +224,25 @@ lazy val ioKqueueDemos =
       run / fork := true
     )
     .dependsOn(ioKqueue, ioTestkit.native)
+
+// The bench: scenarios over every capability (`io-bench/shared`), run over this branch's backends, the JVM's
+// (`ioCapBenchJVM/run`) and kqueue (`ioCapBenchNative/nativeLink`), and by `io-bench/compare` over another branch's too.
+// A release build for Scala Native needs `SCALA_NATIVE_NIGHTLY=1` (see project/plugins.sbt).
+lazy val ioCapBench =
+  crossProject(JVMPlatform, NativePlatform)
+    .crossType(CrossType.Full)
+    .in(file("io-bench"))
+    .settings(
+      publish / skip := true,
+      scalacOptions += "-release:21",
+      Compile / mainClass := Some("gears.async.io.bench.BenchMain")
+    )
+    .jvmSettings(
+      run / fork := true,
+      run / javaOptions ++= Seq("-Xms1g", "-Xmx1g", "--add-opens=java.base/java.lang=ALL-UNNAMED")
+    )
+    .nativeSettings(
+      nativeConfig ~= { _.withMultithreading(true).withMode(scala.scalanative.build.Mode.releaseFast) }
+    )
+    .jvmConfigure(_.dependsOn(ioNio))
+    .nativeConfigure(_.dependsOn(ioKqueue))
