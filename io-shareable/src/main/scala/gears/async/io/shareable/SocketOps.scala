@@ -69,13 +69,13 @@ abstract class AbstractConnectOp[H <: ReadinessHandle](into: Slot[H])
     super.onEntry()
     Checks.checkEmpty(into)
 
-  protected final def attempt(): Int =
+  protected final def attempt(): Moved =
     val connecting = socket.nn
-    if !_finishConnect(connecting) then ReadyWaiting.Blocked
+    if !_finishConnect(connecting) then Moved.Blocked
     else
       into.set(connecting)
       published = true
-      0
+      Moved(0)
 
   final def performConnect(self: Source)(using gears.async.Async): Unit =
     val opened = _startConnect(self.handleOwner)
@@ -108,13 +108,13 @@ abstract class AbstractAcceptOp[L <: ReadinessHandle, C <: BaseHandle](
     super.onEntry()
     Checks.checkEmpty(into)
 
-  protected final def attempt(): Int =
+  protected final def attempt(): Moved =
     val accepted = _accept(listener)
-    if accepted == null then ReadyWaiting.Blocked
+    if accepted == null then Moved.Blocked
     else
       accepted.nn.open()
       into.set(accepted.nn)
-      1
+      Moved(1)
 }
 
 /** Accepts the connections pending on a listener, at most `max`: at least one, waiting while there is none. */
@@ -137,9 +137,9 @@ abstract class AbstractAcceptAllOp[
     super.onEntry()
     Checks.checkEmpty(into)
 
-  protected final def attempt(): Int =
+  protected final def attempt(): Moved =
     val first = _accept(listener)
-    if first == null then ReadyWaiting.Blocked
+    if first == null then Moved.Blocked
     else
       first.nn.open()
       val accepted = scala.collection.mutable.ArrayBuffer[C](first.nn)
@@ -154,5 +154,5 @@ abstract class AbstractAcceptAllOp[
           next.nn.open()
           accepted += next.nn
       into.set(accepted.toArray)
-      accepted.size
+      Moved(accepted.size)
 }

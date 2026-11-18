@@ -271,11 +271,16 @@ class NioSchedulingSuite extends munit.FunSuite {
     }
   }
 
-  test("what a channel moved between several buffers is counted in an Int, held at its most, never wrapped") {
-    assertEquals(NioOp.count(0L), 0)
-    assertEquals(NioOp.count(-1L), -1) // the end of the stream
-    assertEquals(NioOp.count(Int.MaxValue.toLong), Int.MaxValue)
-    assertEquals(NioOp.count(Int.MaxValue.toLong + 1), Int.MaxValue) // wrapped, this would be negative
-    assertEquals(NioOp.count(1L << 32), Int.MaxValue) // wrapped, this would be nothing moved
+  test("what a channel's call did is read as moved, blocked or the end of the stream, its count never wrapped") {
+    import gears.async.io.shareable.Moved
+    assert(NioReadOps.read(0L).isBlocked) // a channel with nothing to read
+    assert(!NioReadOps.read(-1L).isBlocked)
+    assertEquals(NioReadOps.read(-1L).count, Moved.EndOfStream.count)
+    assertEquals(NioReadOps.read(5L).count, 5)
+    assert(NioWriteOps.written(0L).isBlocked) // a channel with no room
+    assertEquals(NioWriteOps.written(5L).count, 5)
+    assertEquals(Moved.of(Int.MaxValue.toLong).count, Int.MaxValue)
+    assertEquals(Moved.of(Int.MaxValue.toLong + 1).count, Int.MaxValue) // wrapped, this would be blocked
+    assertEquals(NioReadOps.read(1L << 32).count, Int.MaxValue) // wrapped, this would be nothing read
   }
 }

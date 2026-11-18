@@ -34,6 +34,7 @@ import gears.async.io.shareable.AbstractSendOp
 import gears.async.io.shareable.AbstractWriteOp
 import gears.async.io.shareable.HandleOwner
 import gears.async.io.shareable.LendingPool
+import gears.async.io.shareable.Moved
 import gears.async.io.shareable.TimerHeapOp
 import gears.async.io.shareable.Worker
 
@@ -47,14 +48,6 @@ sealed trait NioOp extends TimerHeapOp:
   /** A worker takes any op of this backend's among its timers (see `NioPoller.Timer`). */
   type Source = NioPoller
   final def _holdTimer(worker: NioPoller): Unit = worker.addTimer(this)
-
-object NioOp:
-
-  /** What a channel says it moved between several buffers, as the count an op gives: a channel counts in a `Long`, and
-    * buffers that hold more than an `Int` counts between them would wrap it, to nothing moved, or to the end of the
-    * stream. The bytes are moved whatever is said of them, so the count is held at the most an `Int` says.
-    */
-  private[nio] def count(moved: Long): Int = if moved > Int.MaxValue then Int.MaxValue else moved.toInt
 
 /** An op that waits for its handle to be ready, on the worker that listens for it (see `ReadyWaiting`). */
 sealed trait NioReadinessOp extends NioOp:
@@ -79,21 +72,26 @@ sealed trait NioDeadlineOp extends NioOp with Deadline
 sealed trait NioCloseOp extends NioOp:
   def performClose(self: NioPoller)(using Async): Unit
 
-/** A stream read's calls on the JDK's channels: mixed into the op. A channel that has nothing to read reads nothing. */
+/** A stream read's calls on the JDK's channels: mixed into the op. A channel that has nothing to read reads nothing,
+  * which is a read that would block, and says -1 at the end of its stream.
+  */
 trait NioReadOps[H <: NioReadable]:
-  final def _readHandle(handle: H, buf: ByteBuffer): Int = handle.reads.read(buf)
-  final def _readvHandle(handle: H, bufs: Array[ByteBuffer]): Int = NioOp.count(handle.reads.read(bufs))
+  final def _readHandle(handle: H, buf: ByteBuffer): Moved = NioReadOps.read(handle.reads.read(buf).toLong)
+  final def _readvHandle(handle: H, bufs: Array[ByteBuffer]): Moved = NioReadOps.read(handle.reads.read(bufs))
+
+object NioReadOps:
+  private[nio] def read(count: Long): Moved =
+    if count > 0 then Moved.of(count) else if count == 0 then Moved.Blocked else Moved.EndOfStream
 
 /** A stream write's calls, as `NioReadOps` has a read's. A channel with no room writes nothing, which is a write that
   * would block.
   */
 trait NioWriteOps[H <: NioWritable]:
-  final def _writeHandle(handle: H, buf: ByteBuffer): Int =
-    val written = handle.writes.write(buf)
-    if written == 0 then -1 else written
-  final def _writevHandle(handle: H, bufs: Array[ByteBuffer]): Int =
-    val written = NioOp.count(handle.writes.write(bufs))
-    if written == 0 then -1 else written
+  final def _writeHandle(handle: H, buf: ByteBuffer): Moved = NioWriteOps.written(handle.writes.write(buf).toLong)
+  final def _writevHandle(handle: H, bufs: Array[ByteBuffer]): Moved = NioWriteOps.written(handle.writes.write(bufs))
+
+object NioWriteOps:
+  private[nio] def written(count: Long): Moved = if count == 0 then Moved.Blocked else Moved.of(count)
 
 private[nio] final class NioRead(handle: NioChannelReadable, buf: ByteBuffer)
     extends AbstractReadOp(handle, buf),

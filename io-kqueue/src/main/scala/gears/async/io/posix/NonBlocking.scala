@@ -1,5 +1,7 @@
 package gears.async.io.posix
 
+import gears.async.io.shareable.Moved
+
 import java.io.IOException
 import java.nio.ByteBuffer
 import scala.scalanative.meta.LinktimeInfo
@@ -20,8 +22,6 @@ object NonBlocking {
     val err = errno.errno
     err == errno.EAGAIN || err == errno.EWOULDBLOCK || err == errno.EINTR
 
-  inline val EOF = -1
-
   /** Accepts a new connection on `serverFd`, which must be non-blocking, and returns it non-blocking too. Returns the
     * client file descriptor, or -1 if no client was accepted. On macOS and FreeBSD that takes the `accept` alone: an
     * accepted socket has the listening socket's properties, `O_NONBLOCK` among them (see accept(2)).
@@ -41,27 +41,19 @@ object NonBlocking {
     }
   }
 
-  /** What a vectored call moved, as the count an op gives: the system counts in a `ssize_t`, and buffers that hold more
-    * than an `Int` counts between them would wrap it, to nothing moved or to a failure. The bytes are moved whatever is
-    * said of them, so the count is held at the most an `Int` says.
-    */
-  private def counted(moved: Long): Int = if moved > Int.MaxValue then Int.MaxValue else moved.toInt
-
-  /** Fills `buf` from `fd` between position and limit. Returns the number of bytes read, 0 if the read would block, or
-    * -1 at EOF.
-    */
-  def read(fd: Int, buf: ByteBuffer): Int =
+  /** Fills `buf` from `fd` between position and limit: what it read, the end of the stream, or that it would block. */
+  def read(fd: Int, buf: ByteBuffer): Moved =
     NativeBuffer.staged(buf, copyIn = false, copyOut = true)(readAddressable(fd, _))
 
-  private def readAddressable(fd: Int, buf: ByteBuffer): Int = {
+  private def readAddressable(fd: Int, buf: ByteBuffer): Moved = {
     val read = Unblocked.read(fd, NativeBuffer.atPosition(buf), buf.remaining().toCSize)
     if read < 0 then
       if !wouldBlock then throw new IOException(s"Failed to read from descriptor $fd: ${cError()}")
-      0
-    else if read == 0 then EOF
+      Moved.Blocked
+    else if read == 0 then Moved.EndOfStream
     else
       NativeBuffer.advance(buf, read.toInt)
-      read.toInt
+      Moved(read.toInt)
   }
 
   /** The most buffers one `readv` or `writev` takes (`IOV_MAX` on macOS and Linux): beyond them, an op takes the rest
@@ -69,41 +61,37 @@ object NonBlocking {
     */
   inline val MaxBuffers = 1024
 
-  /** Fills `bufs` from `fd` in order, as `read` fills one, with one `readv`: the bytes read, 0 if it would block, or -1
-    * at end of stream, which leaves the buffers as they were.
-    */
-  def readv(fd: Int, bufs: Array[java.nio.ByteBuffer]): Int =
+  /** Fills `bufs` from `fd` in order, as `read` fills one, with one `readv`. */
+  def readv(fd: Int, bufs: Array[java.nio.ByteBuffer]): Moved =
     NativeBuffer.staged(bufs, copyIn = false, copyOut = true)(readvAddressable(fd, _))
 
-  private def readvAddressable(fd: Int, bufs: Array[java.nio.ByteBuffer]): Int = {
+  private def readvAddressable(fd: Int, bufs: Array[java.nio.ByteBuffer]): Moved = {
     val vectors = stackalloc[uio.iovec](math.min(bufs.length, MaxBuffers))
     val count = fill(vectors, bufs)
     val read = Unblocked.readv(fd, vectors, count)
     if read < 0 then
       if !wouldBlock then throw new IOException(s"Failed to read from descriptor $fd: ${cError()}")
-      0
-    else if read == 0 then EOF
+      Moved.Blocked
+    else if read == 0 then Moved.EndOfStream
     else
       advance(bufs, read.toLong)
-      counted(read.toLong)
+      Moved.of(read.toLong)
   }
 
-  /** Drains `bufs` into `fd` in order, as `write` drains one, with one `writev`: the bytes written, or -1 if it would
-    * block.
-    */
-  def writev(fd: Int, bufs: Array[java.nio.ByteBuffer]): Int =
+  /** Drains `bufs` into `fd` in order, as `write` drains one, with one `writev`. */
+  def writev(fd: Int, bufs: Array[java.nio.ByteBuffer]): Moved =
     NativeBuffer.staged(bufs, copyIn = true, copyOut = false)(writevAddressable(fd, _))
 
-  private def writevAddressable(fd: Int, bufs: Array[java.nio.ByteBuffer]): Int = {
+  private def writevAddressable(fd: Int, bufs: Array[java.nio.ByteBuffer]): Moved = {
     val vectors = stackalloc[uio.iovec](math.min(bufs.length, MaxBuffers))
     val count = fill(vectors, bufs)
     val written = Unblocked.writev(fd, vectors, count)
     if written < 0 then {
       if !wouldBlock then throw new IOException(s"Failed to write to descriptor $fd: ${cError()}")
-      -1
+      Moved.Blocked
     } else {
       advance(bufs, written.toLong)
-      counted(written.toLong)
+      Moved.of(written.toLong)
     }
   }
 
@@ -139,17 +127,17 @@ object NonBlocking {
   /** Drains `buf` into `fd` between position and limit. Returns the number of bytes written, or -1 if the write would
     * block.
     */
-  def write(fd: Int, buf: ByteBuffer): Int =
+  def write(fd: Int, buf: ByteBuffer): Moved =
     NativeBuffer.staged(buf, copyIn = true, copyOut = false)(writeAddressable(fd, _))
 
-  private def writeAddressable(fd: Int, buf: ByteBuffer): Int = {
+  private def writeAddressable(fd: Int, buf: ByteBuffer): Moved = {
     val written = Unblocked.write(fd, NativeBuffer.atPosition(buf), buf.remaining().toCSize)
     if written < 0 then {
       if !wouldBlock then throw new IOException(s"Failed to write to descriptor $fd: ${cError()}")
-      -1
+      Moved.Blocked
     } else {
       NativeBuffer.advance(buf, written.toInt)
-      written.toInt
+      Moved(written.toInt)
     }
   }
 }

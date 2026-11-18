@@ -82,7 +82,7 @@ trait ReadinessOp:
     * waiter, to be released with `releaseReady`; or `ReadinessOp.SettledOtherwise` if the op was settled without doing
     * the work, as cancelled or failed.
     */
-  def readyWakeup(): Int
+  def readyWakeup(): Readiness
 
   /** Gives the claim back: whether the op still waits. */
   def releaseReady(): Boolean
@@ -99,12 +99,6 @@ object ReadinessOp:
     * only that, the end of a stream or an error among it, which no later report follows.
     */
   inline val Unknown = Long.MaxValue
-
-  /** What `readyWakeup` returns when the handle was not ready after all. */
-  inline val Blocked = -1
-
-  /** What `readyWakeup` returns when the op was settled without its work being done. */
-  inline val SettledOtherwise = -2
 
 /** What a handle keeps, for reading or for writing, for the ops that wait for it to be ready and for the event source
   * that says when it is. Its own monitor guards it, and a handle has one for each direction, so that a reader and a
@@ -320,7 +314,7 @@ private[shareable] final class SingleWaiter[S <: EventSource](
           busyReport()
           if handle.getState == HandleState.OpenState && op.claimAtReady() then
             val moved = op.readyWakeup()
-            if moved == ReadinessOp.Blocked then
+            if moved.isBlocked then
               // If a cancel settles the op as its claim is given back, its performer clears it.
               op.releaseReady(): Unit
             else
@@ -328,7 +322,7 @@ private[shareable] final class SingleWaiter[S <: EventSource](
               // All that was there as the source took its report: whatever comes after it is reported anew, so until
               // then there is nothing, and the next op need not look. Not at the end of a stream, where nothing was
               // moved, since no report follows it.
-              if moved > 0 && moved >= available then drainedTick = reports
+              if moved.took(available) then drainedTick = reports
     }
     if stopping != null then handle.noLongerListenedForBy(stopping.nn, read)
   }
@@ -423,7 +417,7 @@ private[shareable] final class WaiterQueue[S <: EventSource](
   /** `op`, claimed, does its work with the handle's work claimed: what `readyWakeup` returns. If the handle began to
     * close since the op was claimed, it fails as the close fails the others.
     */
-  private def serve(op: ReadinessOp): Int =
+  private def serve(op: ReadinessOp): Readiness =
     val open =
       try
         handle.claimWork()
@@ -432,7 +426,7 @@ private[shareable] final class WaiterQueue[S <: EventSource](
         case closed: java.io.IOException =>
           op.failReady(closed)
           false
-    if !open then ReadinessOp.SettledOtherwise
+    if !open then Readiness.SettledOtherwise
     else
       try op.readyWakeup()
       finally handle.releaseWork()
@@ -453,7 +447,7 @@ private[shareable] final class WaiterQueue[S <: EventSource](
       val serving = op.nn
       val moved = serve(serving)
       synchronized {
-        if moved == ReadinessOp.Blocked then
+        if moved.isBlocked then
           // Not ready any more: it waits on at the head, and so do those behind it, for the next report.
           queue.addFirst(serving)
           drainedTick = reports

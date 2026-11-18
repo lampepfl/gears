@@ -25,7 +25,7 @@ abstract class AbstractReceiveOp[H <: ReadinessHandle, A <: AnyRef](
     if buf.capacity() == 0 then throw Checks.noCapacity(buf)
     if from != null then Checks.checkEmpty(from)
 
-  protected final def attempt(): Int = if _receive(socket, buf, from) then 1 else ReadyWaiting.Blocked
+  protected final def attempt(): Moved = if _receive(socket, buf, from) then Moved(1) else Moved.Blocked
 }
 
 /** Sends `bufs`, in order, as one packet on a datagram socket, waiting for room while the socket has none. Sends
@@ -49,5 +49,5 @@ abstract class AbstractSendOp[H <: ReadinessHandle](
     super.onEntry()
     if connected && !Checks.anyRemaining(bufs) then throw Checks.emptyPacket(bufs(0))
 
-  protected final def attempt(): Int = if _send(socket, bufs) then 1 else ReadyWaiting.Blocked
+  protected final def attempt(): Moved = if _send(socket, bufs) then Moved(1) else Moved.Blocked
 }

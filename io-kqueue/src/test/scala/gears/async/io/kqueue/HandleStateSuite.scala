@@ -8,6 +8,8 @@ import gears.async.io.shareable.CloseListener
 import gears.async.io.shareable.EventSource
 import gears.async.io.shareable.HandleOwner
 import gears.async.io.shareable.HandleState
+import gears.async.io.shareable.Moved
+import gears.async.io.shareable.Readiness
 import gears.async.io.shareable.ReadinessHandle
 import gears.async.io.shareable.ReadinessOp
 import gears.async.io.shareable.TimerHeap.TimerOp
@@ -115,12 +117,12 @@ class HandleStateSuite extends munit.FunSuite {
 
   /** An op as the handle sees it: `moves` is what its work does when it is woken. */
   private final class FakeOp extends ReadinessOp {
-    var moves = 1
+    var moves: Moved = Moved(1)
     var woken = 0
     var released = 0
     def settled: Boolean = false
     def claimAtReady(): Boolean = claimable
-    def readyWakeup(): Int = { woken += 1; moves }
+    def readyWakeup(): Readiness = { woken += 1; Readiness.of(moves) }
     def releaseReady(): Boolean = { released += 1; true }
     var failed: Throwable | Null = null
     def failReady(failure: Throwable): Unit = failed = failure
@@ -164,7 +166,7 @@ class HandleStateSuite extends munit.FunSuite {
     assert(drained, "an op waits because the handle was not ready")
     assert(!handle.readiness(read = false).drainedAt(handle.readiness(read = false).tick), "each direction on its own")
 
-    op.moves = 4
+    op.moves = Moved(4)
     handle.readiness(read = true).report(source, available = 4)
     assert(drained, "the op took all that was reported")
 
@@ -175,18 +177,18 @@ class HandleStateSuite extends munit.FunSuite {
     assert(handle.readiness(read = true).registerWaiter(op, stale, tried = true, source) == null)
 
     waitNow()
-    op.moves = 4
+    op.moves = Moved(4)
     handle.readiness(read = true).report(source, available = 10)
     assert(!drained, "the op left some of what was reported")
 
     waitNow()
-    op.moves = 0
+    op.moves = Moved.EndOfStream
     handle.readiness(read = true).report(source, ReadinessOp.Unknown)
     assert(!drained, "the end of a stream, which no report follows")
 
     // An op that finds the handle not ready after all waits on, its claim given back.
     waitNow()
-    op.moves = ReadinessOp.Blocked
+    op.moves = Moved.Blocked
     handle.readiness(read = true).report(source, available = 4)
     assertEquals(op.released, 1)
     assert(handle.readiness(read = true).clearWaiter(op), "it was still the waiter")
@@ -214,14 +216,14 @@ class HandleStateSuite extends munit.FunSuite {
     assertEquals(source.started.get(), 1)
 
     // One report serves them from the head until the handle is not ready any more.
-    second.moves = ReadinessOp.Blocked
+    second.moves = Moved.Blocked
     readiness.report(source, ReadinessOp.Unknown)
     assertEquals((first.woken, second.woken, third.woken), (1, 1, 0))
     assertEquals(second.released, 1)
     assert(!readiness.clearWaiter(first), "an op that did its work has left the queue")
 
     // The op that found it not ready is still at the head, and the next report begins with it.
-    second.moves = 1
+    second.moves = Moved(1)
     readiness.report(source, ReadinessOp.Unknown)
     assertEquals((second.woken, third.woken), (2, 1))
     assert(!readiness.waitsWithoutTrying(readiness.tick), "the queue is empty, and the handle may have more")
@@ -306,11 +308,11 @@ class HandleStateSuite extends munit.FunSuite {
     val op = new ReadinessOp {
       def settled: Boolean = false
       def claimAtReady(): Boolean = true
-      def readyWakeup(): Int = {
+      def readyWakeup(): Readiness = {
         claimedDuring = handle.claimedWork
         closedInside = handle.requestClose() // begins the close, which the work under way holds back
         assertEquals(handle.cleanups.get(), 0)
-        1
+        Readiness.of(Moved(1))
       }
       def releaseReady(): Boolean = true
       def failReady(failure: Throwable): Unit = ()
@@ -333,12 +335,12 @@ class HandleStateSuite extends munit.FunSuite {
         def settled: Boolean = false
         def claimAtReady(): Boolean = true
         // The work of an op: it must never run beside, or after, the handle's cleanup.
-        def readyWakeup(): Int = {
+        def readyWakeup(): Readiness = {
           working.incrementAndGet()
           if handle.cleanups.get() > 0 then afterCleanup.incrementAndGet()
           Thread.onSpinWait()
           if handle.cleanups.get() > 0 then afterCleanup.incrementAndGet()
-          ReadinessOp.Blocked // so that it stays the waiter, report after report
+          Readiness.Blocked // so that it stays the waiter, report after report
         }
         def releaseReady(): Boolean = true
         def failReady(failure: Throwable): Unit = ()
