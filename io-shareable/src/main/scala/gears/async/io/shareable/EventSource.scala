@@ -9,23 +9,29 @@ import gears.async.io.shareable.TimerHeap.TimerSource
   */
 trait EventSource extends TimerSource {
 
+  /** The handles this source can listen for: its backend's. A handle names the sources that listen for it in turn
+    * (`ReadinessHandle.Source`), which must take it, so a source is never given a handle of another kind, and has no
+    * need to check.
+    */
+  type Handle <: ReadinessHandle
+
   /** This source has become `handle`'s listener for reads, or for writes: from now on it reports each time the handle
     * becomes ready, not for as long as it is, and at once if it is ready now. Called once for as long as it stays the
     * listener, by the handle, from `HandleReadiness.registerWaiter`, on this source's own thread.
     */
-  def startListening(handle: BaseHandle, read: Boolean): Unit
+  def startListening(handle: Handle, read: Boolean): Unit
 
   /** This source is no longer `handle`'s listener for reads, or for writes: it stops reporting them. Called on this
     * source's own thread, by the handle, from `HandleReadiness.report`.
     */
-  def stopListening(handle: BaseHandle, read: Boolean): Unit = ()
+  def stopListening(handle: Handle, read: Boolean): Unit = ()
 
   /** From any thread: has this source report `handle` ready, for reads or for writes, on its own thread, as it does
     * what it finds ready itself. For a handle whose readiness something else must find out, where this source's own
     * facility can't (see `AbstractBaseHandle.waiterWaits`). A source with no thread of its own to do it on does
     * nothing.
     */
-  def reportLater(handle: BaseHandle, read: Boolean): Unit = ()
+  def reportLater(handle: Handle, read: Boolean): Unit = ()
 
   /** From any thread: schedules to run `body` on this source's own thread once `nanos` have passed.
     *
@@ -46,7 +52,7 @@ trait EventSource extends TimerSource {
   def handleOwner: HandleOwner
 
   /** `handle` is closing: whatever this source keeps to find it by is dropped, before its descriptor is released. */
-  def forgetHandle(handle: BaseHandle): Unit = ()
+  def forgetHandle(handle: Handle): Unit = ()
 }
 
 /** An op waiting for its handle to be ready, as the handle holds it and as an event source wakes it. */
@@ -104,7 +110,7 @@ object ReadinessOp:
   * it has for each direction (`AbstractBaseHandle.queuesWaiters`).
   */
 sealed abstract class HandleReadiness[S <: EventSource] private[shareable] (
-    protected val handle: AbstractBaseHandle,
+    protected val handle: AbstractReadinessHandle { type Source >: S },
     protected val read: Boolean
 ) {
 
@@ -175,7 +181,7 @@ sealed abstract class HandleReadiness[S <: EventSource] private[shareable] (
     * being one. If it can't, `undo` takes back, under the lock, what was done for the op that waited on it.
     */
   protected final def startListening(self: S)(undo: => Unit): Unit =
-    try self.startListening(handle, read)
+    try handle.listenedForBy(self, read)
     catch
       case failure: Throwable =>
         synchronized {
@@ -212,12 +218,14 @@ sealed abstract class HandleReadiness[S <: EventSource] private[shareable] (
   /** For the handle's close: the listener drops the handle. */
   private[shareable] final def forgetListener(): Unit =
     val listening = synchronized(listener)
-    if listening != null then listening.forgetHandle(handle)
+    if listening != null then handle.forgottenBy(listening.nn)
 }
 
 /** The readiness of a stream, for one direction: one op waits at a time. */
-private[shareable] final class SingleWaiter[S <: EventSource](handle: AbstractBaseHandle, read: Boolean)
-    extends HandleReadiness[S](handle, read) {
+private[shareable] final class SingleWaiter[S <: EventSource](
+    handle: AbstractReadinessHandle { type Source >: S },
+    read: Boolean
+) extends HandleReadiness[S](handle, read) {
 
   /** The op that waits. Read without the lock by `clearWaiter`, to find that it has nothing to do. */
   @volatile private var waiter: ReadinessOp | Null = null
@@ -242,7 +250,7 @@ private[shareable] final class SingleWaiter[S <: EventSource](handle: AbstractBa
     }
     // No report can come before this, and a second op to wait meanwhile is refused, as this one is the waiter.
     if start then startListening(self)(if waiter eq op then waiter = null)
-    if listening != null then handle.waiterWaits(read, listening)
+    if listening != null then handle.waiterWaits(read, listening.nn)
     listening
   }
 
@@ -265,13 +273,14 @@ private[shareable] final class SingleWaiter[S <: EventSource](handle: AbstractBa
     * its next report.
     */
   def report(source: EventSource, available: Long): Unit = {
-    var stop = false
+    var stopping: S | Null = null
     synchronized {
       // A report from a source that has stopped listening, already on its way, is not this listener's: ignored.
-      if listener eq source then
+      val listening = listener
+      if listening eq source then
         reports += 1
         val op = waiter
-        if op == null then stop = idleReport()
+        if op == null then { if idleReport() then stopping = listening }
         else
           busyReport()
           if handle.getState == HandleState.OpenState && op.claimAtReady() then
@@ -286,7 +295,7 @@ private[shareable] final class SingleWaiter[S <: EventSource](handle: AbstractBa
               // moved, since no report follows it.
               if moved > 0 && moved >= available then drainedTick = reports
     }
-    if stop then source.stopListening(handle, read)
+    if stopping != null then handle.noLongerListenedForBy(stopping.nn, read)
   }
 
   /** Under the lock, which waits for a report's work that is under way, and after which no report does any. */
@@ -304,8 +313,10 @@ private[shareable] final class SingleWaiter[S <: EventSource](handle: AbstractBa
   * queue meanwhile, and an accept is a system call and a handle made. Each op is taken from the queue and claimed under
   * the lock, and does its work outside it, with the handle's work claimed, which is what keeps a close away.
   */
-private[shareable] final class WaiterQueue[S <: EventSource](handle: AbstractBaseHandle, read: Boolean)
-    extends HandleReadiness[S](handle, read) {
+private[shareable] final class WaiterQueue[S <: EventSource](
+    handle: AbstractReadinessHandle { type Source >: S },
+    read: Boolean
+) extends HandleReadiness[S](handle, read) {
 
   private val queue = new java.util.ArrayDeque[ReadinessOp]
 
@@ -348,7 +359,7 @@ private[shareable] final class WaiterQueue[S <: EventSource](handle: AbstractBas
         case failure: Throwable =>
           stranded.foreach(other => if other.claimAtReady() then other.failReady(failure))
           throw failure
-    if listening != null then handle.waiterWaits(read, listening)
+    if listening != null then handle.waiterWaits(read, listening.nn)
     listening
   }
 
@@ -392,12 +403,13 @@ private[shareable] final class WaiterQueue[S <: EventSource](handle: AbstractBas
       finally handle.releaseWork()
 
   def report(source: EventSource, available: Long): Unit = {
-    var stop = false
+    var stopping: S | Null = null
     var op: ReadinessOp | Null = null
     synchronized {
-      if listener eq source then
+      val listening = listener
+      if listening eq source then
         reports += 1
-        if pending == 0 then stop = idleReport()
+        if pending == 0 then { if idleReport() then stopping = listening }
         else
           busyReport()
           op = takeClaimed()
@@ -416,7 +428,7 @@ private[shareable] final class WaiterQueue[S <: EventSource](handle: AbstractBas
           pending -= 1
           op = takeClaimed()
       }
-    if stop then source.stopListening(handle, read)
+    if stopping != null then handle.noLongerListenedForBy(stopping.nn, read)
   }
 
   /** Those in the queue fail. One a report is serving has the handle's work claimed, which the close waits for. */

@@ -86,30 +86,30 @@ trait NioWriteOps[H <: NioWritable]:
     val written = handle.writes.write(bufs).toInt
     if written == 0 then -1 else written
 
-private[nio] final class NioRead(handle: NioReadable, buf: ByteBuffer)
+private[nio] final class NioRead(handle: NioChannelReadable, buf: ByteBuffer)
     extends AbstractReadOp(handle, buf),
       NioReadinessOp,
-      NioReadOps[NioReadable]
+      NioReadOps[NioChannelReadable]
 
-private[nio] final class NioWrite(handle: NioWritable, buf: ByteBuffer)
+private[nio] final class NioWrite(handle: NioChannelWritable, buf: ByteBuffer)
     extends AbstractWriteOp(handle, buf),
       NioReadinessOp,
-      NioWriteOps[NioWritable]
+      NioWriteOps[NioChannelWritable]
 
-private[nio] final class NioScatterRead(handle: NioReadable, bufs: Array[ByteBuffer])
+private[nio] final class NioScatterRead(handle: NioChannelReadable, bufs: Array[ByteBuffer])
     extends AbstractScatterReadOp(handle, bufs),
       NioReadinessOp,
-      NioReadOps[NioReadable]
+      NioReadOps[NioChannelReadable]
 
-private[nio] final class NioPooledRead(handle: NioReadable, pool: LendingPool, into: Slot[Received])
+private[nio] final class NioPooledRead(handle: NioChannelReadable, pool: LendingPool, into: Slot[Received])
     extends AbstractPooledReadOp(handle, pool, into),
       NioReadinessOp,
-      NioReadOps[NioReadable]
+      NioReadOps[NioChannelReadable]
 
-private[nio] final class NioGatherWrite(handle: NioWritable, bufs: Array[ByteBuffer])
+private[nio] final class NioGatherWrite(handle: NioChannelWritable, bufs: Array[ByteBuffer])
     extends AbstractGatherWriteOp(handle, bufs),
       NioReadinessOp,
-      NioWriteOps[NioWritable]
+      NioWriteOps[NioChannelWritable]
 
 private[nio] final class NioCloseHandle(handle: NioHandle) extends AbstractCloseOp(handle) with NioCloseOp
 

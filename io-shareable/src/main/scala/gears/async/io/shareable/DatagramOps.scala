@@ -6,7 +6,7 @@ import java.nio.ByteBuffer
 /** Receives one packet on a datagram socket, waiting for one while there is none. Receives performed at once on one
   * socket take turns, each a whole packet (see `WaiterQueue`). `from`, if given, takes the packet's sender.
   */
-abstract class AbstractReceiveOp[H <: BaseHandle, A <: AnyRef](
+abstract class AbstractReceiveOp[H <: ReadinessHandle, A <: AnyRef](
     socket: H,
     buf: ByteBuffer,
     from: Slot[A] | Null
@@ -31,7 +31,7 @@ abstract class AbstractReceiveOp[H <: BaseHandle, A <: AnyRef](
 /** Sends `bufs`, in order, as one packet on a datagram socket, waiting for room while the socket has none. Sends
   * performed at once on one socket take turns. A `connected` socket sends no empty packet (see `IpDatagrams.send`).
   */
-abstract class AbstractSendOp[H <: BaseHandle](
+abstract class AbstractSendOp[H <: ReadinessHandle](
     socket: H,
     bufs: Array[ByteBuffer],
     connected: Boolean

@@ -56,27 +56,27 @@ sealed trait NioByteStreams extends ByteStreams { self: NioInterface & NioHandle
   // A file is not waited for: its reads and writes as a stream are file ops, at the position it carries.
 
   override def read(handle: Readable, buf: ByteBuffer): NioOp & Repeatable = handle match
-    case file: NioFile => NioFileRead(file, Array(buf), -1L)
-    case _             => NioRead(handle, buf)
+    case file: NioFile               => NioFileRead(file, Array(buf), -1L)
+    case channel: NioChannelReadable => NioRead(channel, buf)
 
   override def write(handle: Writable, buf: ByteBuffer): NioOp & Repeatable = handle match
-    case file: NioFile => NioFileWrite(file, Array(buf), -1L)
-    case _             => NioWrite(handle, buf)
+    case file: NioFile               => NioFileWrite(file, Array(buf), -1L)
+    case channel: NioChannelWritable => NioWrite(channel, buf)
 
   override def read(handle: Readable, bufs: Array[ByteBuffer]): NioOp & Repeatable = handle match
-    case file: NioFile => NioFileRead(file, bufs, -1L)
-    case _             => NioScatterRead(handle, bufs)
+    case file: NioFile               => NioFileRead(file, bufs, -1L)
+    case channel: NioChannelReadable => NioScatterRead(channel, bufs)
 
   override def write(handle: Writable, bufs: Array[ByteBuffer]): NioOp & Repeatable = handle match
-    case file: NioFile => NioFileWrite(file, bufs, -1L)
-    case _             => NioGatherWrite(handle, bufs)
+    case file: NioFile               => NioFileWrite(file, bufs, -1L)
+    case channel: NioChannelWritable => NioGatherWrite(channel, bufs)
 
   override def read(handle: Readable, pool: BufferPool, into: Slot[Received]): NioOp & Repeatable =
     pool match
       case pool: LendingPool =>
         handle match
-          case file: NioFile => NioFilePooledRead(file, pool, into)
-          case _             => NioPooledRead(handle, pool, into)
+          case file: NioFile               => NioFilePooledRead(file, pool, into)
+          case channel: NioChannelReadable => NioPooledRead(channel, pool, into)
       case _ => throw new IllegalArgumentException("A pooled read takes a pool of this backend's (Backend.pool)")
 }
 

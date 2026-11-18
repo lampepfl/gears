@@ -63,7 +63,7 @@ trait ReadyWaiting extends AbstractTimerHeapOp, TimeoutOnWake, ReadinessOp {
     * performer, which goes on from there on that worker. On a handle whose ops take turns, an op performed while others
     * wait goes behind them without trying.
     */
-  protected final def performWhenReadyOn(handle: BaseHandle { type Source = ReadyWaiting.this.Source })(
+  protected final def performWhenReadyOn(handle: ReadinessHandle { type Source = ReadyWaiting.this.Source })(
       self: Source
   )(using Async): Unit =
     self.handleOwner.check(handle)
@@ -98,7 +98,7 @@ trait ReadyWaiting extends AbstractTimerHeapOp, TimeoutOnWake, ReadinessOp {
 }
 
 /** A `ReadyWaiting` op that may be performed again and again, on the handle it was built with. */
-abstract class AbstractReadinessOp[H <: BaseHandle](protected val waitsOn: H)
+abstract class AbstractReadinessOp[H <: ReadinessHandle](protected val waitsOn: H)
     extends RepeatableAbstractTimerHeapOp,
       ReadyWaiting {
   type Source = waitsOn.Source
@@ -125,7 +125,8 @@ object AbstractStreamReadOp:
     if read == 0 then AbstractReadinessOp.Blocked else if read < 0 then 0 else read
 
 /** A read of a stream, whatever it reads into. */
-abstract class AbstractStreamReadOp[H <: BaseReadableHandle](handle: H) extends AbstractReadinessOp[H](handle) {
+abstract class AbstractStreamReadOp[H <: BaseReadableHandle & ReadinessHandle](handle: H)
+    extends AbstractReadinessOp[H](handle) {
 
   /** The bytes read into `buf`, 0 if the read would block, or -1 at the end of the stream. */
   def _readHandle(handle: H, buf: ByteBuffer): Int
@@ -136,7 +137,7 @@ abstract class AbstractStreamReadOp[H <: BaseReadableHandle](handle: H) extends 
   protected final def isRead: Boolean = true
 }
 
-abstract class AbstractReadOp[H <: BaseReadableHandle](handle: H, buf: ByteBuffer)
+abstract class AbstractReadOp[H <: BaseReadableHandle & ReadinessHandle](handle: H, buf: ByteBuffer)
     extends AbstractStreamReadOp[H](handle) {
   if buf.isReadOnly() then throw new IllegalArgumentException("A read needs a buffer it can write to")
 
@@ -148,7 +149,7 @@ abstract class AbstractReadOp[H <: BaseReadableHandle](handle: H, buf: ByteBuffe
 }
 
 /** A scattering read: into `bufs` in order, each filled before the next is begun. */
-abstract class AbstractScatterReadOp[H <: BaseReadableHandle](
+abstract class AbstractScatterReadOp[H <: BaseReadableHandle & ReadinessHandle](
     handle: H,
     bufs: Array[ByteBuffer]
 ) extends AbstractStreamReadOp[H](handle) {
@@ -168,7 +169,7 @@ abstract class AbstractScatterReadOp[H <: BaseReadableHandle](
   * and given back by one that would block, so that a read which waits holds none: a pool with no buffer free refuses
   * the read as it is attempted.
   */
-abstract class AbstractPooledReadOp[H <: BaseReadableHandle](
+abstract class AbstractPooledReadOp[H <: BaseReadableHandle & ReadinessHandle](
     handle: H,
     pool: LendingPool,
     into: Slot[Received]
@@ -196,7 +197,8 @@ abstract class AbstractPooledReadOp[H <: BaseReadableHandle](
 }
 
 /** A write to a stream, whatever it writes from. */
-abstract class AbstractStreamWriteOp[H <: BaseWritableHandle](handle: H) extends AbstractReadinessOp[H](handle) {
+abstract class AbstractStreamWriteOp[H <: BaseWritableHandle & ReadinessHandle](handle: H)
+    extends AbstractReadinessOp[H](handle) {
 
   /** The bytes written from `buf`, or -1 if the write would block. */
   def _writeHandle(handle: H, buf: ByteBuffer): Int
@@ -207,7 +209,7 @@ abstract class AbstractStreamWriteOp[H <: BaseWritableHandle](handle: H) extends
   protected final def isRead: Boolean = false
 }
 
-abstract class AbstractWriteOp[H <: BaseWritableHandle](
+abstract class AbstractWriteOp[H <: BaseWritableHandle & ReadinessHandle](
     handle: H,
     buf: ByteBuffer
 ) extends AbstractStreamWriteOp[H](handle) {
@@ -217,7 +219,7 @@ abstract class AbstractWriteOp[H <: BaseWritableHandle](
 }
 
 /** A gathering write: from `bufs` in order, each drained before the next is begun. */
-abstract class AbstractGatherWriteOp[H <: BaseWritableHandle](
+abstract class AbstractGatherWriteOp[H <: BaseWritableHandle & ReadinessHandle](
     handle: H,
     bufs: Array[ByteBuffer]
 ) extends AbstractStreamWriteOp[H](handle) {

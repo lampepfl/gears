@@ -217,4 +217,19 @@ class NioSchedulingSuite extends munit.FunSuite {
     }
     assertEquals(reports.map(_.message), Nil)
   }
+
+  test("a selector takes the handles that have a channel for it, and a file is not one: neither is given the other") {
+    // A pipe's end is listened for by a worker's selector.
+    assertNoDiff(
+      compileErrors("def listen(poller: NioPoller, pipe: PipeRead): Unit = poller.startListening(pipe, true)"),
+      ""
+    )
+    // A file is not, and a read that waits is not built on one.
+    assert(
+      compileErrors("def listen(poller: NioPoller, file: NioFile): Unit = poller.startListening(file, true)").nonEmpty
+    )
+    assert(
+      compileErrors("def read(file: NioFile, buf: java.nio.ByteBuffer): NioOp = new NioRead(file, buf)").nonEmpty
+    )
+  }
 }

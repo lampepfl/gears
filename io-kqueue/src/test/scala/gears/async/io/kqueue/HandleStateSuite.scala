@@ -2,11 +2,13 @@ package gears.async.io
 package kqueue
 
 import gears.async.io.shareable.AbstractBaseHandle
+import gears.async.io.shareable.AbstractReadinessHandle
 import gears.async.io.shareable.BaseHandle
 import gears.async.io.shareable.CloseListener
 import gears.async.io.shareable.EventSource
 import gears.async.io.shareable.HandleOwner
 import gears.async.io.shareable.HandleState
+import gears.async.io.shareable.ReadinessHandle
 import gears.async.io.shareable.ReadinessOp
 import gears.async.io.shareable.TimerHeap.TimerOp
 
@@ -18,8 +20,10 @@ import java.util.concurrent.atomic.AtomicInteger
   */
 class HandleStateSuite extends munit.FunSuite {
 
-  private final class TestHandle(queued: Boolean = false) extends AbstractBaseHandle(new HandleOwner) {
-    type Source = EventSource
+  private final class TestHandle(queued: Boolean = false)
+      extends AbstractBaseHandle(new HandleOwner),
+        AbstractReadinessHandle {
+    type Source = EventSource { type Handle = ReadinessHandle }
     override protected def queuesWaiters(read: Boolean): Boolean = queued
     val cleanups = AtomicInteger(0)
     open()
@@ -93,6 +97,7 @@ class HandleStateSuite extends munit.FunSuite {
   }
 
   private final class FakeSource extends EventSource {
+    type Handle = ReadinessHandle
     val handleOwner = new HandleOwner
     val started = AtomicInteger(0)
     val stopped = AtomicInteger(0)
@@ -102,10 +107,10 @@ class HandleStateSuite extends munit.FunSuite {
     def removeTimer(op: TimerOp): Boolean = false
     def notifyDeadlineChange(op: TimerOp): Unit = ()
     var onStart: () => Unit = () => ()
-    def startListening(handle: BaseHandle, read: Boolean): Unit =
+    def startListening(handle: ReadinessHandle, read: Boolean): Unit =
       started.incrementAndGet()
       onStart()
-    override def stopListening(handle: BaseHandle, read: Boolean): Unit = stopped.incrementAndGet(): Unit
+    override def stopListening(handle: ReadinessHandle, read: Boolean): Unit = stopped.incrementAndGet(): Unit
   }
 
   /** An op as the handle sees it: `moves` is what its work does when it is woken. */
@@ -384,7 +389,7 @@ class HandleStateSuite extends munit.FunSuite {
     assertNoDiff(
       compileErrors("""
         import gears.async.io.shareable.*
-        abstract class Monitored extends AbstractBaseHandle(new HandleOwner), BaseReadableHandle { type Source = MonitorPoller }
+        abstract class Monitored extends AbstractBaseHandle(new HandleOwner), AbstractReadinessHandle, BaseReadableHandle { type Source = MonitorPoller }
         abstract class Fits(handle: Monitored, buf: java.nio.ByteBuffer) extends AbstractReadOp[Monitored](handle, buf) {
           def here(source: MonitorPoller)(using gears.async.Async): Unit = performWhenReady(source)
         }
@@ -394,7 +399,7 @@ class HandleStateSuite extends munit.FunSuite {
     // The same op said to be a kqueue worker's is refused: its source is its handle's, and no other.
     val mismatched = compileErrors("""
       import gears.async.io.shareable.*
-      abstract class Monitored extends AbstractBaseHandle(new HandleOwner), BaseReadableHandle { type Source = MonitorPoller }
+      abstract class Monitored extends AbstractBaseHandle(new HandleOwner), AbstractReadinessHandle, BaseReadableHandle { type Source = MonitorPoller }
       abstract class Misfit(handle: Monitored, buf: java.nio.ByteBuffer) extends AbstractReadOp[Monitored](handle, buf) {
         type Source = gears.async.io.kqueue.KqueuePoller
       }
@@ -403,11 +408,20 @@ class HandleStateSuite extends munit.FunSuite {
     // Nor is it performed on a source that does not listen for its handle.
     val elsewhere = compileErrors("""
       import gears.async.io.shareable.*
-      abstract class Monitored extends AbstractBaseHandle(new HandleOwner), BaseReadableHandle { type Source = MonitorPoller }
+      abstract class Monitored extends AbstractBaseHandle(new HandleOwner), AbstractReadinessHandle, BaseReadableHandle { type Source = MonitorPoller }
       abstract class Astray(handle: Monitored, buf: java.nio.ByteBuffer) extends AbstractReadOp[Monitored](handle, buf) {
         def there(source: gears.async.io.kqueue.KqueuePoller)(using gears.async.Async): Unit = performWhenReady(source)
       }
     """)
     assert(elsewhere.nonEmpty, "performed on a source that is not its handle's")
+  }
+
+  test("a file is no handle a kqueue listens for, nor one a waiting read is built on") {
+    assert(
+      compileErrors(
+        "def listen(poller: gears.async.io.kqueue.KqueuePoller, file: gears.async.io.kqueue.KqueueFile): Unit = poller.startListening(file, true)"
+      ).nonEmpty
+    )
+    assert(compileErrors("def waits(file: gears.async.io.kqueue.KqueueFile) = file.readiness(true)").nonEmpty)
   }
 }

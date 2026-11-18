@@ -47,9 +47,12 @@ abstract class AbstractCloseOp(val handle: BaseHandle)
 }
 
 /** Opens a pipe and writes its ends into two slots. Performed once. What opens it is the backend's (`_pipe`). */
-abstract class AbstractMakePipeOp[R <: AnyRef, W <: AnyRef](readSlot: Slot[R], writeSlot: Slot[W]) extends ImmediateOp {
+abstract class AbstractMakePipeOp[R <: BaseHandle, W <: BaseHandle](readSlot: Slot[R], writeSlot: Slot[W])
+    extends ImmediateOp {
 
-  /** Opens a pipe, as `owner`'s: its read end and its write end. Nothing is left open by one that throws. */
+  /** Makes a pipe, as `owner`'s: its read end and its write end. Nothing is left open by one that throws. The op opens
+    * what this returns.
+    */
   def _pipe(owner: HandleOwner): (R, W)
 
   /** Before anything is opened: an occupied slot could not take its end. */
@@ -59,6 +62,8 @@ abstract class AbstractMakePipeOp[R <: AnyRef, W <: AnyRef](readSlot: Slot[R], w
 
   final def perform(owner: HandleOwner): Unit =
     val (read, write) = _pipe(owner)
+    read.open()
+    write.open()
     readSlot.set(read)
     writeSlot.set(write)
 }

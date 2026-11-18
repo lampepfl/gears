@@ -9,21 +9,28 @@ import gears.async.io.posix.PosixPipeOpener
 import gears.async.io.posix.PosixSocket
 import gears.async.io.posix.PosixSocketOpener
 import gears.async.io.posix.UnixBinding
+import gears.async.io.shareable.AbstractReadinessHandle
 import gears.async.io.shareable.BaseHandle
 import gears.async.io.shareable.BaseReadableHandle
 import gears.async.io.shareable.BaseWritableHandle
-import gears.async.io.shareable.EventSource
 import gears.async.io.shareable.FilePosition
 import gears.async.io.shareable.HandleOwner
 
-sealed trait KqueueHandle extends PosixKernelHandle, BaseHandle:
+sealed trait KqueueHandle extends PosixKernelHandle, BaseHandle
+
+/** A handle whose ops wait for a worker's kqueue to report it ready: every kind but a file. */
+sealed trait KqueueWaitable extends KqueueHandle, AbstractReadinessHandle:
   type Source = KqueuePoller
 
 sealed trait KqueueReadable extends KqueueHandle, BaseReadableHandle
 sealed trait KqueueWritable extends KqueueHandle, BaseWritableHandle
 
-final class PipeRead(fd: Int, owner: HandleOwner) extends PosixKernelHandle(fd, owner) with KqueueReadable
-final class PipeWrite(fd: Int, owner: HandleOwner) extends PosixKernelHandle(fd, owner) with KqueueWritable
+/** A stream that is waited for: a pipe's end, a FIFO's or a connection, not a file. */
+private[kqueue] type KqueueWaitingReadable = KqueueReadable & KqueueWaitable
+private[kqueue] type KqueueWaitingWritable = KqueueWritable & KqueueWaitable
+
+final class PipeRead(fd: Int, owner: HandleOwner) extends PosixKernelHandle(fd, owner), KqueueReadable, KqueueWaitable
+final class PipeWrite(fd: Int, owner: HandleOwner) extends PosixKernelHandle(fd, owner), KqueueWritable, KqueueWaitable
 
 /** A regular file: read and written at offsets, and as a stream at the position it carries. Its ops are done off the
   * workers, never waited for here: the system reports a file ready whatever it would do.
@@ -42,7 +49,8 @@ final class KqueueConnection(fd: Int, val kind: SocketOption.Kind, val ipv6: Boo
     extends PosixKernelHandle(fd, owner),
       KqueueReadable,
       KqueueWritable,
-      KqueueSocket
+      KqueueSocket,
+      KqueueWaitable
 
 /** A listening stream socket, IP or Unix, whose accepts take turns. A Unix one removes the socket file it bound as it
   * closes.
@@ -56,7 +64,8 @@ final class KqueueListener(
     owner: HandleOwner
 ) extends PosixKernelHandle(fd, owner),
       KqueueSocket,
-      PosixListener:
+      PosixListener,
+      KqueueWaitable:
   override protected def queuesWaiters(read: Boolean): Boolean = true
   override protected def beforeDescriptorCloses(): Unit = if bound != null then bound.remove()
 
@@ -70,7 +79,8 @@ sealed abstract class KqueueDatagramSocket(
     bound: UnixBinding | Null,
     owner: HandleOwner
 ) extends PosixKernelHandle(fd, owner),
-      KqueueSocket:
+      KqueueSocket,
+      KqueueWaitable:
   override protected def queuesWaiters(read: Boolean): Boolean = true
   override protected def beforeDescriptorCloses(): Unit = if bound != null then bound.remove()
 
@@ -111,12 +121,12 @@ object KqueueSockets extends PosixSocketOpener:
   * and two turns of the watcher's thread, which a read answered in less never needed, as the bytes are the kqueue's to
   * report. The end of a FIFO is so seen at most that much later than it came.
   */
-final class FifoRead(fd: Int, owner: HandleOwner) extends PosixKernelHandle(fd, owner) with KqueueReadable:
+final class FifoRead(fd: Int, owner: HandleOwner) extends PosixKernelHandle(fd, owner), KqueueReadable, KqueueWaitable:
 
   /** Whether the listener has been asked to look, in a while, at whether a read still waits. */
   private val lookPending = new java.util.concurrent.atomic.AtomicBoolean(false)
 
-  override def waiterWaits(read: Boolean, listener: EventSource): Unit =
+  override def waiterWaits(read: Boolean, listener: KqueuePoller): Unit =
     if read && lookPending.compareAndSet(false, true) then listener.runAfter(FifoRead.WatchAfterNanos, () => look())
 
   /** A read that waits now, whether or not it is the one that asked, has the descriptor watched. */
@@ -146,7 +156,7 @@ object FifoRead:
   inline val WatchAfterNanos = 1_000_000L
 
 /** A FIFO's write end, written as a pipe's is. */
-final class FifoWrite(fd: Int, owner: HandleOwner) extends PosixKernelHandle(fd, owner) with KqueueWritable
+final class FifoWrite(fd: Int, owner: HandleOwner) extends PosixKernelHandle(fd, owner), KqueueWritable, KqueueWaitable
 
 trait KqueuePipeOpener extends PosixPipeOpener[KqueueReadable, KqueueWritable]:
   final def makeReadableHandle(fd: Int, owner: HandleOwner): PipeRead = new PipeRead(fd, owner)

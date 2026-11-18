@@ -1,7 +1,9 @@
 package gears.async.io.shareable
 
 trait MonitorPoller extends Poller, EventSource {
-  def startListening(handle: BaseHandle, read: Boolean): Unit =
+  type Handle = ReadinessHandle
+
+  def startListening(handle: ReadinessHandle, read: Boolean): Unit =
     throw new UnsupportedOperationException("A monitor reports no handles")
 
   private val notifier = new Object

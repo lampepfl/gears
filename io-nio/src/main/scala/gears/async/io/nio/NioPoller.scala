@@ -1,6 +1,5 @@
 package gears.async.io.nio
 
-import gears.async.io.shareable.BaseHandle
 import gears.async.io.shareable.EventSource
 import gears.async.io.shareable.Poller
 import gears.async.io.shareable.ReadinessOp
@@ -29,6 +28,9 @@ trait NioPoller extends Poller, EventSource {
   /** Its timers include every op of this backend's: the worker it is part of takes its pool's ops. */
   type Timer >: NioOp <: TimerOp
 
+  /** It listens for the handles that have a channel a selector takes, which a file's is not. */
+  type Handle = NioChannelHandle
+
   private val selector = Selector.open()
 
   /** Guards the first registration of a channel here: a second `register` would reset the interest of the first. */
@@ -43,14 +45,12 @@ trait NioPoller extends Poller, EventSource {
   @volatile private var waitingThread: Thread | Null = null
 
   /** Registers the handle's channel here, with no interest yet: `arm` sets it, as each op begins to wait. */
-  override def startListening(handle: BaseHandle, read: Boolean): Unit = handle match
-    case handle: NioChannelHandle =>
-      registering.synchronized {
-        if handle.channel.keyFor(selector) == null then
-          handle.registeredWith(this)
-          handle.channel.register(selector, 0, handle): Unit
-      }
-    case _ => throw new IllegalArgumentException(s"Not a handle of this backend's: $handle")
+  override def startListening(handle: NioChannelHandle, read: Boolean): Unit =
+    registering.synchronized {
+      if handle.channel.keyFor(selector) == null then
+        handle.registeredWith(this)
+        handle.channel.register(selector, 0, handle): Unit
+    }
 
   /** An op has begun to wait for `handle`, which this listens for: the selector is to report it, and is woken if it was
     * not already to, as a selection under way does not see the change.
@@ -66,13 +66,12 @@ trait NioPoller extends Poller, EventSource {
 
   /** The interest is taken off; the key stays, for the next time this listens for the handle, until the handle closes.
     */
-  override def stopListening(handle: BaseHandle, read: Boolean): Unit = handle match
-    case handle: NioChannelHandle =>
-      val key = handle.channel.keyFor(selector)
-      if key != null then
-        try key.interestOpsAnd(~handle.interest(read)): Unit
-        catch case _: CancelledKeyException => ()
-    case _ => ()
+  override def stopListening(handle: NioChannelHandle, read: Boolean): Unit = {
+    val key = handle.channel.keyFor(selector)
+    if key != null then
+      try key.interestOpsAnd(~handle.interest(read)): Unit
+      catch case _: CancelledKeyException => ()
+  }
 
   /** The handles whose channels have been closed, and whose keys this selector has yet to take out. */
   private val closing = new java.util.concurrent.ConcurrentLinkedQueue[NioChannelHandle]

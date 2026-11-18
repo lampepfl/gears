@@ -60,27 +60,27 @@ sealed trait KqueueByteStreams extends ByteStreams { self: KqueueInterface & Kqu
   // A file is not waited for: its reads and writes as a stream are file ops, at the position it carries.
 
   override def read(handle: Readable, buf: ByteBuffer): KqueueOp & Repeatable = handle match
-    case file: KqueueFile => KqueueFileRead(file, Array(buf), -1L)
-    case _                => KqueueRead(handle, buf)
+    case file: KqueueFile              => KqueueFileRead(file, Array(buf), -1L)
+    case waited: KqueueWaitingReadable => KqueueRead(waited, buf)
 
   override def write(handle: Writable, buf: ByteBuffer): KqueueOp & Repeatable = handle match
-    case file: KqueueFile => KqueueFileWrite(file, Array(buf), -1L)
-    case _                => KqueueWrite(handle, buf)
+    case file: KqueueFile              => KqueueFileWrite(file, Array(buf), -1L)
+    case waited: KqueueWaitingWritable => KqueueWrite(waited, buf)
 
   override def read(handle: Readable, bufs: Array[ByteBuffer]): KqueueOp & Repeatable = handle match
-    case file: KqueueFile => KqueueFileRead(file, bufs, -1L)
-    case _                => KqueueScatterRead(handle, bufs)
+    case file: KqueueFile              => KqueueFileRead(file, bufs, -1L)
+    case waited: KqueueWaitingReadable => KqueueScatterRead(waited, bufs)
 
   override def write(handle: Writable, bufs: Array[ByteBuffer]): KqueueOp & Repeatable = handle match
-    case file: KqueueFile => KqueueFileWrite(file, bufs, -1L)
-    case _                => KqueueGatherWrite(handle, bufs)
+    case file: KqueueFile              => KqueueFileWrite(file, bufs, -1L)
+    case waited: KqueueWaitingWritable => KqueueGatherWrite(waited, bufs)
 
   override def read(handle: Readable, pool: BufferPool, into: Slot[Received]): KqueueOp & Repeatable =
     pool match
       case pool: LendingPool =>
         handle match
-          case file: KqueueFile => KqueueFilePooledRead(file, pool, into)
-          case _                => KqueuePooledRead(handle, pool, into)
+          case file: KqueueFile              => KqueueFilePooledRead(file, pool, into)
+          case waited: KqueueWaitingReadable => KqueuePooledRead(waited, pool, into)
       case _ => throw new IllegalArgumentException("A pooled read takes a pool of this backend's (Backend.pool)")
 }
 

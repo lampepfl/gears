@@ -148,7 +148,8 @@ abstract class AbstractOpenFileOp[F <: BaseHandle](path: String, write: Boolean,
       WorkOffThread {
   Checks.checkPath(path)
 
-  /** Opens the regular file at `path`, for writing if `write`, as `owner`'s, or throws why it could not be. May block.
+  /** Makes a handle of the regular file at `path`, opened for writing if `write`, as `owner`'s, or throws why it could
+    * not be. May block. The op opens what this returns.
     */
   def _openFile(path: String, write: Boolean, owner: HandleOwner): F
 
@@ -160,7 +161,10 @@ abstract class AbstractOpenFileOp[F <: BaseHandle](path: String, write: Boolean,
 
   protected final def interruptible: Boolean = false
   protected final def waits: Boolean = true
-  protected final def work(): Unit = opened = _openFile(path, write, owner)
+  protected final def work(): Unit =
+    val made = _openFile(path, write, owner)
+    made.open()
+    opened = made
   protected final def commit(): Unit = into.set(opened.nn)
   override protected def discard(): Unit = opened.nn.requestClose(): Unit
 }

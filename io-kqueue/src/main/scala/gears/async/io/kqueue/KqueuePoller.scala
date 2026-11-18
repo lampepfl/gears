@@ -1,7 +1,6 @@
 package gears.async.io.kqueue
 
 import gears.async.io.kqueue.internal.KqueueLoop
-import gears.async.io.shareable.BaseHandle
 import gears.async.io.shareable.EventSource
 import gears.async.io.shareable.Poller
 import gears.async.io.shareable.ReadinessOp
@@ -14,6 +13,9 @@ trait KqueuePoller(maxEvents: Int) extends Poller, EventSource {
 
   /** Its timers include every kqueue op: the worker it is part of takes its pool's ops. */
   type Timer >: KqueueOp <: TimerOp
+
+  /** It listens for this backend's handles that are waited for, each of which has a descriptor. */
+  type Handle = KqueueWaitable
   private val kq = KqueueLoop.open()
 
   private val zone = Zone.open()
@@ -34,44 +36,41 @@ trait KqueuePoller(maxEvents: Int) extends Poller, EventSource {
   /** The handle this kqueue listens for, by descriptor number, which is all an event names. The waiters are the
     * handle's own.
     */
-  @volatile private var handles = new Array[KqueueHandle | Null](64)
+  @volatile private var handles = new Array[KqueueWaitable | Null](64)
 
   /** Has the kqueue report `handle` each time it becomes readable, or writable, and at once if it is now: an
     * edge-triggered filter, added once and left until the handle closes, when the kernel takes it with the descriptor,
     * or gives this listener up (`stopListening`). An op that waits meanwhile costs no system call.
     */
-  override def startListening(handle: BaseHandle, read: Boolean): Unit = handle match
-    case handle: KqueueHandle =>
-      val fd = handle.fd
-      handlesLock.synchronized {
-        if fd >= handles.length then handles = java.util.Arrays.copyOf(handles, Math.max(fd + 1, 2 * handles.length))
-        handles(fd) = handle
-      }
-      KqueueLoop.createAndRegisterEvents(kq, 1) { changes =>
-        KqueueLoop.addFile(changes(0), fd, read, clear = true)
-      }
-    case _ => throw new IllegalArgumentException(s"Not a handle of this backend's: $handle")
+  override def startListening(handle: KqueueWaitable, read: Boolean): Unit = {
+    val fd = handle.fd
+    handlesLock.synchronized {
+      if fd >= handles.length then handles = java.util.Arrays.copyOf(handles, Math.max(fd + 1, 2 * handles.length))
+      handles(fd) = handle
+    }
+    KqueueLoop.createAndRegisterEvents(kq, 1) { changes =>
+      KqueueLoop.addFile(changes(0), fd, read, clear = true)
+    }
+  }
 
   /** Takes the filter off the kqueue, and the handle from `handles` unless this still listens for its other direction.
     */
-  override def stopListening(handle: BaseHandle, read: Boolean): Unit = handle match
-    case handle: KqueueHandle =>
-      val fd = handle.fd
-      if !closed then KqueueLoop.deleteFileIfOpen(kq, fd, read): Unit
-      if !handle.readiness(!read).listenedBy(this) then
-        handlesLock.synchronized {
-          if fd < handles.length && (handles(fd) eq handle) then handles(fd) = null
-        }
-    case _ => ()
-
-  /** Before the handle's descriptor is released, so that its number, another handle's next, never finds this one. */
-  override def forgetHandle(handle: BaseHandle): Unit = handle match
-    case handle: KqueueHandle =>
-      val fd = handle.fd
+  override def stopListening(handle: KqueueWaitable, read: Boolean): Unit = {
+    val fd = handle.fd
+    if !closed then KqueueLoop.deleteFileIfOpen(kq, fd, read): Unit
+    if !handle.readiness(!read).listenedBy(this) then
       handlesLock.synchronized {
         if fd < handles.length && (handles(fd) eq handle) then handles(fd) = null
       }
-    case _ => ()
+  }
+
+  /** Before the handle's descriptor is released, so that its number, another handle's next, never finds this one. */
+  override def forgetHandle(handle: KqueueWaitable): Unit = {
+    val fd = handle.fd
+    handlesLock.synchronized {
+      if fd < handles.length && (handles(fd) eq handle) then handles(fd) = null
+    }
+  }
 
   /** `fd` became ready: its handle's waiter does its work, or, finding it not ready after all, waits on for the next
     * time. With no waiter the handle only counts it, for an op that is about to wait (see

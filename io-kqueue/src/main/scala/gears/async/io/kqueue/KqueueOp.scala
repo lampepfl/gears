@@ -86,30 +86,30 @@ sealed trait KqueueDeadlineOp extends KqueueOp with Deadline
 sealed trait KqueueCloseOp extends KqueueOp:
   def performClose(self: KqueuePoller)(using Async): Unit
 
-private[kqueue] final class KqueueRead(handle: KqueueReadable, buf: ByteBuffer)
+private[kqueue] final class KqueueRead(handle: KqueueWaitingReadable, buf: ByteBuffer)
     extends AbstractReadOp(handle, buf),
       KqueueReadableOp,
-      PosixReadOps[KqueueReadable]
+      PosixReadOps[KqueueWaitingReadable]
 
-private[kqueue] final class KqueueWrite(handle: KqueueWritable, buf: ByteBuffer)
+private[kqueue] final class KqueueWrite(handle: KqueueWaitingWritable, buf: ByteBuffer)
     extends AbstractWriteOp(handle, buf),
       KqueueWritableOp,
-      PosixWriteOps[KqueueWritable]
+      PosixWriteOps[KqueueWaitingWritable]
 
-private[kqueue] final class KqueueScatterRead(handle: KqueueReadable, bufs: Array[ByteBuffer])
+private[kqueue] final class KqueueScatterRead(handle: KqueueWaitingReadable, bufs: Array[ByteBuffer])
     extends AbstractScatterReadOp(handle, bufs),
       KqueueReadableOp,
-      PosixReadOps[KqueueReadable]
+      PosixReadOps[KqueueWaitingReadable]
 
-private[kqueue] final class KqueuePooledRead(handle: KqueueReadable, pool: LendingPool, into: Slot[Received])
+private[kqueue] final class KqueuePooledRead(handle: KqueueWaitingReadable, pool: LendingPool, into: Slot[Received])
     extends AbstractPooledReadOp(handle, pool, into),
       KqueueReadableOp,
-      PosixReadOps[KqueueReadable]
+      PosixReadOps[KqueueWaitingReadable]
 
-private[kqueue] final class KqueueGatherWrite(handle: KqueueWritable, bufs: Array[ByteBuffer])
+private[kqueue] final class KqueueGatherWrite(handle: KqueueWaitingWritable, bufs: Array[ByteBuffer])
     extends AbstractGatherWriteOp(handle, bufs),
       KqueueWritableOp,
-      PosixWriteOps[KqueueWritable]
+      PosixWriteOps[KqueueWaitingWritable]
 
 private[kqueue] final class KqueueCloseHandle(handle: KqueueHandle) extends AbstractCloseOp(handle) with KqueueCloseOp
 
