@@ -88,6 +88,12 @@ trait WorkOffThread extends AbstractTimerHeapOp, TimeoutOnWake {
   /** The work, on a pool thread, which may block. What it makes it keeps to itself until `commit`. */
   protected def work(): Unit
 
+  /** Before the work is handed to any thread, on the performer's: does it here and now if that takes no blocking, as an
+    * answer kept from the last time does, and says whether it did. What it made is then the caller's at once
+    * (`commit`), and the op is done as it was tried, with nothing to wait for.
+    */
+  protected def workWithoutBlocking(): Boolean = false
+
   /** After `work`, on its thread, with the op claimed: what the work made becomes the caller's. */
   protected def commit(): Unit
 
@@ -186,6 +192,9 @@ trait WorkOffThread extends AbstractTimerHeapOp, TimeoutOnWake {
     val on = worksOn
     if on != null then owner.check(on)
     performerOwner = owner
+    if workWithoutBlocking() then
+      commit()
+      return
     val run = new Run(worker)
     expose()
     if hasDeadline then holdTimerOn(worker)
@@ -254,6 +263,9 @@ trait WorkOffThread extends AbstractTimerHeapOp, TimeoutOnWake {
       val on = worksOn
       if on != null then owner.check(on)
       performerOwner = owner
+      if workWithoutBlocking() then
+        commit()
+        return
       val here = new Here(Thread.currentThread())
       expose()
       val limit =
@@ -291,6 +303,9 @@ abstract class AbstractBlockingValueOp[A <: AnyRef](body: () => A, into: Slot[A]
 /** Resolves a host name (`Resolving.resolve`), which blocks, so off the workers. A lookup can't be interrupted, and
   * nothing of the caller's is lent to it: a cancel or the time limit is delivered at once, the lookup running on to its
   * end with its result dropped. Performed once.
+  *
+  * A name that was looked up a little while ago is answered from `ResolveCache`, on the performer's own thread, with no
+  * lookup: what a lookup finds is kept there, whether or not the op that asked was still waiting for it.
   */
 abstract class AbstractResolveOp(host: String, into: Slot[List[IpAddress]])
     extends SingleUseAbstractTimerHeapOp,
@@ -308,6 +323,15 @@ abstract class AbstractResolveOp(host: String, into: Slot[List[IpAddress]])
 
   protected final def interruptible: Boolean = false
   protected final def waits: Boolean = false
-  protected final def work(): Unit = found = Checks.resolved(host, _lookup(host))
+  override protected final def workWithoutBlocking(): Boolean =
+    val kept = ResolveCache.get(host)
+    if kept != null then found = kept
+    kept != null
+
+  protected final def work(): Unit =
+    val looked = Checks.resolved(host, _lookup(host))
+    ResolveCache.put(host, looked)
+    found = looked
+
   protected final def commit(): Unit = into.set(found)
 }
