@@ -2,8 +2,45 @@ package gears.async.io.nio
 
 import gears.async.SuspendSupport
 
-import java.util.concurrent.locks.ReentrantLock
+import java.util.concurrent.locks.LockSupport
 import scala.annotation.unchecked.uncheckedVariance
+
+/** A value one thread hands to another, which waits for it parked: a field and an unpark, with no lock. One thread
+  * waits at a time. Whoever gives writes the value and then looks for a waiter; whoever waits says so and then looks
+  * for the value: one of the two sees the other.
+  */
+private[nio] final class Handover:
+  @volatile private var value: Any = Handover.Nothing
+  @volatile private var waiter: Thread | Null = null
+
+  def clear(): Unit = value = Handover.Nothing
+
+  def give(data: Any): Unit =
+    value = data
+    val waiting = waiter
+    if waiting != null then LockSupport.unpark(waiting)
+
+  /** Parks until a value has been given, and returns it, leaving it there. An interrupt does not end the wait: it is
+    * kept for the thread to find afterwards, as a park returns at once for as long as one is pending.
+    */
+  def take(): Any =
+    var taken = value
+    if taken.asInstanceOf[AnyRef] eq Handover.Nothing then
+      var interrupted = false
+      waiter = Thread.currentThread()
+      try
+        taken = value
+        while taken.asInstanceOf[AnyRef] eq Handover.Nothing do
+          LockSupport.park(this)
+          if Thread.interrupted() then interrupted = true
+          taken = value
+      finally
+        waiter = null
+        if interrupted then Thread.currentThread().interrupt()
+    taken
+
+private[nio] object Handover:
+  private val Nothing = new AnyRef
 
 /** Suspension on virtual threads, as gears' `VThreadSupport` has it, for threads started however the scheduler mixing
   * this in starts them (`startThread`): a boundary's body runs on a thread of its own, and a suspension is that thread
@@ -15,28 +52,13 @@ trait VirtualThreadSuspend extends SuspendSupport:
   protected def startThread(body: Runnable): Unit
 
   final class ThreadLabel[R] private[VirtualThreadSuspend] ():
-    private var result: Option[R] = None
-    private val lock = ReentrantLock()
-    private val cond = lock.newCondition()
+    private val result = new Handover
 
-    private[VirtualThreadSuspend] def clearResult(): Unit =
-      lock.lock()
-      result = None
-      lock.unlock()
+    private[VirtualThreadSuspend] def clearResult(): Unit = result.clear()
 
-    private[VirtualThreadSuspend] def setResult(data: R): Unit =
-      lock.lock()
-      try
-        result = Some(data)
-        cond.signalAll()
-      finally lock.unlock()
+    private[VirtualThreadSuspend] def setResult(data: R): Unit = result.give(data)
 
-    private[VirtualThreadSuspend] def waitResult(): R =
-      lock.lock()
-      try
-        while result.isEmpty do cond.await()
-        result.get
-      finally lock.unlock()
+    private[VirtualThreadSuspend] def waitResult(): R = result.take().asInstanceOf[R]
 
   type Label[R] = ThreadLabel[R]
 
@@ -44,24 +66,12 @@ trait VirtualThreadSuspend extends SuspendSupport:
   final class ThreadSuspension[-T, +R] private[VirtualThreadSuspend] (
       private[VirtualThreadSuspend] val label: ThreadLabel[R] @uncheckedVariance
   ) extends gears.async.Suspension[T, R]:
-    private var nextInput: Option[T] @uncheckedVariance = None
-    private val lock = ReentrantLock()
-    private val cond = lock.newCondition()
+    private val nextInput = new Handover
 
-    private[VirtualThreadSuspend] def setInput(data: T): Unit =
-      lock.lock()
-      try
-        nextInput = Some(data)
-        cond.signalAll()
-      finally lock.unlock()
+    private[VirtualThreadSuspend] def setInput(data: T): Unit = nextInput.give(data)
 
     // Safe: only the thread that made the suspension reads it.
-    private[VirtualThreadSuspend] def waitInput(): T @uncheckedVariance =
-      lock.lock()
-      try
-        while nextInput.isEmpty do cond.await()
-        nextInput.get
-      finally lock.unlock()
+    private[VirtualThreadSuspend] def waitInput(): T @uncheckedVariance = nextInput.take().asInstanceOf[T]
 
     override def resume(arg: T): R =
       label.clearResult()

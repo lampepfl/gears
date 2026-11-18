@@ -9,6 +9,12 @@ import gears.async.Async
   * as the kqueue backend's are, each with a selector, a heap of timers and an inbox. An op is tried on the thread
   * performing it, and one that must wait is given to a worker, which does its work when its handle is ready, or fires
   * its time limit, and wakes the future. It needs nothing of the JDK beyond its public interface.
+  *
+  * An op that waits costs a wake-up of the worker's thread and then another of the future's, on the JDK's scheduler,
+  * which between two ends on one machine is most of what the op takes. Nothing here tries to avoid them, as trying an
+  * op again before it waits would: that only ever helps when the other end answers within microseconds, which over a
+  * network it does not. A program that minds runs over `NioPoolBackend`, where a future woken by a worker goes on on
+  * that worker's thread.
   */
 object NioBackend extends Backend {
   type Interface = NioOps.type

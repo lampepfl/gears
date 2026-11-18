@@ -62,9 +62,6 @@ abstract class AbstractConnectOp[H <: ReadinessHandle](into: Slot[H])
 
   protected final def isRead: Boolean = false
 
-  /** A connect that did not go through at once takes a round trip to its peer, which no yield waits out. */
-  override protected def yieldsBeforeWaiting: Boolean = false
-
   override def onEntry(): Unit =
     super.onEntry()
     Checks.checkEmpty(into)

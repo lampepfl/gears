@@ -49,15 +49,12 @@ abstract class NioScheduler(
   override def makeWorker(id: Int, owner: HandleOwner): NioWorker = new NioWorker(id, owner)
 
   /** Whether the futures run on threads of their own, not the workers': then an op's work that blocks is done by the
-    * future itself, an op that finds its handle not ready yields and tries again before it waits, and a timer already
-    * due is a yield.
+    * future itself, and a timer already due is a yield.
     */
   protected def futuresOnOwnThreads: Boolean = false
 
   class NioWorker(id: Int, owner: HandleOwner) extends Worker(id, owner), NioPoller {
     type Op = NioOp
-
-    override def retriesBeforeWaiting: Int = if futuresOnOwnThreads then NioScheduler.Retries else 0
 
     override def performOp(op: NioOp)(using Async): Unit =
       op match
@@ -77,13 +74,6 @@ abstract class NioScheduler(
           if futuresOnOwnThreads then work.performOnCaller(this) else work.performOffThread(this)
         case connect: NioConnectOp => connect.performConnect(this)
   }
-}
-
-object NioScheduler {
-
-  /** How many times an op that would wait is tried again after a yield, where the futures are on threads of their own.
-    */
-  inline val Retries = 8
 }
 
 /** The pool of a program on the JDK's own virtual threads: its futures run on the JDK's scheduler, and the workers do
