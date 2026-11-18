@@ -43,6 +43,18 @@ trait KqueuePoller(maxEvents: Int) extends Poller, EventSource {
     KqueueLoop.addUser(events(0), WakeEvent) // edge-triggered, registered once
   }
 
+  /** A user event of this worker's own, which a look that must not wait triggers as it looks, so that there is always
+    * something to report. A `kevent` given a timeout of zero does not return at once when nothing is pending: on macOS
+    * (measured on 27.2) it takes some twelve microseconds, where one with an event to report takes a fraction of one.
+    * The event says nothing: like a wake-up, it is neither a read nor a write, and is passed over.
+    */
+  private val PollMarker = 1.toUSize
+  KqueueLoop.createAndRegisterEvents(kq, 1) { events =>
+    KqueueLoop.addUser(events(0), PollMarker)
+  }
+  private val markerTrigger = KqueueLoop.allocateQueue(1)(using zone)
+  KqueueLoop.triggerUser(markerTrigger(0), PollMarker)
+
   /** Guards writes to `handles`, which a close clears from its own thread. This worker's thread, which alone puts
     * handles there, reads it without: all it can miss is that a close has just taken one out, and a closed handle has
     * no waiter.
@@ -139,11 +151,17 @@ trait KqueuePoller(maxEvents: Int) extends Poller, EventSource {
     if thread != null then java.util.concurrent.locks.LockSupport.unpark(thread)
   }
 
+  /** One poll of the kqueue into `events` by a worker about to wait: at once if there is something, and otherwise for
+    * as long as the system takes over a timeout of zero (see `KqueueLoop.pollEventsBriefly`). The number of events.
+    */
+  protected def pollBriefly(): Int = KqueueLoop.pollEventsBriefly(kq, events, maxEvents)
+
   /** One poll of the kqueue into `events`: without waiting if `timeout` is 0, for at most `timeout` nanoseconds if it
-    * is positive, and until there is something if it is negative. The number of events.
+    * is positive, and until there is something if it is negative. The number of events, the marker among them where
+    * it did not wait.
     */
   protected def pollKqueue(timeout: Long): Int =
-    if timeout == 0 then KqueueLoop.pollEventsNow(kq, events, maxEvents)
+    if timeout == 0 then KqueueLoop.pollEventsNow(kq, markerTrigger, events, maxEvents)
     else if timeout > 0 then
       KqueueLoop.pollEventsTimeout(
         kq,
@@ -188,10 +206,16 @@ trait KqueuePoller(maxEvents: Int) extends Poller, EventSource {
         0
       else
         try
-          // First without waiting: under load something is there already, and a poll that may wait costs more,
-          // since it tells the GC that the thread is leaving (see `Unblocked`).
-          val ready = pollKqueue(0)
-          val found = if ready > 0 || timeout == 0 then ready else pollKqueue(timeout)
+          val found =
+            // With work left this only looks, and must not be kept: the look that triggers the marker.
+            if timeout == 0 then pollKqueue(0)
+            else
+              // About to wait. First with a timeout of zero and no marker: under load something is there already,
+              // and where nothing is, what the system takes over a timeout of zero is a wait of microseconds that an
+              // answer on its way ends, at less than a poll that waits costs, which tells the GC that the thread
+              // is leaving (see `Unblocked`) and puts it to sleep.
+              val ready = pollBriefly()
+              if ready > 0 then ready else pollKqueue(timeout)
           pollFailures = 0
           found
         catch

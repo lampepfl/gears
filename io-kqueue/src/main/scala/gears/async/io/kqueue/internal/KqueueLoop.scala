@@ -203,15 +203,25 @@ object KqueueLoop {
   // stack-allocated one boxes its pointer.
   private val zeroTimeout: Ptr[timespec] = alloc[timespec]()(using Zone.open())
 
-  /** Polls without waiting, so without telling the GC (see `Unblocked`). */
+  /** Polls without waiting, so without telling the GC (see `Unblocked`). `trigger` is one change that triggers a user
+    * event of the caller's, made in the same call: with that event to report the call returns at once, where with
+    * nothing to report and a timeout of zero it does not (see `KqueuePoller.PollMarker`).
+    */
   def pollEventsNow(
       kq: Int,
+      trigger: EventQueue,
       events: EventQueue,
       nEvents: Int
   ): Int = {
-    val polledEvents = KqueueUnblocked.kevent(kq, null, 0, events, nEvents, zeroTimeout)
+    val polledEvents = KqueueUnblocked.kevent(kq, trigger, 1, events, nEvents, zeroTimeout)
     polled(polledEvents)
   }
+
+  /** Polls with a timeout of zero and nothing triggered: at once if there is an event, and otherwise after as long as
+    * the system takes over a timeout of zero, which on macOS is some twelve microseconds, or as soon as one comes.
+    */
+  def pollEventsBriefly(kq: Int, events: EventQueue, nEvents: Int): Int =
+    polled(KqueueUnblocked.kevent(kq, null, 0, events, nEvents, zeroTimeout))
 
   /** Polls until there is an event, through posixlib's `@blocking` binding, since it waits. */
   def pollEventsForever(

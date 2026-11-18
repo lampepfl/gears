@@ -33,6 +33,15 @@ private[io] object Unblocked {
 
   def recvmsg(fd: CInt, message: Ptr[socket.msghdr], flags: CInt): CSSize = extern
 
+  def recvfrom(
+      fd: CInt,
+      buffer: CVoidPtr,
+      length: CSize,
+      flags: CInt,
+      address: Ptr[socket.sockaddr],
+      addressLength: Ptr[socket.socklen_t]
+  ): CSSize = extern
+
   def sendto(
       fd: CInt,
       buffer: CVoidPtr,

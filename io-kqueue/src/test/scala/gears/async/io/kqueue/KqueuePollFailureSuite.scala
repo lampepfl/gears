@@ -30,6 +30,12 @@ class KqueuePollFailureSuite extends munit.FunSuite {
           failedPolls.incrementAndGet()
           throw new IOException("Failed to poll events: injected")
         else super.pollKqueue(timeout)
+
+      override protected def pollBriefly(): Int =
+        if failing.get() then
+          failedPolls.incrementAndGet()
+          throw new IOException("Failed to poll events: injected")
+        else super.pollBriefly()
     }
   }
 

@@ -16,19 +16,33 @@ object PosixDatagrams {
     */
   def receive[A <: AnyRef](fd: Int, buf: ByteBuffer, from: Slot[A] | Null): Boolean = {
     buf.clear()
-    val sender = stackalloc[socket.sockaddr_storage]().asInstanceOf[Ptr[socket.sockaddr]]
-    val senderLength = stackalloc[socket.socklen_t]()
-    !senderLength = sizeOf[socket.sockaddr_storage].toUInt
-    val received = NativeBuffer.staged(buf, copyIn = false, copyOut = true) { b =>
-      val n = PosixSockets.receiveDatagram(fd, NativeBuffer.atPosition(b), b.remaining(), sender, senderLength)
-      if n > 0 then NativeBuffer.advance(b, n)
-      n
-    }
-    if received < 0 then false
+    if from == null then
+      // Nobody wants the sender, as on a connected socket: no room is made for its address, and none is asked for.
+      val received = NativeBuffer.staged(buf, copyIn = false, copyOut = true) { b =>
+        val n = PosixSockets.receiveDatagram(fd, NativeBuffer.atPosition(b), b.remaining(), null, null)
+        if n > 0 then NativeBuffer.advance(b, n)
+        n
+      }
+      if received < 0 then false
+      else {
+        buf.flip()
+        true
+      }
     else {
-      buf.flip()
-      if from != null then from.set(PosixSockets.decode(sender, !senderLength).asInstanceOf[A])
-      true
+      val sender = stackalloc[socket.sockaddr_storage]().asInstanceOf[Ptr[socket.sockaddr]]
+      val senderLength = stackalloc[socket.socklen_t]()
+      !senderLength = sizeOf[socket.sockaddr_storage].toUInt
+      val received = NativeBuffer.staged(buf, copyIn = false, copyOut = true) { b =>
+        val n = PosixSockets.receiveDatagram(fd, NativeBuffer.atPosition(b), b.remaining(), sender, senderLength)
+        if n > 0 then NativeBuffer.advance(b, n)
+        n
+      }
+      if received < 0 then false
+      else {
+        buf.flip()
+        from.set(PosixSockets.decode(sender, !senderLength).asInstanceOf[A])
+        true
+      }
     }
   }
 

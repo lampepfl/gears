@@ -269,9 +269,14 @@ object PosixSockets {
     } else throw new IOException(s"Unsupported address family $family")
   }
 
-  /** Receive one packet and its sender. Returns -1 if a non-blocking socket has no packet ready; zero is a valid empty
-    * datagram, not EOF. Initialize senderLength to the capacity of sender before each call. A packet larger than
-    * capacity fills it, the rest being dropped, and the count returned is the bytes that fitted.
+  /** Receive one packet, and its sender if `sender` is given, with `senderLength` set to its capacity before each
+    * call; both are null for a caller that does not want it. Returns -1 if a non-blocking socket has no packet ready;
+    * zero is a valid empty datagram, not EOF. A packet larger than capacity fills it, the rest being dropped, as the
+    * JDK and Network.framework drop it, and the count returned is the bytes that fitted: the packet is consumed either
+    * way, so failing would only lose what fitted.
+    *
+    * With `recvfrom`, whose arguments are the call's own: a `recvmsg` needs a message header and a vector built for
+    * it, each try, which is most of what a try that finds nothing costs here.
     */
   def receiveDatagram(
       fd: Int,
@@ -281,30 +286,14 @@ object PosixSockets {
       senderLength: Ptr[socket.socklen_t]
   ): Int = {
     require(capacity > 0, "Datagram buffer capacity must be positive")
-    val iov = stackalloc[uio.iovec]()
-    iov.iov_base = buffer
-    iov.iov_len = capacity.toCSize
-    val msg = stackalloc[socket.msghdr]()
-    msg.msg_name = sender.asInstanceOf[Ptr[Byte]]
-    msg.msg_namelen = !senderLength
-    msg.msg_iov = iov
-    msg.msg_iovlen = 1
-    msg.msg_control = null
-    msg.msg_controllen = 0.toUInt
-    msg.msg_flags = 0
-    var read = Unblocked.recvmsg(fd, msg, 0) // datagram sockets here are non-blocking
+    var read = Unblocked.recvfrom(fd, buffer, capacity.toCSize, 0, sender, senderLength) // non-blocking sockets here
     while (read < 0 && errno.errno == errno.EINTR) {
-      read = Unblocked.recvmsg(fd, msg, 0)
+      read = Unblocked.recvfrom(fd, buffer, capacity.toCSize, 0, sender, senderLength)
     }
     if (read < 0) {
       if (errno.errno == errno.EAGAIN || errno.errno == errno.EWOULDBLOCK) -1
       else throw new IOException(s"Failed to receive datagram: ${cError()}")
-    } else {
-      // A packet larger than the buffer fills it, the rest being dropped (MSG_TRUNC), as `recvfrom`, the JDK and
-      // Network.framework drop it: the packet is consumed either way, so failing would only lose what fitted.
-      !senderLength = msg.msg_namelen
-      read.toInt
-    }
+    } else read.toInt
   }
 
   /** Sends `bufs`, in order, as one datagram, with one `sendmsg`, to `destination` if given: true once sent, consuming
