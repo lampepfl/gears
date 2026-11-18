@@ -513,4 +513,107 @@ class KqueueSchedulingSuite extends munit.FunSuite {
       assert(refusal.isInstanceOf[IllegalStateException], String.valueOf(refusal))
     }
   }
+
+  /** Performs blocking `body` from a future of a one-worker pool until it is done in place, on the thread that was the
+    * worker's, as it is when the worker has nothing else to run at that moment: the thread before, and the thread
+    * after.
+    */
+  private def blockingInPlace(io: Io[KqueueOps.type])(body: () => Unit)(using Async): (Thread, Thread) = {
+    var tries = 0
+    while tries < 200 do
+      io.perform(io.ops.timer(1)) // lets whatever else is ready run first
+      val before = Thread.currentThread()
+      var ran: Thread | Null = null
+      io.perform(io.ops.blocking { () =>
+        ran = Thread.currentThread()
+        if ran eq before then body()
+      })
+      if ran eq before then return (before, Thread.currentThread())
+      tries += 1
+    fail("blocking code was never done in place")
+  }
+
+  test("blocking code runs on the thread that was its future's worker's, which another thread takes over meanwhile") {
+    onPool(1) { io ?=>
+      val ticks = AtomicInteger(0)
+      val ticking = Future { for _ <- 1 to 40 do { io.perform(io.ops.timer(5)); ticks.incrementAndGet() } }
+      var ticksBefore = 0
+      var ticksDuring = 0
+      val (before, after) = blockingInPlace(io) { () =>
+        ticksBefore = ticks.get()
+        Thread.sleep(60) // the one worker's timers go on firing, on another thread
+        ticksDuring = ticks.get() - ticksBefore
+      }
+      assert(ticksDuring >= 5, s"only $ticksDuring timers fired on the worker while its thread was blocked")
+      // The future is back on the worker, which is another thread's now, and performs ops as before.
+      assert(after ne before)
+      io.perform(io.ops.timer(1))
+      ticking.await
+    }
+  }
+
+  test(
+    "what comes to a worker while its thread is blocked, timers, tasks and futures to resume, is run by the thread taking over"
+  ) {
+    onPool(1) { io ?=>
+      val order = new java.util.concurrent.ConcurrentLinkedQueue[String]
+      val later = Future {
+        io.perform(io.ops.timer(20))
+        order.add("timer"): Unit
+        (1 to 3).map(i => Future { order.add(s"task $i"): Unit }).foreach(_.await)
+      }
+      blockingInPlace(io) { () =>
+        Thread.sleep(120)
+        order.add("body"): Unit
+      }
+      later.await
+      val seen = order.toArray(Array.empty[String]).toList
+      // The timer fired and the tasks ran while the body slept, the tasks in whatever order the worker took them.
+      assertEquals(seen.head, "timer", seen.toString)
+      assertEquals(seen.last, "body", seen.toString)
+      assertEquals(seen.slice(1, 4).toSet, Set("task 1", "task 2", "task 3"), seen.toString)
+      assertEquals(seen.length, 5, seen.toString)
+    }
+  }
+
+  test("many futures of one worker blocking at once each get a thread, and each comes back to the worker") {
+    onPool(1) { io ?=>
+      val inBody = new java.util.concurrent.CountDownLatch(16)
+      val release = new java.util.concurrent.CountDownLatch(1)
+      val blockers = (1 to 16).map { _ =>
+        Future {
+          io.perform(io.ops.blocking { () =>
+            inBody.countDown()
+            release.await()
+          })
+          io.perform(io.ops.timer(1)) // on the worker again
+          Thread.currentThread()
+        }
+      }
+      // All sixteen bodies are entered at once, off this future's worker, which goes on.
+      while inBody.getCount() > 0 do io.perform(io.ops.timer(2))
+      release.countDown()
+      val after = blockers.map(_.await).toSet
+      assertEquals(after.size, 1, s"the futures went on on $after, which are not one worker's thread")
+    }
+  }
+
+  test("blocking code in place is still interrupted by its time limit and by a cancel, which wait for it") {
+    onPool(1) { io ?=>
+      val returned = AtomicInteger(0)
+      def sleeper = io.ops.blocking { () =>
+        try Thread.sleep(10_000)
+        catch case _: InterruptedException => ()
+        returned.incrementAndGet(): Unit
+      }
+      intercept[java.util.concurrent.TimeoutException](io.perform(sleeper, 50.millis))
+      assertEquals(returned.get(), 1, "the time limit returned before the body had")
+      val cancelled = Future(io.perform(sleeper))
+      io.perform(io.ops.timer(50))
+      cancelled.cancel()
+      assert(cancelled.awaitResult.isFailure)
+      assertEquals(returned.get(), 2, "the cancel returned before the body had")
+      io.perform(io.ops.timer(1)) // and the worker is as it was
+    }
+  }
 }

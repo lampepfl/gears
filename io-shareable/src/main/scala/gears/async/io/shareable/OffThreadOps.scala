@@ -274,6 +274,42 @@ trait WorkOffThread extends AbstractTimerHeapOp, TimeoutOnWake {
       try gears.async.cancellationScope(here)(here.run())
       finally if limit != null then limit.cancel()
       parkUntilSettled() // settled by now: this returns its outcome, or throws it
+
+  /** As `performOnCaller`, for a performer on a worker's own thread, which must not block it: the thread first steps
+    * out of the worker, which another thread takes over (`Worker.stepOut`), does the work, and the performer then comes
+    * back to the worker (`Worker.comeBack`). The work is not handed to another thread, nor waited for by one: what is
+    * handed over is the worker.
+    *
+    * That is done when the worker has nothing else to run, and would only have waited for the work: the work begins at
+    * once, with no thread woken to do it, and the worker's own waiting is the other thread's. A worker with other tasks
+    * to run gives the work to the pool as before, and goes on with them itself: handing the worker over for each of
+    * many blocking ops under way at once would move it from thread to thread, where the pool takes them a batch at a
+    * time. So does an op that does not wait for its work, and a worker with no thread to hand over to.
+    */
+  final def performInPlace(worker: Worker & Source)(using async: Async): Unit =
+    if !waits || worker.hasOtherWork then performOffThread(worker)
+    else
+      val owner = worker.handleOwner
+      val on = worksOn
+      if on != null then owner.check(on)
+      performerOwner = owner
+      if workWithoutBlocking() then
+        commit()
+        return
+      // On the worker's heap while this is still its thread; what fires it interrupts the thread that has the work.
+      val here = new Here(Thread.currentThread())
+      if !worker.stepOut() then performOffThread(worker)
+      else
+        expose()
+        val limit =
+          if hasDeadline then worker.runAfter(Math.max(deadlineNow - System.nanoTime(), 0L), () => here.expire())
+          else null
+        try gears.async.cancellationScope(here)(here.run())
+        finally
+          if limit != null then limit.cancel()
+          // Whatever happened: the future goes no further on a thread that is no worker's.
+          worker.comeBack()
+        parkUntilSettled() // settled by now: this returns its outcome, or throws it
 }
 
 /** Blocking code as an op (`Blocking.blocking`): interrupted by a cancel or its time limit, which wait for it. */

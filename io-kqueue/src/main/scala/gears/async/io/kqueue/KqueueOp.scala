@@ -71,6 +71,7 @@ sealed trait KqueueAcceptOp extends KqueueReadinessOp
 /** An op whose work is done off the workers' threads (see `WorkOffThread`). */
 sealed trait KqueueOffThreadOp extends KqueueOp:
   def performOffThread(worker: Worker & KqueuePoller)(using Async): Unit
+  def performInPlace(worker: Worker & KqueuePoller)(using Async): Unit
 
 sealed trait KqueueDatagramOp extends KqueueReadinessOp
 

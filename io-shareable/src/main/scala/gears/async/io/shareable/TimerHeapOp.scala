@@ -189,15 +189,17 @@ abstract class AbstractTimerHeapOp private[shareable] ()
 
   // TimerOp implementation
 
-  private val timersLock = new Object
+  // Both are written by the performer alone, one performance at a time, and read by whichever worker's heap holds the
+  // op: volatile, with no lock, as each is read on its own, and a heap asks for the deadline with its own lock held.
 
+  /** The heap the op is on, if it is on one. */
   @volatile private var worker: TimerHeap.TimerSource | Null = null
 
   @volatile private var timeoutDeadline = -1L
 
-  def minDeadline: Long = timersLock.synchronized(timeoutDeadline)
+  def minDeadline: Long = timeoutDeadline
 
-  final def deadlineNow: Long = timersLock.synchronized(minDeadline)
+  final def deadlineNow: Long = minDeadline
 
   def ownDeadline: Long = -1L
 
@@ -241,19 +243,16 @@ abstract class AbstractTimerHeapOp private[shareable] ()
   }
 
   /** Sets this performance's time limit, or none if `t` is negative. It says nothing of where the op waits: an op goes
-    * on a heap, if it has to, with `holdTimerOn`. With no limit now and none before there is nothing to write: read
-    * without the lock, as only the performer, one at a time, writes it.
+    * on a heap, if it has to, with `holdTimerOn`. With no limit now and none before there is nothing to write.
     */
   final def setTimeout(t: Long): Unit =
     if t >= 0 || timeoutDeadline >= 0 then
-      timersLock.synchronized {
-        if t < 0 then timeoutDeadline = -1L
-        else timeoutDeadline = TimerHeap.deadlineAfter(t * 1000000L)
-      }
+      if t < 0 then timeoutDeadline = -1L
+      else timeoutDeadline = TimerHeap.deadlineAfter(t * 1000000L)
 
   final def holdTimerOn(source: Source): Unit = {
     // Before it is there: `clearTimeout` must know where to take it from, whatever comes of putting it.
-    timersLock.synchronized { worker = source }
+    worker = source
     _holdTimer(source)
   }
 
@@ -261,15 +260,11 @@ abstract class AbstractTimerHeapOp private[shareable] ()
     * `parkUntilSettled` waits for, reads it to tell whether it is the limit that has passed.
     */
   final def clearTimeout(): Unit =
-    if worker != null then // else it was on no heap: see `holdTimerOn`
-      val w = timersLock.synchronized {
-        val w = worker
-        worker = null
-        w
-      }
-      if w != null then w.removeTimer(this)
+    val w = worker
+    if w != null then // else it was on no heap: see `holdTimerOn`
+      worker = null
+      w.removeTimer(this): Unit
 
-  /** Takes no op lock: the heap reads `deadlineNow` under its own lock, so that order is heap, then op. */
   final def requestTimersUpdate(): Unit = {
     val w = worker
     if w != null then w.notifyDeadlineChange(this)

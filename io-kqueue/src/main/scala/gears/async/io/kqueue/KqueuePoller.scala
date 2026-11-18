@@ -14,6 +14,22 @@ trait KqueuePoller(maxEvents: Int) extends Poller, EventSource {
   /** Its timers include every kqueue op: the worker it is part of takes its pool's ops. */
   type Timer >: KqueueOp <: TimerOp
 
+  /** Whether the worker's heap of timers is being edited (see `TimerHeapImpl.claimHeap`). */
+  private val heapClaimed = new java.util.concurrent.atomic.AtomicBoolean(false)
+
+  /** A flag, taken with one atomic operation and given up with another: a thread that finds it taken, which is rare, as
+    * nearly every edit is the worker's own, tries again at once a few times, the edit being a few instructions long,
+    * and then gives way between tries, in case whoever holds it is not running.
+    */
+  protected final def claimHeap(): Unit =
+    if !heapClaimed.compareAndSet(false, true) then
+      var tries = 0
+      while !heapClaimed.compareAndSet(false, true) do
+        tries += 1
+        if tries < 64 then Thread.onSpinWait() else Thread.`yield`()
+
+  protected final def releaseHeap(): Unit = heapClaimed.set(false)
+
   /** It listens for this backend's handles that are waited for, each of which has a descriptor. */
   type Handle = KqueueWaitable
   private val kq = KqueueLoop.open()
@@ -116,6 +132,8 @@ trait KqueuePoller(maxEvents: Int) extends Poller, EventSource {
   /** The worker's thread, once it has waited here: what a wake-up unparks when there is no kqueue to trigger. */
   @volatile private var waitingThread: Thread | Null = null
 
+  override protected def drivenBy(thread: Thread): Unit = waitingThread = thread
+
   private def wakeWaiting(): Unit = {
     val thread = waitingThread
     if thread != null then java.util.concurrent.locks.LockSupport.unpark(thread)
@@ -164,7 +182,6 @@ trait KqueuePoller(maxEvents: Int) extends Poller, EventSource {
       if !isEmpty() then 0L
       else if deadlineTask >= 0 then Math.max(deadlineTask - now, 0)
       else -1L
-    if waitingThread == null then waitingThread = Thread.currentThread()
     val polled =
       if broken then
         waitWithoutKqueue(timeout)

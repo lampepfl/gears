@@ -162,11 +162,71 @@ abstract class Worker(val id: Int, final val handleOwner: HandleOwner) extends T
   private[shareable] def resumeNext[T, R](suspension: Suspension[T, R], value: T): Unit =
     ready.addLast(Continuation(suspension, value))
 
-  private[shareable] val thread = {
-    val t = new WorkerThread(this, () => loop())
-    t.setName(s"WorkpoolSchedulerWorker-$id")
-    t.setDaemon(true)
-    t
+  /** The thread that drives this worker now: runs its loop, and so its tasks, its timers and its poller. Given by the
+    * scheduler as the pool starts, and again each time the one before steps out (`stepOut`).
+    */
+  @volatile private[shareable] var driver: WorkerThread | Null = null
+
+  /** Set by the scheduler before the worker is first driven: gives the worker another thread to drive it, as the
+    * calling thread, which drove it, steps out. Throws if there is none to be had.
+    */
+  private[shareable] var handOver: () => Unit = () => throw new IllegalStateException("No thread to hand over to")
+
+  /** How many times the worker has been handed from one thread to the next. A thread's `loop` remembers the count it
+    * began at, and stops the moment it differs: by then another thread drives the worker, and everything of the
+    * worker's own, its inbox, its timers, what it is about to resume, is that thread's to touch.
+    */
+  private var drives = 0
+
+  /** For a future running on this worker's thread that is about to block the thread, as blocking code and a file's
+    * calls do: the thread stops being the worker's, and another takes the worker over, from where this one left it, so
+    * that the worker's other tasks, its timers and its handles' events go on meanwhile. Whether it did: if not, there
+    * was no thread to be had, and the caller is still on the worker.
+    *
+    * From here on the calling thread is no worker's. It must touch nothing of this worker's but through what any thread
+    * may call, and the future it runs must not go on to its own code there: it comes back with `comeBack`, which
+    * suspends it and resumes it on the worker. As the future suspends, the thread returns into the `loop` it was
+    * running, which sees the worker has moved on, and leaves.
+    */
+  private[shareable] def stepOut(): Boolean = {
+    val me = Thread.currentThread()
+    if driver ne me then false
+    else
+      val thread = me.asInstanceOf[WorkerThread]
+      thread.worker = null
+      drives += 1
+      try
+        handOver()
+        true
+      catch
+        case NonFatal(_) =>
+          // Nobody else drives it: this thread still does, as if it had never stepped out.
+          drives -= 1
+          thread.worker = this
+          driver = thread
+          false
+  }
+
+  /** Whether the worker has tasks to run or futures to resume besides the one its thread is running now. Worker thread
+    * only.
+    */
+  private[shareable] def hasOtherWork: Boolean = !inbox.isEmpty || !ready.isEmpty()
+
+  /** For a future whose thread stepped out of this worker (`stepOut`), once what blocked has returned: suspends the
+    * future, and resumes it on the worker, whichever thread drives it by then. Whatever the future's group says: it
+    * must not go on where it is.
+    */
+  private[shareable] def comeBack()(using async: Async): Unit = {
+    val worker = this
+    val back = new Async.Source[Unit] {
+      def poll(k: gears.async.Listener[Unit]): Boolean = false
+      def onComplete(k: gears.async.Listener[Unit]): Unit =
+        // On the worker, which resumes the future there as it does any waiter it completes. A worker that has left
+        // takes nothing: then from here, which gives it to whichever worker will have it.
+        if !worker.submit(() => k.completeNow((), this): Unit) then k.completeNow((), this): Unit
+      def dropListener(k: gears.async.Listener[Unit]): Unit = ()
+    }
+    async.withGroup(gears.async.CompletionGroup.Unlinked).await(back)
   }
 
   /** Does the core work of performing an operation, when it returns the operation is guaranteed to have been processed.
@@ -214,48 +274,58 @@ abstract class Worker(val id: Int, final val handleOwner: HandleOwner) extends T
     catch case _: Throwable => failure.printStackTrace()
   }
 
-  /** Has a budget so that tasks resuming each other can't keep the worker from its timers and inbox. */
-  private def runReady(): Unit = {
+  /** Has a budget so that tasks resuming each other can't keep the worker from its timers and inbox. Whether this
+    * thread still drives the worker after it: a future it ran may have had it step out (see `drives`).
+    */
+  private def runReady(drive: Int): Boolean = {
     var readyBudget = 32
     while readyBudget > 0 do
       val continuation = ready.pollFirst()
       if continuation == null then readyBudget = 0
       else
         guarded(continuation.run())
+        if drives != drive then return false
         readyBudget -= 1
+    true
   }
 
   /** Each timer's waiter runs before the next timer leaves the heap, so that it can still move or cancel that one. */
-  private def fireTimers(now: Long): Unit = {
+  private def fireTimers(now: Long, drive: Int): Boolean = {
     var timerBudget = 32
     while timerBudget > 0 do
       val timer = nextReadyTimer(now)
       if timer == null then timerBudget = 0
       else
         guarded(timer.timerWakeup(now))
-        runReady()
+        if !runReady(drive) then return false
         timerBudget -= 1
+    true
   }
 
-  def drainInbox(): Unit = {
+  private def drainInbox(drive: Int): Boolean = {
     var inboxBudget = 32
     while inboxBudget > 0 do
       val task = inbox.take()
       if task == null then inboxBudget = 0
       else
         guarded(task.run())
-        runReady()
+        if drives != drive || !runReady(drive) then return false
         inboxBudget -= 1
+    true
   }
 
+  /** Runs the worker on the calling thread, which the scheduler made its driver, until the worker stops for good, or
+    * until a future it runs has this thread step out of the worker (`stepOut`): from that moment the loop touches
+    * nothing more of the worker's, and returns as soon as that future lets go of the thread.
+    */
   def loop(): Unit = {
+    val drive = drives
+    drivenBy(Thread.currentThread())
     while !stopped || !isEmpty() do
       turns += 1
       if wakePending.get() then wakePending.set(false)
       val now = System.nanoTime()
-      fireTimers(now)
-      runReady()
-      drainInbox()
+      if !fireTimers(now, drive) || !runReady(drive) || !drainInbox(drive) then return
       // `stop`'s wake-up may have been spent while the inbox was still draining.
       if !stopped then
         // More than a turn's worth, and more than the task or two that a turn's budget may leave for the next.
@@ -264,7 +334,7 @@ abstract class Worker(val id: Int, final val handleOwner: HandleOwner) extends T
         val stolen = if isEmpty() then steal() else null
         if stolen != null then
           guarded(stolen.run())
-          runReady()
+          if drives != drive || !runReady(drive) then return
           // Its own handles' events still get their turn, without waiting: there may be more to take.
           pollOnly = true
           try guarded(waitForDeadline(peekNextDeadline()))
@@ -277,9 +347,7 @@ abstract class Worker(val id: Int, final val handleOwner: HandleOwner) extends T
       opsThisRun = 0
     exited = true
     // A task added before `exited` showed is either run here or taken back by `submit`, never lost.
-    while !isEmpty() do
-      drainInbox()
-      runReady()
+    while !isEmpty() do if !drainInbox(drive) || !runReady(drive) then return
     close()
   }
 }

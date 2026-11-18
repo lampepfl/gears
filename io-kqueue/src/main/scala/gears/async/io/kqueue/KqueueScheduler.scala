@@ -31,7 +31,7 @@ class KqueueScheduler(workers: Int, onStarvation: Starvation.Handler = Starvatio
         case close: KqueueCloseOp         => close.performClose(this)
         case ready: KqueueReadinessOp     => ready.performWhenReady(this)
         case immediate: KqueueImmediateOp => immediate.perform(handleOwner)
-        case work: KqueueOffThreadOp      => work.performOffThread(this)
+        case work: KqueueOffThreadOp      => work.performInPlace(this)
         case connect: KqueueConnectOp     => connect.performConnect(this)
     }
   }

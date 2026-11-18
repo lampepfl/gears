@@ -33,6 +33,15 @@ trait NioPoller extends Poller, EventSource {
 
   private val selector = Selector.open()
 
+  /** The worker's heap of timers is guarded by a lock (see `TimerHeapImpl.claimHeap`): timers are put there from the
+    * futures' threads as a matter of course, and a virtual thread that waits for a lock leaves its carrier.
+    */
+  private val heapLock = new java.util.concurrent.locks.ReentrantLock()
+
+  protected final def claimHeap(): Unit = heapLock.lock()
+
+  protected final def releaseHeap(): Unit = heapLock.unlock()
+
   /** Guards the first registration of a channel here: a second `register` would reset the interest of the first. */
   private val registering = new Object
 

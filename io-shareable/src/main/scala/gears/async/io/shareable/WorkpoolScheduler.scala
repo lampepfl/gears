@@ -57,8 +57,9 @@ abstract class WorkpoolScheduler[I <: Interface { type Op <: AsyncOp & Reentrant
 
   protected final def workerOf(thread: Thread): PoolWorker | Null = thread match
     case thread: WorkpoolScheduler.WorkerThread =>
-      val worker = thread.worker
-      if worker.id < workerGroup.length && (workerGroup(worker.id) eq worker) then worker.asInstanceOf[PoolWorker]
+      val worker = thread.worker // null for a thread that has stepped out of its worker, or waits to be given one
+      if worker != null && worker.id < workerGroup.length && (workerGroup(worker.id) eq worker) then
+        worker.asInstanceOf[PoolWorker]
       else null // another pool's
     case _ => null
 
@@ -77,13 +78,49 @@ abstract class WorkpoolScheduler[I <: Interface { type Op <: AsyncOp & Reentrant
     rootGroup.cancel()
   }
 
+  /** The threads that have driven a worker, stepped out of it to block (`Worker.stepOut`), and are kept a while to
+    * drive another: the last to come is the first taken, as the likeliest to be warm. Guarded by its own monitor.
+    */
+  private val spares = new java.util.ArrayDeque[WorkpoolScheduler.WorkerThread]()
+
+  /** Gives `worker` a thread to drive it: a spare one, or a new one. */
+  private def drive(worker: PoolWorker): Unit = {
+    val spare = spares.synchronized(spares.pollLast())
+    val thread = if spare != null then spare else new WorkpoolScheduler.WorkerThread(waitAsSpare)
+    thread.setName(s"WorkpoolSchedulerWorker-${worker.id}")
+    worker.driver = thread
+    thread.worker = worker
+    if spare != null then java.util.concurrent.locks.LockSupport.unpark(spare)
+    else
+      thread.setDaemon(true)
+      thread.start()
+  }
+
+  /** For a thread with no worker: waits to be given one. Whether it was: not if none needed it for
+    * `WorkpoolScheduler.SpareMillis`, or the pool has shut down, and the thread then ends.
+    */
+  private def waitAsSpare(thread: WorkpoolScheduler.WorkerThread): Boolean = {
+    thread.setName("WorkpoolSchedulerSpare")
+    spares.synchronized(spares.addLast(thread))
+    val deadline = System.nanoTime() + WorkpoolScheduler.SpareMillis * 1_000_000L
+    while thread.worker == null do
+      val left = deadline - System.nanoTime()
+      if isShutDown || left <= 0 then
+        // Taken off the list, it can be given no worker; if it was not there, one is being given it now.
+        if spares.synchronized(spares.remove(thread)) then return false
+        java.util.concurrent.locks.LockSupport.parkNanos(this, 1_000_000L)
+      else java.util.concurrent.locks.LockSupport.parkNanos(this, left)
+    true
+  }
+
   workerGroup.foreach { worker =>
     worker.onFatal = failFatally
     worker.steal = () => stealFor(worker)
     worker.callThief = () => wakeThief(worker)
+    worker.handOver = () => drive(worker)
   }
   // Only now: a worker's thread started as the worker was made would run it before its subclass had its fields.
-  workerGroup.foreach(_.thread.start())
+  workerGroup.foreach(drive)
 
   /** Looks at the workers every half of `Starvation.thresholdNanos`, and finds starved one that has had tasks in its
     * inbox, or a timer due, for that long without beginning a turn (see `Starvation`). The tasks in its inbox are moved
@@ -137,7 +174,7 @@ abstract class WorkpoolScheduler[I <: Interface { type Op <: AsyncOp & Reentrant
             if !reported(i) then
               reported(i) = true // once for each time it is kept
               // A handler that throws must not end the monitor.
-              try onStarvation(new Starvation.Report(worker.thread, now - seenSince(i), moved))
+              try onStarvation(new Starvation.Report(worker.driver.nn, now - seenSince(i), moved))
               catch case _: Throwable => ()
           i += 1
     catch case _: InterruptedException => () // shut down
@@ -231,7 +268,11 @@ abstract class WorkpoolScheduler[I <: Interface { type Op <: AsyncOp & Reentrant
     isShutDown = true
     workerGroup.foreach(_.stop())
     if starvationMonitor != null then starvationMonitor.interrupt()
-    workerGroup.foreach(_.thread.join())
+    workerGroup.foreach(_.driver.nn.join())
+    // The spare threads leave as they find the pool shut down.
+    spares.synchronized(spares.toArray(new Array[WorkpoolScheduler.WorkerThread](0))).foreach { spare =>
+      java.util.concurrent.locks.LockSupport.unpark(spare)
+    }
   }
 
   /** A task from one of this pool's workers stays with that worker, behind what it already has: what a future spawns is
@@ -318,8 +359,28 @@ object WorkpoolScheduler {
   /** How many ops one worker performs between turns before the future performing the next yields. */
   inline val OpBudget = 64
 
-  /** A worker's thread, which carries its worker for whoever asks which worker the current thread is. */
-  final class WorkerThread(val worker: Worker, body: Runnable) extends Thread(body)
+  /** How long a thread that stepped out of its worker is kept, with no worker to drive, before it ends. */
+  inline val SpareMillis = 60_000L
+
+  /** A thread that drives a worker, and carries it for whoever asks which worker the current thread is: null once it
+    * has stepped out of the worker to block (`Worker.stepOut`), and until it is given another. With no worker it waits
+    * to be given one (`spare`), and ends if that says none will come.
+    */
+  final class WorkerThread(spare: WorkerThread => Boolean) extends Thread {
+    @volatile private[shareable] var worker: Worker | Null = null
+
+    override def run(): Unit = {
+      var alive = true
+      while alive do
+        val driven = worker
+        if driven == null then alive = spare(this)
+        else
+          driven.loop()
+          // Still its worker: the worker has stopped for good, and so does the thread. Otherwise the thread stepped
+          // out of it, and goes on to wait for another.
+          if worker eq driven then alive = false
+    }
+  }
 
   trait ReentrantOp {
 

@@ -8,6 +8,10 @@ trait MonitorPoller extends Poller, EventSource {
 
   private val notifier = new Object
 
+  private val heapLock = new java.util.concurrent.locks.ReentrantLock()
+  protected def claimHeap(): Unit = heapLock.lock()
+  protected def releaseHeap(): Unit = heapLock.unlock()
+
   protected def wake(): Unit = notifier.synchronized {
     signalled = true
     notifier.notify()
