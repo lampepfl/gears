@@ -8,6 +8,6 @@ resolvers ++= (if (scalaNativeNightly) Seq(Resolver.sonatypeCentralSnapshots) el
 addSbtPlugin(
   "org.scala-native" % "sbt-scala-native" % (if (scalaNativeNightly) "0.5.13-20261015-c3918a9-SNAPSHOT" else "0.5.12")
 )
-addSbtPlugin("org.scala-js" % "sbt-scalajs" % "1.22.0")
+addSbtPlugin("org.scala-js" % "sbt-scalajs" % "1.23.0")
 addSbtPlugin("org.scalameta" % "sbt-scalafmt" % "2.6.2")
 addSbtPlugin("com.github.sbt" % "sbt-ci-release" % "1.12.1")

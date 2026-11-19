@@ -312,7 +312,8 @@ private[shareable] final class WaiterQueue[S <: EventSource](
     read: Boolean
 ) extends HandleReadiness[S](handle, read) {
 
-  private val queue = new java.util.ArrayDeque[ReadinessOp]
+  // Not `java.util.ArrayDeque`: see `RingDeque`.
+  private val queue = new RingDeque[ReadinessOp]
 
   /** The ops in the queue, and the one a report is serving, if any. Written under the lock; read without it to find
     * that there is no queue to join, or to leave.
@@ -344,8 +345,8 @@ private[shareable] final class WaiterQueue[S <: EventSource](
       try
         startListening(self) {
           if queue.remove(op) then pending -= 1
-          if !queue.isEmpty() then
-            stranded = queue.toArray(WaiterQueue.NoOps)
+          if !queue.isEmpty then
+            stranded = queue.toArray(new Array[ReadinessOp](_))
             queue.clear()
             pending -= stranded.length
         }
@@ -373,7 +374,7 @@ private[shareable] final class WaiterQueue[S <: EventSource](
   private def takeClaimed(): ReadinessOp | Null =
     var taken: ReadinessOp | Null = null
     if handle.getState == HandleState.OpenState then
-      while taken == null && !queue.isEmpty() do
+      while taken == null && !queue.isEmpty do
         val op = queue.pollFirst()
         if op.claimAtReady() then taken = op
         else pending -= 1
@@ -427,7 +428,7 @@ private[shareable] final class WaiterQueue[S <: EventSource](
 
   /** Those in the queue fail. One a report is serving has the handle's work claimed, which the close waits for. */
   private[shareable] def failWaiters(): Unit =
-    val waiting = synchronized(queue.toArray(new Array[ReadinessOp](0)))
+    val waiting = synchronized(queue.toArray(new Array[ReadinessOp](_)))
     waiting.foreach(_.handleClosing())
 }
 
