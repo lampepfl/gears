@@ -123,31 +123,37 @@ lazy val ioReferenceDemos =
     )
     .dependsOn(ioReference, ioTestkit.jvm)
 
-// The backends that run a program on a pool of workers, each with a poller of its platform's (`io-poller`): on the
-// JVM the JDK's channels over selectors (`gears.async.io.nio`), and on Scala Native the system's own event queue
-// (`gears.async.io.eventpolling`), kqueue on macOS and FreeBSD and epoll on Linux. What the two share is
-// `gears.async.io.shareable`: the workers, their timers and inboxes, handles and the ops that wait on them, with
-// nothing of a platform's own. The native side's resources override
-// `setjmp` and `longjmp` in every program that links it with `_setjmp` and `_longjmp`, which leave the signal mask
-// alone (see setjmp_override.S).
+// The backends that run a program over the event queue of their platform (`io-poller`): on the JVM the JDK's channels
+// over selectors (`gears.async.io.nio`), on Scala Native the system's own event queue (`gears.async.io.eventpolling`),
+// kqueue on macOS and FreeBSD and epoll on Linux, and on Scala.js Node's event loop (`gears.async.io.node`), for
+// programs linked to WebAssembly, which suspend with JSPI. `shared` is what all three have in common, and
+// `jvm-native` what the two with threads do besides: the pool of workers, their inboxes, and what waits on them. The
+// native side's resources override `setjmp` and `longjmp` in every program that links it with `_setjmp` and
+// `_longjmp`, which leave the signal mask alone (see setjmp_override.S).
 lazy val ioPoller =
-  crossProject(JVMPlatform, NativePlatform)
+  crossProject(JSPlatform, JVMPlatform, NativePlatform)
     .crossType(CrossType.Full)
     .in(file("io-poller"))
     .settings(
       name := "gears-io-poller",
       publish / skip := false,
       versionScheme := Some("early-semver"),
-      scalacOptions += "-release:21",
       libraryDependencies += munit % Test,
       testFrameworks += MUnitFramework
     )
+    .jsSettings(jsWasmSettings)
+    .jsSettings(
+      // One event loop runs every suite: run together, their timers would be measured against each other's work.
+      Test / parallelExecution := false
+    )
     .jvmSettings(
+      scalacOptions += "-release:21",
       Test / fork := true,
       // For `NioPoolBackend`, whose pool carries the virtual threads.
       Test / javaOptions += "--add-opens=java.base/java.lang=ALL-UNNAMED"
     )
     .nativeSettings(
+      scalacOptions += "-release:21",
       // The tests of one poller's own, which name it and so link its system calls: only on a system that has them.
       Test / unmanagedSourceDirectories += {
         val linux = sys.props.getOrElse("os.name", "").toLowerCase.contains("linux")
@@ -189,22 +195,30 @@ lazy val ioPoller =
     .dependsOn(root, ioTestkit % Test)
 
 // The backends' demo applications: the testkit's gears demos over them, as `ioPollerDemosJVM/run <command>` and
-// `ioPollerDemosNative/run <command>`.
+// `ioPollerDemosNative/run <command>`. The Node.js one is linked with `ioPollerDemosJS/fastLinkJS` and run as
+// `node <linked>/main.js <command>`, since Scala.js's `run` passes a program no arguments.
 lazy val ioPollerDemos =
-  crossProject(JVMPlatform, NativePlatform)
+  crossProject(JSPlatform, JVMPlatform, NativePlatform)
     .crossType(CrossType.Full)
     .in(file("io-poller/demos"))
-    .settings(
-      publish / skip := true,
-      scalacOptions += "-release:21",
-      run / fork := true
+    .settings(publish / skip := true)
+    .jsSettings(jsWasmSettings)
+    .jsSettings(
+      scalaJSUseMainModuleInitializer := true,
+      Compile / mainClass := Some("nodedemos.NodeDemos")
     )
     .jvmSettings(
+      scalacOptions += "-release:21",
+      run / fork := true,
       Compile / mainClass := Some("niodemos.NioDemos"),
       // For `--backend nio-pool`.
       run / javaOptions += "--add-opens=java.base/java.lang=ALL-UNNAMED"
     )
-    .nativeSettings(Compile / mainClass := Some("eventpollingdemos.EventPollingDemos"))
+    .nativeSettings(
+      scalacOptions += "-release:21",
+      run / fork := true,
+      Compile / mainClass := Some("eventpollingdemos.EventPollingDemos")
+    )
     .dependsOn(ioPoller, ioTestkit)
 
 // The bench: scenarios over every capability (`io-bench/shared`), run over this branch's backends, the JVM's

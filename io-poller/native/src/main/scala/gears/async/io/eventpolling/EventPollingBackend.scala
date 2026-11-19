@@ -37,7 +37,7 @@ object EventPollingBackend extends Backend {
       program: Io[Interface] ?=> Async.Spawn ?=> T
   ): T = {
     posix.FileLimit.raised: Unit // a shell's limit on open descriptors is far below what a server's sockets need
-    shareable.WorkpoolScheduler.run(scheduler(workers, onStarvation))(program)
+    shareable.PoolRun(scheduler(workers, onStarvation))(program)
   }
 
   /** The pool for the system the program is linked for: over epoll on Linux, and over kqueue anywhere else. Decided as

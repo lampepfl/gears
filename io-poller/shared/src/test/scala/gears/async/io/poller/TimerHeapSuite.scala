@@ -1,10 +1,9 @@
 package gears.async.io
 package poller
 
-import gears.async.io.shareable.MonitorPoller
+import gears.async.io.shareable.BinaryTimerHeap
 import gears.async.io.shareable.TimerHeap
 import gears.async.io.shareable.TimerHeap.TimerOp
-import gears.async.io.shareable.TimerHeapImpl
 
 import scala.collection.mutable
 
@@ -17,12 +16,12 @@ class TimerHeapSuite extends munit.FunSuite {
     def timerWakeup(actAfter: Long): Unit = ()
   }
 
-  private class Heap extends TimerHeapImpl with MonitorPoller {
-    val handleOwner = new gears.async.io.shareable.HandleOwner
+  /** The heap alone, as every platform has it, with nothing to guard it and nothing to wake. */
+  private class Heap extends BinaryTimerHeap {
     type Timer = FakeTimer
-    protected def makeSchedule(nanos: Long, body: Runnable) = throw new UnsupportedOperationException
-    protected def id: Int = 0
-    override protected def isEmpty(): Boolean = true
+    protected def claimHeap(): Unit = ()
+    protected def releaseHeap(): Unit = ()
+    protected def earliestChanged(): Unit = ()
   }
 
   private def drain(heap: Heap, now: Long): List[FakeTimer] =

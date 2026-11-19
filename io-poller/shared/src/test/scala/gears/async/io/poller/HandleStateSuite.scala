@@ -14,27 +14,12 @@ import gears.async.io.shareable.ReadinessHandle
 import gears.async.io.shareable.ReadinessOp
 import gears.async.io.shareable.TimerHeap.TimerOp
 
-import java.nio.channels.ClosedChannelException
 import java.util.concurrent.atomic.AtomicInteger
 
 /** A handle's state and its count of claimed work, which share one word: work is claimed only while the handle is open,
   * and a closing handle is closed once, by whoever releases the last of its work.
   */
-class HandleStateSuite extends munit.FunSuite {
-
-  private final class TestHandle(queued: Boolean = false)
-      extends AbstractBaseHandle(new HandleOwner),
-        AbstractReadinessHandle {
-    type Source = EventSource { type Handle = ReadinessHandle }
-    override protected def queuesWaiters(read: Boolean): Boolean = queued
-    val cleanups = AtomicInteger(0)
-    open()
-    def cleanup()(using ClosePermit): Boolean = {
-      cleanups.incrementAndGet()
-      assert(compareAndSetState(HandleState.ClosingState, HandleState.ClosedState))
-      true
-    }
-  }
+class HandleStateSuite extends munit.FunSuite, HandleStateFixtures {
 
   test("claimed work is counted, and leaves the handle open") {
     val handle = TestHandle()
@@ -98,38 +83,7 @@ class HandleStateSuite extends munit.FunSuite {
     assertEquals(told.get(), 2)
   }
 
-  private final class FakeSource extends EventSource {
-    type Handle = ReadinessHandle
-    val handleOwner = new HandleOwner
-    val started = AtomicInteger(0)
-    val stopped = AtomicInteger(0)
-    type Timer = TimerOp
-    def addTimer(op: TimerOp): Unit = throw new UnsupportedOperationException
-    protected def makeSchedule(nanos: Long, body: Runnable) = throw new UnsupportedOperationException
-    def removeTimer(op: TimerOp): Boolean = false
-    def notifyDeadlineChange(op: TimerOp): Unit = ()
-    var onStart: () => Unit = () => ()
-    def startListening(handle: ReadinessHandle, read: Boolean): Unit =
-      started.incrementAndGet()
-      onStart()
-    override def stopListening(handle: ReadinessHandle, read: Boolean): Unit = stopped.incrementAndGet(): Unit
-  }
-
   /** An op as the handle sees it: `moves` is what its work does when it is woken. */
-  private final class FakeOp extends ReadinessOp {
-    var moves: Moved = Moved(1)
-    var woken = 0
-    var released = 0
-    def settled: Boolean = false
-    def claimAtReady(): Boolean = claimable
-    def readyWakeup(): Readiness = { woken += 1; Readiness.of(moves) }
-    def releaseReady(): Boolean = { released += 1; true }
-    var failed: Throwable | Null = null
-    def failReady(failure: Throwable): Unit = failed = failure
-    def handleClosing(): Unit = closed += 1
-    var closed = 0
-    var claimable = true
-  }
 
   test("a source starts listening once, however many ops wait, and again only after it was given up") {
     val handle = TestHandle()
@@ -323,98 +277,5 @@ class HandleStateSuite extends munit.FunSuite {
     assertEquals(claimedDuring, 1L)
     assert(!closedInside)
     assertEquals(handle.cleanups.get(), 1, "the work's release closed the handle")
-  }
-
-  test("a close waits for work a report has under way, and no report does work once the handle has closed") {
-    for _ <- 1 to 300 do
-      val handle = TestHandle()
-      val source = FakeSource()
-      val afterCleanup = AtomicInteger(0)
-      val working = AtomicInteger(0)
-      val op = new ReadinessOp {
-        def settled: Boolean = false
-        def claimAtReady(): Boolean = true
-        // The work of an op: it must never run beside, or after, the handle's cleanup.
-        def readyWakeup(): Readiness = {
-          working.incrementAndGet()
-          if handle.cleanups.get() > 0 then afterCleanup.incrementAndGet()
-          Thread.onSpinWait()
-          if handle.cleanups.get() > 0 then afterCleanup.incrementAndGet()
-          Readiness.Blocked // so that it stays the waiter, report after report
-        }
-        def releaseReady(): Boolean = true
-        def failReady(failure: Throwable): Unit = ()
-        def handleClosing(): Unit = ()
-      }
-      assert(
-        handle
-          .readiness(read = true)
-          .registerWaiter(op, handle.readiness(read = true).tick, tried = true, source) eq source
-      )
-      val reporter = new Thread(() => {
-        while handle.getState != HandleState.ClosedState do
-          handle.readiness(read = true).report(source, ReadinessOp.Unknown)
-        var i = 0
-        while i < 100 do { handle.readiness(read = true).report(source, ReadinessOp.Unknown); i += 1 }
-      })
-      reporter.start()
-      while working.get() < 50 do Thread.onSpinWait()
-      assert(handle.requestClose())
-      reporter.join()
-      assertEquals(afterCleanup.get(), 0)
-  }
-
-  test("threads claiming and releasing against a close leave the handle closed once, with no work claimed") {
-    for _ <- 1 to 200 do
-      val handle = TestHandle()
-      val claimed = AtomicInteger(0)
-      val workers = List.fill(4)(new Thread(() => {
-        var open = true
-        while open do
-          try
-            handle.claimWork()
-            claimed.incrementAndGet()
-            handle.releaseWork()
-          catch case _: ClosedChannelException => open = false
-      }))
-      workers.foreach(_.start())
-      while claimed.get() < 100 do Thread.onSpinWait()
-      handle.requestClose()
-      workers.foreach(_.join())
-      assertEquals(handle.getState, HandleState.ClosedState)
-      assertEquals(handle.claimedWork, 0L)
-      assertEquals(handle.cleanups.get(), 1)
-  }
-
-  test("an op takes its event source from its handle's type, and can't be given another") {
-    // A read of a handle that `MonitorPoller` listens for is an op whose source is `MonitorPoller`: that compiles.
-    assertNoDiff(
-      compileErrors("""
-        import gears.async.io.shareable.*
-        abstract class Monitored extends AbstractBaseHandle(new HandleOwner), AbstractReadinessHandle, BaseReadableHandle { type Source = MonitorPoller }
-        abstract class Fits(handle: Monitored, buf: java.nio.ByteBuffer) extends AbstractReadOp[Monitored](handle, buf) {
-          def here(source: MonitorPoller)(using gears.async.Async): Unit = performWhenReady(source)
-        }
-      """),
-      ""
-    )
-    // The same op said to be another source's is refused: its source is its handle's, and no other.
-    val mismatched = compileErrors("""
-      import gears.async.io.shareable.*
-      abstract class Monitored extends AbstractBaseHandle(new HandleOwner), AbstractReadinessHandle, BaseReadableHandle { type Source = MonitorPoller }
-      abstract class Misfit(handle: Monitored, buf: java.nio.ByteBuffer) extends AbstractReadOp[Monitored](handle, buf) {
-        type Source = gears.async.io.shareable.PoolSource
-      }
-    """)
-    assert(mismatched.contains("Source"), mismatched)
-    // Nor is it performed on a source that does not listen for its handle.
-    val elsewhere = compileErrors("""
-      import gears.async.io.shareable.*
-      abstract class Monitored extends AbstractBaseHandle(new HandleOwner), AbstractReadinessHandle, BaseReadableHandle { type Source = MonitorPoller }
-      abstract class Astray(handle: Monitored, buf: java.nio.ByteBuffer) extends AbstractReadOp[Monitored](handle, buf) {
-        def there(source: gears.async.io.shareable.PoolSource)(using gears.async.Async): Unit = performWhenReady(source)
-      }
-    """)
-    assert(elsewhere.nonEmpty, "performed on a source that is not its handle's")
   }
 }

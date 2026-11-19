@@ -5,7 +5,7 @@ import gears.async.Cancellable
 import gears.async.io.Backend
 import gears.async.io.shareable.HandleOwner
 import gears.async.io.shareable.Starvation
-import gears.async.io.shareable.PoolOp
+import gears.async.io.shareable.BackendOp
 import gears.async.io.shareable.PoolOpWorker
 import gears.async.io.shareable.WorkpoolScheduler
 
@@ -65,11 +65,11 @@ abstract class NioScheduler(
     type Op = NioOp
 
     // On a thread of its own a timer already due gives the other threads their turn, and is done.
-    override protected[io] def performTimed(timed: PoolOp.Timed[NioPoller])(using Async): Unit = timed match
+    override protected[io] def performTimed(timed: BackendOp.Timed[NioPoller])(using Async): Unit = timed match
       case timer: NioMakeTimer if futuresOnOwnThreads && timer.isDue => Thread.`yield`()
       case _                                                         => super.performTimed(timed)
 
-    protected[io] def performBlocking(work: PoolOp.OffThread[NioPoller])(using Async): Unit =
+    protected[io] def performBlocking(work: BackendOp.OffThread[NioPoller])(using Async): Unit =
       if futuresOnOwnThreads then work.performOnCaller(this) else work.performOffThread(this)
   }
 }

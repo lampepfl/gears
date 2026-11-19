@@ -7,7 +7,6 @@ import gears.async.AsyncSupport
 import gears.async.Future
 
 import java.nio.ByteBuffer
-import java.nio.channels.ClosedChannelException
 import java.util.concurrent.CancellationException
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong

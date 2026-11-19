@@ -30,7 +30,7 @@ object NioBackend extends Backend {
   /** As `run`, on a pool of `workers` workers whose reports of starved workers go to `onStarvation`. */
   private[io] def runOn[T](workers: Int, onStarvation: shareable.Starvation.Handler)(
       program: Io[Interface] ?=> Async.Spawn ?=> T
-  ): T = shareable.WorkpoolScheduler.run(new NioThreadsScheduler(workers, onStarvation))(program)
+  ): T = shareable.PoolRun(new NioThreadsScheduler(workers, onStarvation))(program)
 }
 
 /** The JVM backend with its futures carried by the pool's own workers, in place of the JDK's scheduler: `NioBackend`'s
@@ -55,6 +55,6 @@ object NioPoolBackend extends Backend {
       program: Io[Interface] ?=> Async.Spawn ?=> T
   ): T = {
     VirtualCarriers.check()
-    shareable.WorkpoolScheduler.run(new NioPoolScheduler(workers, onStarvation))(program)
+    shareable.PoolRun(new NioPoolScheduler(workers, onStarvation))(program)
   }
 }

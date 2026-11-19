@@ -1,12 +1,12 @@
 package gears.async.io.shareable
 
 import gears.async.Async
+import gears.async.io.ClosedChannelException
 import gears.async.io.Received
 import gears.async.io.Slot
 import gears.async.io.shareable.TimerHeapOp.Outcome
 
 import java.nio.ByteBuffer
-import java.nio.channels.ClosedChannelException
 import scala.util.Failure
 import scala.util.control.NonFatal
 

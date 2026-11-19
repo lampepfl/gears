@@ -66,11 +66,12 @@ abstract class AbstractTimerHeapOp private[shareable] ()
     val out =
       outcomeOf(result.get()) match
         case null =>
-          try async.await(this)
+          waited = true
+          try Parking.parkOn(this)
           catch
             case _: CancellationException =>
               if cancelByPerformer() then TimerHeapOp.CancelledSentinel
-              else async.withGroup(CompletionGroup.Unlinked).await(this) // claimed: its outcome is the op's
+              else Parking.parkUncancelled(this) // claimed: its outcome is the op's
         case outcome => outcome
     out match
       case result: Try[Unit]             => result.get
@@ -113,6 +114,7 @@ abstract class AbstractTimerHeapOp private[shareable] ()
     */
   protected def reset(): Unit = {
     exposed = false
+    if waited then waited = false
     if _cancelLater then _cancelLater = false
     if claim.get() != null then claim.set(null)
     if result.get() != null then result.set(null)
@@ -127,6 +129,16 @@ abstract class AbstractTimerHeapOp private[shareable] ()
     */
   private var exposed = false
 
+  /** Whether this performance suspended its performer to wait for the op, which one done as it was tried did not. The
+    * performer's alone to read and write.
+    */
+  private var waited = false
+
+  /** Whether this performance suspended its performer (see `waited`): for a loop that counts the ops that did not, as
+    * each of those left it no turn.
+    */
+  final def suspendedPerformer: Boolean = waited
+
   /** Before the op is given to something that can settle it other than a heap, which `hasDeadline` tells of. */
   protected final def expose(): Unit = exposed = true
 
@@ -136,7 +148,7 @@ abstract class AbstractTimerHeapOp private[shareable] ()
     */
   protected final def leave()(using async: Async): Unit =
     if (exposed || hasDeadline) && outcomeOf(result.get()) == null then
-      if !settleCancelled() then async.withGroup(CompletionGroup.Unlinked).await(this): Unit
+      if !settleCancelled() then Parking.parkUncancelled(this): Unit
 
   protected def cancelledDuringWork: Boolean = {
     _cancelLater

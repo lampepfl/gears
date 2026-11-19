@@ -143,3 +143,24 @@ jobs:
     - uses: sbt/setup-sbt@v1
     - name: Test
       run: sbt rootJS/test
+  # The I/O interface's contracts over the Node.js backend, and its demo application linked.
+  test-io-node:
+    strategy:
+      fail-fast: false
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+        fetch-depth: 0
+    - uses: coursier/cache-action@v6
+    - uses: actions/setup-java@v3
+      with:
+        distribution: temurin
+        java-version: 21
+    - uses: actions/setup-node@v4
+      with:
+          node-version: '26'
+    - uses: sbt/setup-sbt@v1
+    - name: Test
+      run: sbt 'ioPollerJS/testFull; ioPollerDemosJS/fastLinkJS'

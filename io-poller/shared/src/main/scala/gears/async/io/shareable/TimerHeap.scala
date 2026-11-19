@@ -72,8 +72,12 @@ object TimerHeap {
 
 /** A binary heap of timers, each knowing its place, so that removing a timer or bringing it forward takes logarithmic
   * time. Its order is by `heapKey` and never by a deadline read afresh, as a deadline can move at any moment.
+  *
+  * Whoever waits for its earliest deadline is told when that changes (`earliestChanged`), and when a removal leaves it
+  * empty (`emptied`), by whatever its platform has for that: a worker's poller is woken, and Node's event loop has its
+  * one timer set again.
   */
-abstract class TimerHeapImpl extends Poller with TimerHeap {
+abstract class BinaryTimerHeap extends TimerHeap {
 
   /** Claims the heap for one edit, or one look at it, by the calling thread, and gives it up again: what guards the
     * heap, which is its platform's to choose. Edits are short, never wait, and never claim the heap again inside one.
@@ -92,8 +96,19 @@ abstract class TimerHeapImpl extends Poller with TimerHeap {
     finally releaseHeap()
   }
 
+  /** A timer has become the earliest, or the earliest has moved earlier: called with the heap not claimed. */
+  protected def earliestChanged(): Unit
+
+  /** A removal has left the heap empty: called with the heap not claimed. Nothing, unless whoever waits must be told
+    * that there is nothing left to wait for.
+    */
+  protected def emptied(): Unit = ()
+
   private var heap = new Array[TimerOp](16)
   private var size = 0
+
+  /** Whether any timer is held. */
+  final def hasTimers: Boolean = editing(size > 0)
 
   private def place(timerOp: TimerOp, index: Int): Unit = {
     heap(index) = timerOp
@@ -175,7 +190,7 @@ abstract class TimerHeapImpl extends Poller with TimerHeap {
     heap.iterator.take(size).mkString("[", ", ", "]")
   }
 
-  /** Wakes the worker only for a new earliest deadline: otherwise it wakes in time as it is. */
+  /** Tells whoever waits only of a new earliest deadline. */
   final def addTimer(timerOp: Timer): Unit = {
     if !timerOp.hasDeadline then throw new IllegalArgumentException("Only an op with a deadline goes on the heap")
     val isNext = editing {
@@ -185,7 +200,7 @@ abstract class TimerHeapImpl extends Poller with TimerHeap {
       siftUp(timerOp, size - 1)
       heap(0) eq timerOp
     }
-    if isNext then wake()
+    if isNext then earliestChanged()
   }
 
   /** Doesn't wake the worker, which at worst wakes for a timer no longer there, and finds nothing to do.
@@ -198,11 +213,16 @@ abstract class TimerHeapImpl extends Poller with TimerHeap {
   final override def removeTimer(timerOp: TimerOp): Boolean =
     if timerOp.heapIndex < 0 then false
     else
-      editing {
+      var empty = false
+      val held = editing {
         val held = holds(timerOp)
-        if held then takeAt(timerOp.heapIndex)
+        if held then
+          takeAt(timerOp.heapIndex)
+          empty = size == 0
         held
       }
+      if empty then emptied()
+      held
 
   final def notifyDeadlineChange(timerOp: TimerOp): Unit = {
     val isNext = editing {
@@ -210,6 +230,13 @@ abstract class TimerHeapImpl extends Poller with TimerHeap {
       if held then rekey(timerOp)
       held && (heap(0) eq timerOp)
     }
-    if isNext then wake()
+    if isNext then earliestChanged()
   }
+}
+
+/** The heap of a worker, which is woken where it waits on its poller for a new earliest deadline: otherwise it wakes
+  * in time as it is.
+  */
+abstract class TimerHeapImpl extends BinaryTimerHeap with Poller {
+  protected final def earliestChanged(): Unit = wake()
 }

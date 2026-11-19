@@ -348,25 +348,6 @@ abstract class WorkpoolScheduler[I <: Interface { type Op <: AsyncOp & Reentrant
 
 object WorkpoolScheduler {
 
-  /** Runs `program` on `pool`, as its backend's `run` does, and shuts the pool down afterwards. The program runs as a
-    * future of the pool's, under the pool's group: a fatal error in a worker cancels it, and is thrown from here once
-    * it has unwound. The caller's thread waits, and runs nothing of the program.
-    */
-  def run[I <: Interface { type Op <: AsyncOp & ReentrantOp }, T](pool: WorkpoolScheduler[I])(
-      program: Io[I] ?=> Async.Spawn ?=> T
-  ): T = {
-    given poolSupport: (AsyncSupport { type Scheduler = pool.Scheduler }) = pool
-    given poolScheduler: pool.Scheduler = pool
-    try
-      val outcome = Async.blocking({
-        Async.withNewCompletionGroup(pool.rootGroup)(gears.async.Future(program(using pool)).awaitResult)
-      })
-      val fatal = pool.fatalFailure
-      if fatal != null then throw fatal
-      outcome.get
-    finally pool.shutdown()
-  }
-
   trait AsyncOp extends TimerOp {
     def setTimeout(timeoutMillis: Long): Unit
 

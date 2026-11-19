@@ -1,7 +1,8 @@
 package gears.async.io.shareable
 
+import gears.async.io.ClosedChannelException
+
 import java.io.IOException
-import java.nio.channels.ClosedChannelException
 import java.util.concurrent.atomic.AtomicReference
 
 trait BaseHandle extends HandleState.Holder:
@@ -161,7 +162,7 @@ trait AbstractReadinessHandle extends AbstractBaseHandle, ReadinessHandle:
     * which the reports only wake the listener for nothing, and tie the handle's next wait to a worker that may by then
     * be kept busy.
     */
-  protected[shareable] def idleReportsLimit: Int = 16
+  protected[io] def idleReportsLimit: Int = 16
 
   /** Whoever waits fails, and then the listeners drop the handle, while its descriptor is still its own; what they
     * registered with the kernel goes as the descriptor is closed.

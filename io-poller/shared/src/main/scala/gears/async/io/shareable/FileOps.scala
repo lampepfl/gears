@@ -2,7 +2,6 @@ package gears.async.io
 package shareable
 
 import java.nio.ByteBuffer
-import java.nio.channels.ClosedChannelException
 
 /** What a file's handle keeps for the reads and writes of it as a stream (`ByteStreams.read` and `write` on a file):
   * the position they are at, which each moves on by what it read or wrote. Its positional ops leave it alone.

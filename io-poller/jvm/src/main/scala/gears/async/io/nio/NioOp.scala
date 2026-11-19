@@ -35,7 +35,7 @@ import gears.async.io.shareable.AbstractWriteOp
 import gears.async.io.shareable.HandleOwner
 import gears.async.io.shareable.LendingPool
 import gears.async.io.shareable.Moved
-import gears.async.io.shareable.PoolOp
+import gears.async.io.shareable.BackendOp
 import gears.async.io.shareable.Worker
 
 import java.nio.ByteBuffer
@@ -43,25 +43,25 @@ import java.nio.channels.DatagramChannel
 import java.nio.channels.Pipe
 import scala.concurrent.duration.FiniteDuration
 
-/** An op of this backend's, of one of the kinds a pool's worker performs (see `PoolOp`). */
-sealed trait NioOp extends PoolOp[NioPoller]:
+/** An op of this backend's, of one of the kinds a backend has (see `BackendOp`). */
+sealed trait NioOp extends BackendOp[NioPoller]:
 
   /** A worker takes any op of this backend's among its timers (see `NioPoller.Timer`). */
   final def _holdTimer(worker: NioPoller): Unit = worker.addTimer(this)
 
-sealed trait NioReadinessOp extends NioOp, PoolOp.Readiness[NioPoller]
+sealed trait NioReadinessOp extends NioOp, BackendOp.Readiness[NioPoller]
 
-sealed trait NioImmediateOp extends NioOp, PoolOp.Immediate[NioPoller]
+sealed trait NioImmediateOp extends NioOp, BackendOp.Immediate[NioPoller]
 
-sealed trait NioOffThreadOp extends NioOp, PoolOp.OffThread[NioPoller]
+sealed trait NioOffThreadOp extends NioOp, BackendOp.OffThread[NioPoller]
 
-sealed trait NioConnectOp extends NioOp, PoolOp.Connect[NioPoller]
+sealed trait NioConnectOp extends NioOp, BackendOp.Connect[NioPoller]
 
-sealed trait NioTimerOp extends NioOp, PoolOp.Timed[NioPoller]
+sealed trait NioTimerOp extends NioOp, BackendOp.Timed[NioPoller]
 
-sealed trait NioDeadlineOp extends NioOp, PoolOp.Timed[NioPoller], Deadline
+sealed trait NioDeadlineOp extends NioOp, BackendOp.Timed[NioPoller], Deadline
 
-sealed trait NioCloseOp extends NioOp, PoolOp.Close[NioPoller]
+sealed trait NioCloseOp extends NioOp, BackendOp.Close[NioPoller]
 
 /** A stream read's calls on the JDK's channels: mixed into the op. A channel that has nothing to read reads nothing,
   * which is a read that would block, and says -1 at the end of its stream.

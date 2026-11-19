@@ -4,12 +4,10 @@ package poller
 import gears.async.Async
 import gears.async.Future
 import gears.async.Listener
-import gears.async.default.given
 import gears.async.io.shareable.AbstractMakeTimerOp
-import gears.async.io.shareable.MonitorPoller
+import gears.async.io.shareable.BinaryTimerHeap
 import gears.async.io.shareable.RepeatableAbstractTimerHeapOp
 import gears.async.io.shareable.TimerHeap.TimerOp
-import gears.async.io.shareable.TimerHeapImpl
 import gears.async.io.shareable.TimerHeapOp.CancelledSentinel
 import gears.async.io.shareable.TimerHeapOp.Outcome
 import gears.async.io.shareable.WorkpoolScheduler
@@ -22,7 +20,16 @@ import scala.util.Success
 import scala.util.Try
 
 /** A firing and a cancel race for an op: whichever claims it decides its outcome, and a listener gets that outcome. */
-class TimerHeapOpSuite extends munit.FunSuite {
+class TimerHeapOpSuite extends SuspendingSuite {
+
+  /** A heap alone, as every platform has it, with nothing to guard it and nothing to wake. */
+  private class PlainHeap extends BinaryTimerHeap {
+    type Timer = TimerOp
+    protected def claimHeap(): Unit = ()
+    protected def releaseHeap(): Unit = ()
+    protected def earliestChanged(): Unit = ()
+  }
+
   private class CountingTimer extends AbstractMakeTimerOp(Duration.Zero), HeldOnOwnKind[CountingTimer] {
     var worked = 0
     override def wakeup(resumedAt: Long): Try[Unit] | CancelledSentinel.type = {
@@ -51,7 +58,7 @@ class TimerHeapOpSuite extends munit.FunSuite {
 
   /** An op entered as its performer would. */
   private def entered[T <: CountingTimer](timer: T)(body: T => Async ?=> Unit): Unit =
-    Async.blocking(timer.performWith(body(timer)))
+    blocking(timer.performWith(body(timer)))
 
   /** Cancels the op as its performer does when it is cancelled as it waits: nothing else cancels an op, which is linked
     * to no group.
@@ -162,7 +169,7 @@ class TimerHeapOpSuite extends munit.FunSuite {
 
   test("a performer cancelled as it waits for its op cancels the op, and is cancelled itself") {
     val timer = CountingTimer()
-    val failure = Async.blocking {
+    val failure = blocking {
       val performing = Future(timer.performWith(timer.parkUntilSettled()))
       performing.cancel() // before it waits or as it does: either way its wait ends cancelled
       performing.awaitResult.failed.toOption
@@ -187,9 +194,9 @@ class TimerHeapOpSuite extends munit.FunSuite {
   test("an op can't be entered twice at once, nor left when not entered") {
     val timer = CountingTimer()
     entered(timer) { timer =>
-      Async.blocking(intercept[IllegalStateException](timer.requestEntry()))
+      blocking(intercept[IllegalStateException](timer.requestEntry()))
     }
-    Async.blocking(intercept[IllegalStateException](timer.requestExit()))
+    blocking(intercept[IllegalStateException](timer.requestExit()))
   }
 
   /** An op like a read: only a time limit puts it on the heap. */
@@ -202,15 +209,9 @@ class TimerHeapOpSuite extends munit.FunSuite {
   }
 
   test("a firing for a time limit is a timeout, though the performer has taken the op off the heap meanwhile") {
-    val heap = new TimerHeapImpl with MonitorPoller {
-      val handleOwner = new gears.async.io.shareable.HandleOwner
-      type Timer = TimerOp
-      protected def makeSchedule(nanos: Long, body: Runnable) = throw new UnsupportedOperationException
-      protected def id: Int = 0
-      override protected def isEmpty(): Boolean = true
-    }
+    val heap = new PlainHeap
     val op = LimitedOnly()
-    Async.blocking {
+    blocking {
       op.performWith {
         op.setTimeout(0)
         op.holdTimerOn(heap)
@@ -231,15 +232,9 @@ class TimerHeapOpSuite extends munit.FunSuite {
   }
 
   test("an op performed again with no time limit forgets the last one") {
-    val heap = new TimerHeapImpl with MonitorPoller {
-      val handleOwner = new gears.async.io.shareable.HandleOwner
-      type Timer = TimerOp
-      protected def makeSchedule(nanos: Long, body: Runnable) = throw new UnsupportedOperationException
-      protected def id: Int = 0
-      override protected def isEmpty(): Boolean = true
-    }
+    val heap = new PlainHeap
     val op = LimitedOnly()
-    Async.blocking {
+    blocking {
       op.performWith {
         op.setTimeout(0)
         assert(op.hasDeadline)
@@ -301,7 +296,7 @@ class TimerHeapOpSuite extends munit.FunSuite {
         if failing then throw new IllegalArgumentException("boom")
         else super.onEntry()
     }
-    Async.blocking {
+    blocking {
       // A group waits for its members as it ends: this would not return if the op had been linked to it.
       Async.group(intercept[IllegalArgumentException](timer.requestEntry()))
       intercept[IllegalStateException](timer.requestExit())
