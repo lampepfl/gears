@@ -163,9 +163,12 @@ abstract class WorkpoolScheduler[I <: Interface { type Op <: AsyncOp & Reentrant
             reported(i) = false
             stuck(i) = false
           else
+            // With nothing waiting it keeps nothing, however long its turn: counted from when something next does,
+            // which is the first look to find it so. Not from the look before: all that one knew is that nothing
+            // waited then, and a monitor kept from running for as long as the threshold, as on a busy machine, would
+            // otherwise report a worker whose task came a moment ago.
+            if !reported(i) && (!waiting || !stuck(i)) then seenSince(i) = now
             stuck(i) = waiting
-            // With nothing waiting it keeps nothing, however long its turn: counted from when something next does.
-            if !waiting && !reported(i) then seenSince(i) = now
           i += 1
         i = 0
         while i < count do
