@@ -1,5 +1,5 @@
 package gears.async.io
-package nio
+package poller
 
 import gears.async.io.shareable.ResolveCache
 
@@ -36,10 +36,7 @@ class ResolveCacheSuite extends munit.FunSuite {
     assertEquals(ResolveCache.get("old-0.test", now = 31 * Second, kept = 30 * Second), null)
   }
 
-  private val both: List[(String, Backend { type Interface = NioOps.type })] =
-    List("on the JDK's threads" -> NioBackend, "on the pool" -> NioPoolBackend)
-
-  for (where, backend) <- both do
+  for (where, backend) <- PollerPlatform.all do
     test(s"$where, a resolve op is answered from the cache with no lookup, and a lookup fills it") {
       // A name no resolver knows, which only the cache can answer.
       val name = "only-in-the-cache.invalid"

@@ -31,8 +31,15 @@ abstract class NioScheduler(
 
   protected final def startThread(body: Runnable): Unit = threads.newThread(body).start()
 
-  /** A future is a virtual thread of its own. */
-  override def execute(body: Runnable): Unit = startThread(body)
+  /** A future is a virtual thread of its own. A pool that has shut down refuses it as the native one does: where the
+    * pool carries the threads, the JDK is told so its own way (`RejectedExecutionException`), which is not a caller's
+    * to see.
+    */
+  override def execute(body: Runnable): Unit =
+    try startThread(body)
+    catch
+      case refused: java.util.concurrent.RejectedExecutionException =>
+        throw new IllegalStateException(refused.getMessage, refused)
 
   override private[async] def scheduleBoundary(body: Label[Unit] ?=> Unit)(using s: Scheduler): Unit =
     startBoundary(body)

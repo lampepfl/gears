@@ -1,5 +1,5 @@
 package gears.async.io
-package eventpolling
+package poller
 
 import gears.async.Async
 import gears.async.io.shareable.Starvation
@@ -16,6 +16,10 @@ import scala.util.Failure
   * cancelled, the test goes on to end, and fails with the report. A task that takes no notice, computing for ever,
   * can't be ended: the report is written to `FailsOnStarvation.Log`, and if the test is still running `GraceMillis`
   * later the test process is ended, failing the run rather than hanging it.
+  *
+  * Only where the platform's pool is one a test can be failed for (`PollerPlatform.failsOnStarvation`): on the JVM a
+  * worker is kept for longer than the threshold by the JVM itself, loading and compiling what a test first runs, and
+  * there a report is only printed.
   */
 trait FailsOnStarvation extends ContractSuite {
   private val starved = new ConcurrentLinkedQueue[Starvation.Report]
@@ -25,13 +29,16 @@ trait FailsOnStarvation extends ContractSuite {
   /** How many workers the pool of each of the suite's programs has: `Io.run`'s one for each processor. */
   protected def workers: Int = Runtime.getRuntime.availableProcessors
 
-  /** As `Io.run` over `EventPollingBackend`, which the suites mixing this in all run over, on a pool that reports its starved
-    * workers here.
+  /** As `Io.run` over the platform's pool backend, which the suites mixing this in all run over, on a pool that reports
+    * its starved workers here.
     */
   override protected def running[T](body: Io[backend.Interface] ?=> Async.Spawn ?=> T): T =
-    EventPollingBackend.runOn(workers, onStarvation)(io ?=> body(using io.asInstanceOf[Io[backend.Interface]]))
+    PollerPlatform.runOn(workers, onStarvation)(io ?=> body(using io.asInstanceOf[Io[backend.Interface]]))
 
-  private val onStarvation: Starvation.Handler = report => {
+  private val onStarvation: Starvation.Handler = report =>
+    if !PollerPlatform.failsOnStarvation then Starvation.printWarning(report) else held(report)
+
+  private def held(report: Starvation.Report): Unit = {
     starved.add(report): Unit
     report.worker.interrupt()
     val during = testsBegun.get()

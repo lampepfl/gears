@@ -204,7 +204,7 @@ lazy val ioPollerDemos =
       // For `--backend nio-pool`.
       run / javaOptions += "--add-opens=java.base/java.lang=ALL-UNNAMED"
     )
-    .nativeSettings(Compile / mainClass := Some("referencedemos.EventPollingDemos"))
+    .nativeSettings(Compile / mainClass := Some("eventpollingdemos.EventPollingDemos"))
     .dependsOn(ioPoller, ioTestkit)
 
 // The bench: scenarios over every capability (`io-bench/shared`), run over this branch's backends, the JVM's

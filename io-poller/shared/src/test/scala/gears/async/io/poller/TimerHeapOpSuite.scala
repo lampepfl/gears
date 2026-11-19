@@ -1,5 +1,5 @@
 package gears.async.io
-package eventpolling
+package poller
 
 import gears.async.Async
 import gears.async.Future

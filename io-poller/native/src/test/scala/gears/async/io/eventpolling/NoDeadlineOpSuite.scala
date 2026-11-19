@@ -1,6 +1,7 @@
 package gears.async.io
 package eventpolling
 
+import gears.async.io.poller.*
 import gears.async.Async
 import gears.async.AsyncSupport
 import gears.async.Future

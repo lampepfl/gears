@@ -1,5 +1,5 @@
 package gears.async.io
-package eventpolling
+package poller
 
 import gears.async.io.shareable.AbstractBaseHandle
 import gears.async.io.shareable.AbstractReadinessHandle
@@ -398,12 +398,12 @@ class HandleStateSuite extends munit.FunSuite {
       """),
       ""
     )
-    // The same op said to be a kqueue worker's is refused: its source is its handle's, and no other.
+    // The same op said to be another source's is refused: its source is its handle's, and no other.
     val mismatched = compileErrors("""
       import gears.async.io.shareable.*
       abstract class Monitored extends AbstractBaseHandle(new HandleOwner), AbstractReadinessHandle, BaseReadableHandle { type Source = MonitorPoller }
       abstract class Misfit(handle: Monitored, buf: java.nio.ByteBuffer) extends AbstractReadOp[Monitored](handle, buf) {
-        type Source = gears.async.io.eventpolling.EventPoller
+        type Source = gears.async.io.shareable.PoolSource
       }
     """)
     assert(mismatched.contains("Source"), mismatched)
@@ -412,18 +412,9 @@ class HandleStateSuite extends munit.FunSuite {
       import gears.async.io.shareable.*
       abstract class Monitored extends AbstractBaseHandle(new HandleOwner), AbstractReadinessHandle, BaseReadableHandle { type Source = MonitorPoller }
       abstract class Astray(handle: Monitored, buf: java.nio.ByteBuffer) extends AbstractReadOp[Monitored](handle, buf) {
-        def there(source: gears.async.io.eventpolling.EventPoller)(using gears.async.Async): Unit = performWhenReady(source)
+        def there(source: gears.async.io.shareable.PoolSource)(using gears.async.Async): Unit = performWhenReady(source)
       }
     """)
     assert(elsewhere.nonEmpty, "performed on a source that is not its handle's")
-  }
-
-  test("a file is no handle a kqueue listens for, nor one a waiting read is built on") {
-    assert(
-      compileErrors(
-        "def listen(poller: gears.async.io.eventpolling.EventPoller, file: gears.async.io.eventpolling.EventPollingFile): Unit = poller.startListening(file, true)"
-      ).nonEmpty
-    )
-    assert(compileErrors("def waits(file: gears.async.io.eventpolling.EventPollingFile) = file.readiness(true)").nonEmpty)
   }
 }
