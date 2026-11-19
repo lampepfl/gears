@@ -163,4 +163,4 @@ jobs:
           node-version: '26'
     - uses: sbt/setup-sbt@v1
     - name: Test
-      run: sbt 'ioPollerJS/testFull; ioPollerDemosJS/fastLinkJS'
+      run: sbt 'ioPollerJS/testFull; ioPollerDemosJS/fastLinkJS; ioCapBenchJS/fastLinkJS'

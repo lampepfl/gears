@@ -3,7 +3,7 @@
 //> using dep io.netty:netty-codec-base:4.2.21.Final
 
 import io.netty.bootstrap.{Bootstrap, ServerBootstrap}
-import io.netty.buffer.ByteBuf
+import io.netty.buffer.{ByteBuf, ByteBufUtil, Unpooled}
 import io.netty.channel.*
 import io.netty.channel.nio.NioIoHandler
 import io.netty.channel.socket.{ChannelInputShutdownEvent, DatagramPacket, DuplexChannel, SocketProtocolFamily}
@@ -14,6 +14,9 @@ import io.netty.util.ReferenceCountUtil
 import java.net.{InetAddress, InetSocketAddress}
 import java.nio.channels.spi.SelectorProvider
 import java.util.concurrent.{CountDownLatch, LinkedBlockingQueue, TimeUnit}
+import java.util.concurrent.atomic.AtomicInteger
+
+import Cache.*
 
 /** The IP socket scenarios of `CapBench` over Netty's NIO transport: see `../README.md`.
   *
@@ -160,6 +163,198 @@ object NettyBench {
     override def channelReadComplete(ctx: ChannelHandlerContext): Unit = { val _ = ctx.flush() }
   }
 
+  // ---- the session cache: see `Cache.scala`, whose work is done on arrays
+
+  /** Gathers what is read into an array and, when the reads of one turn of the loop are done, finds the whole RESP
+    * values there: `value` for each, then `after`. The beginning of a value the rest of which has yet to come is kept
+    * for the next turn.
+    */
+  private abstract class Values extends Handler {
+    private var bytes = new Array[Byte](LargestBatch)
+    private var have = 0
+
+    /** The whole value of `in` from `from` to `end`. */
+    protected def value(ctx: ChannelHandlerContext, in: Array[Byte], from: Int, end: Int): Unit
+
+    /** Every whole value that has come has been given to `value`. */
+    protected def after(ctx: ChannelHandlerContext): Unit
+
+    override def channelRead(ctx: ChannelHandlerContext, message: AnyRef): Unit = {
+      val read = message.asInstanceOf[ByteBuf]
+      try
+        val length = read.readableBytes()
+        if have + length > bytes.length then
+          bytes = java.util.Arrays.copyOf(bytes, math.max(bytes.length * 2, have + length))
+        read.readBytes(bytes, have, length)
+        have += length
+      finally { val _ = read.release() }
+    }
+
+    override def channelReadComplete(ctx: ChannelHandlerContext): Unit = {
+      var at = 0
+      var end = Resp.end(bytes, at, have)
+      while end >= 0 do
+        value(ctx, bytes, at, end)
+        at = end
+        end = Resp.end(bytes, at, have)
+      if at > 0 then
+        System.arraycopy(bytes, at, bytes, 0, have - at)
+        have -= at
+      after(ctx)
+    }
+  }
+
+  /** `length` bytes of `from`, in a buffer of the channel's allocator, for a write. */
+  private def copied(ctx: ChannelHandlerContext, from: Array[Byte], length: Int): ByteBuf =
+    ctx.alloc().buffer(length).writeBytes(from, 0, length)
+
+  /** The cache for one connection. `together`, every command that came together is answered in one buffer and one
+    * write; otherwise each is answered in a write of its own. Either way there is one flush.
+    */
+  private final class CacheServing(accepted: LinkedBlockingQueue[Channel], together: Boolean) extends Values {
+    private val cache = new CacheServer
+    private val responses = new Array[Byte](if together then LargestBatch else LargestValue)
+    private var written = 0
+    private var wrote = false
+
+    override def channelActive(ctx: ChannelHandlerContext): Unit = {
+      accepted.add(ctx.channel())
+      ctx.fireChannelActive()
+    }
+
+    protected def value(ctx: ChannelHandlerContext, in: Array[Byte], from: Int, end: Int): Unit =
+      if together then written = cache.handle(in, from, responses, written)
+      else
+        wrote = true
+        val _ = ctx.write(copied(ctx, responses, cache.handle(in, from, responses, 0)), ctx.voidPromise())
+
+    protected def after(ctx: ChannelHandlerContext): Unit =
+      if written > 0 then
+        val _ = ctx.writeAndFlush(copied(ctx, responses, written), ctx.voidPromise())
+        written = 0
+      else if wrote then
+        wrote = false
+        val _ = ctx.flush()
+  }
+
+  /** Answers that are the same bytes every time: written as duplicates, which share them. */
+  private def constant(text: String): ByteBuf = {
+    val bytes = Resp.bytes(text)
+    Unpooled.unreleasableBuffer(Unpooled.directBuffer(bytes.length).writeBytes(bytes))
+  }
+  private val Ok = constant("+OK\r\n")
+  private val NoValue = constant("$-1\r\n")
+  private val LineEnd = constant("\r\n")
+  private val Unknown = constant("-ERR unknown command\r\n")
+
+  /** The cache as `tcp-realistic-gather` keeps it: a value is a direct buffer of its own, and an answer is written as
+    * its parts, a line for its length, the value's own buffer (a duplicate, sharing its bytes) and a line's end. The
+    * parts of every answer that came together are flushed together, and the channel writes them with one gathering
+    * write.
+    */
+  private final class GatheringCacheServing(accepted: LinkedBlockingQueue[Channel]) extends Values {
+    private val values = new java.util.HashMap[String, ByteBuf]()
+    private val counts = new java.util.HashMap[String, Integer]()
+    private var wrote = false
+
+    override def channelActive(ctx: ChannelHandlerContext): Unit = {
+      accepted.add(ctx.channel())
+      ctx.fireChannelActive()
+    }
+
+    // A write still to be done holds its value itself.
+    override def handlerRemoved(ctx: ChannelHandlerContext): Unit = {
+      values.values().forEach(value => { val _ = value.release() })
+      values.clear()
+    }
+
+    /** `sign`, `number` in decimal and a line's end. */
+    private def line(ctx: ChannelHandlerContext, sign: Char, number: Int): ByteBuf = {
+      val buffer = ctx.alloc().buffer(16).writeByte(sign)
+      ByteBufUtil.writeAscii(buffer, Integer.toString(number))
+      buffer.writeByte('\r').writeByte('\n')
+    }
+
+    private def write(ctx: ChannelHandlerContext, part: ByteBuf): Unit = { val _ = ctx.write(part, ctx.voidPromise()) }
+
+    protected def value(ctx: ChannelHandlerContext, request: Array[Byte], from: Int, end: Int): Unit = {
+      wrote = true
+      val until = request.length
+      val parts = Resp.number(request, from + 1)
+      var next = Resp.lineEnd(request, from, until)
+      val nameLength = Resp.number(request, next + 1)
+      val name = Resp.lineEnd(request, next, until)
+      next = name + nameLength + 2
+      val keyLength = Resp.number(request, next + 1)
+      val keyAt = Resp.lineEnd(request, next, until)
+      val key = Resp.text(request, keyAt, keyLength)
+      next = keyAt + keyLength + 2
+      if nameLength == 3 && request(name) == 'S' && parts == 3 then
+        val length = Resp.number(request, next + 1)
+        val valueAt = Resp.lineEnd(request, next, until)
+        val before = values.put(key, ctx.alloc().directBuffer(length).writeBytes(request, valueAt, length))
+        if before != null then { val _ = before.release() }
+        write(ctx, Ok.duplicate())
+      else if nameLength == 3 && request(name) == 'G' then
+        val value = values.get(key)
+        if value == null then write(ctx, NoValue.duplicate())
+        else
+          write(ctx, line(ctx, '$', value.readableBytes()))
+          write(ctx, value.retainedDuplicate())
+          write(ctx, LineEnd.duplicate())
+      else if nameLength == 4 && request(name) == 'I' then
+        val held = counts.get(key)
+        val now = (if held == null then 0 else held.intValue) + 1
+        counts.put(key, now)
+        write(ctx, line(ctx, ':', now))
+      else write(ctx, Unknown.duplicate())
+    }
+
+    protected def after(ctx: ChannelHandlerContext): Unit =
+      if wrote then
+        wrote = false
+        val _ = ctx.flush()
+  }
+
+  /** The client `id`: sends its requests `batch` at once, in one write, checks their answers as they come, and sends
+    * the next when all of them have, until `rounds` requests are answered.
+    */
+  private final class CacheAsk(id: Int, rounds: Int, batch: Int, done: CountDownLatch) extends Values {
+    private val user = new CacheClient(id)
+    private val requests = new Array[Byte](batch * LargestValue)
+    private val answers = new Array[Array[Byte]](batch)
+    private var i = 0
+    private var sent = 0
+    private var checked = 0
+
+    private def send(ctx: ChannelHandlerContext): Unit = {
+      sent = math.min(batch, rounds - i)
+      checked = 0
+      var length = 0
+      var k = 0
+      while k < sent do
+        length = user.request(i + k, requests, length)
+        answers(k) = user.answer
+        k += 1
+      val _ = ctx.writeAndFlush(copied(ctx, requests, length), ctx.voidPromise())
+    }
+
+    override def userEventTriggered(ctx: ChannelHandlerContext, event: AnyRef): Unit =
+      if event eq Start then send(ctx) else ctx.fireUserEventTriggered(event)
+
+    protected def value(ctx: ChannelHandlerContext, in: Array[Byte], from: Int, end: Int): Unit = {
+      if checked == sent then throw new IllegalStateException(s"client $id was answered more often than it asked")
+      user.check(i + checked, answers(checked), in, from, end)
+      checked += 1
+    }
+
+    protected def after(ctx: ChannelHandlerContext): Unit =
+      if sent > 0 && checked == sent then
+        i += sent
+        sent = 0
+        if i == rounds then done.countDown() else send(ctx)
+  }
+
   // ---- setting up
 
   private var group: EventLoopGroup = null
@@ -230,6 +425,46 @@ object NettyBench {
     }
     close(pairs.flatMap((asking, echoing) => Seq(asking, echoing)) :+ listening)
   }
+
+  private def tcpRealistic(name: String, connections: Int, rounds: Int, batch: Int)(
+      serving: LinkedBlockingQueue[Channel] => ChannelHandler
+  ): Unit = {
+    val accepted = new LinkedBlockingQueue[Channel]()
+    val done = new CountDownLatch(connections)
+    val ids = new AtomicInteger()
+    val listening = server(initializer[Channel] { channel =>
+      val _ = channel.pipeline().addLast(serving(accepted))
+    }).bind(anyPort).sync().channel()
+    val connecting = client(initializer[Channel] { channel =>
+      val _ = channel.pipeline().addLast(new CacheAsk(ids.getAndIncrement(), rounds, batch, done))
+    })
+    val pairs = Seq.fill(connections) {
+      val connected = connecting.connect(address(listening)).sync().channel()
+      (connected, accepted.take())
+    }
+    timed(name, rounds.toLong * connections) {
+      pairs.foreach((asking, _) => start(asking))
+      done.await()
+    }
+    close(pairs.flatMap((asking, answering) => Seq(asking, answering)) :+ listening)
+  }
+
+  /** The work of `tcp-realistic` with nothing between the two sides. */
+  private def workRealistic(name: String, connections: Int, rounds: Int): Unit =
+    timed(name, rounds.toLong * connections) {
+      val request = new Array[Byte](LargestValue)
+      val response = new Array[Byte](LargestValue)
+      var id = 0
+      while id < connections do
+        val cache = new CacheServer
+        val user = new CacheClient(id)
+        var i = 0
+        while i < rounds do
+          val _ = user.request(i, request, 0)
+          user.check(i, user.answer, response, 0, cache.handle(request, 0, response, 0))
+          i += 1
+        id += 1
+    }
 
   private def tcpStream(chunks: Int): Unit = {
     val accepted = new LinkedBlockingQueue[Channel]()
@@ -307,7 +542,19 @@ object NettyBench {
   }
 
   private val allScenarios =
-    Seq("tcp-pingpong", "tcp-concurrent", "tcp-stream", "tcp-connect", "udp-pingpong", "udp-concurrent", "udp-connected")
+    Seq(
+      "tcp-pingpong",
+      "tcp-concurrent",
+      "tcp-stream",
+      "tcp-connect",
+      "udp-pingpong",
+      "udp-concurrent",
+      "udp-connected",
+      "tcp-realistic",
+      "tcp-realistic-bulk",
+      "tcp-realistic-gather",
+      "work-realistic"
+    )
 
   def main(args: Array[String]): Unit = {
     var workers = 1
@@ -339,6 +586,13 @@ object NettyBench {
           case "udp-pingpong"   => udpEcho("udp-pingpong", 1, n(100_000), connect = false)
           case "udp-concurrent" => udpEcho("udp-concurrent", connections, n(5_000), connect = false)
           case "udp-connected"  => udpEcho("udp-connected", 1, n(100_000), connect = true)
+          case "tcp-realistic" =>
+            tcpRealistic("tcp-realistic", connections, n(2_000), 1)(new CacheServing(_, together = false))
+          case "tcp-realistic-bulk" =>
+            tcpRealistic("tcp-realistic-bulk", connections, n(2_000), Batch)(new CacheServing(_, together = true))
+          case "tcp-realistic-gather" =>
+            tcpRealistic("tcp-realistic-gather", connections, n(2_000), Batch)(new GatheringCacheServing(_))
+          case "work-realistic" => workRealistic("work-realistic", connections, n(2_000))
           case _                => () // not one this stack does
         }
     finally

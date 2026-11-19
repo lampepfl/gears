@@ -9,4 +9,7 @@ object BenchPlatform {
   private val zone = Zone.open()
 
   def buffer(size: Int): ByteBuffer = zone.synchronized(PointerBuffer.wrap(alloc[Byte](size)(using zone), size))
+
+  /** A buffer for a program that reads and fills it by way of arrays: native memory here too. */
+  def arrayBuffer(size: Int): ByteBuffer = buffer(size)
 }

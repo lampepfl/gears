@@ -10,7 +10,7 @@ import scala.scalanative.runtime.Continuations
 
 /** What a suspension costs on Scala Native, layer by layer, on one thread: the runtime's own continuations at several
   * depths of stack, then a future's `await` on a source another future completes, then an op that waits (a timer of
-  * no time). Run by `BenchMain` given `suspend` as its first argument; `--rounds` is how many of each.
+  * no time), and ops that are done as they are tried (`enter`). Run by `BenchMain` given `suspend` as its first argument; `--rounds` is how many of each.
   */
 object SuspendBench {
 
@@ -97,10 +97,53 @@ object SuspendBench {
     val only = args.sliding(2).collectFirst { case Array("--only", what) => what }
     def chosen(what: String): Boolean = only.forall(_ == what)
     if chosen("runtime") then for _ <- 1 to 2 do for depth <- Seq(0, 8, 32, 128) do raw(depth, rounds)
-    if chosen("await") || chosen("op") then
+    if chosen("await") || chosen("op") || chosen("enter") then
       EventPollingBackend.runOn(1, shareable.Starvation.printWarning) { io ?=>
         for _ <- 1 to 2 do
           if chosen("await") then awaits(rounds)
+          if chosen("enter") then
+            // Ops that are done as they are tried: what entering and leaving one costs, with and without a call to
+            // the system, beside the call alone.
+            val in = Slot[io.ops.Readable]()
+            val out = Slot[io.ops.Writable]()
+            io.perform(io.ops.pipe(in, out))
+            val (readEnd, writeEnd) = (in.clear(), out.clear())
+            val nothing = BenchPlatform.buffer(1)
+            nothing.limit(0)
+            val writeNothing = io.ops.write(writeEnd, nothing)
+            var start = System.nanoTime()
+            var i = 0
+            while i < rounds do
+              io.perform(writeNothing)
+              i += 1
+            report("op, a write of nothing", rounds, System.nanoTime() - start)
+            val sent = BenchPlatform.buffer(1)
+            val got = BenchPlatform.buffer(1)
+            val write = io.ops.write(writeEnd, sent)
+            val read = io.ops.read(readEnd, got)
+            start = System.nanoTime()
+            i = 0
+            while i < rounds do
+              sent.clear()
+              io.perform(write)
+              got.clear()
+              io.perform(read)
+              i += 1
+            report("op, a byte written, a byte read", rounds * 2, System.nanoTime() - start)
+            // The same two calls with no op around them.
+            val fdOut = writeEnd.asInstanceOf[gears.async.io.posix.PosixKernelHandle].fd
+            val fdIn = readEnd.asInstanceOf[gears.async.io.posix.PosixKernelHandle].fd
+            start = System.nanoTime()
+            i = 0
+            while i < rounds do
+              sent.clear()
+              gears.async.io.posix.NonBlocking.write(fdOut, sent): Unit
+              got.clear()
+              gears.async.io.posix.NonBlocking.read(fdIn, got): Unit
+              i += 1
+            report("the two calls alone", rounds * 2, System.nanoTime() - start)
+            io.perform(io.ops.close(readEnd))
+            io.perform(io.ops.close(writeEnd))
           if chosen("op") then
             val timer = io.ops.timer(0)
             val start = System.nanoTime()

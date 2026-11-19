@@ -36,7 +36,8 @@ object Stacks {
   )
 
   private val usage =
-    """Stacks [--stacks kqueue,nio-pool,netty,nio,fs2,go,node,tokio] [--scenarios a,b] [--workers 1,4]
+    """Stacks [--stacks kqueue,nio-pool,nio-threads,gears-node,netty,loom,ox,kotlin,fs2-js,fs2-wasm,nio,fs2,go,node,tokio]
+      |       [--scenarios a,b] [--workers 1,4]
       |       [--scale 1] [--repeat 5] [--warmups 2] [--out io-bench/results/stacks-latest.md]""".stripMargin
 
   private def parse(args: List[String], options: Options): Options = args match
@@ -108,7 +109,22 @@ object Stacks {
       version: () => String
   )
 
+  /** For sbt, which is run as a JVM of its own (`--server`): as the thin client of a server already running, an IDE's
+    * say, it would build with that server's environment, and so with Scala Native's release, saying nothing.
+    */
   private val nightly = Map("SCALA_NATIVE_NIGHTLY" -> "1")
+
+  /** The Scala Native the bench is linked with, as the build resolves it: checked to be a nightly, since the release is
+    * what a build falls back to, saying nothing, when sbt is not given the environment that asks for one.
+    */
+  private def nativeVersion(root: File): String = {
+    val listed = checked(root, nightly, "sbt", "--server", "-batch", "-no-colors", "show ioCapBenchNative/libraryDependencies")
+    val version =
+      """org\.scala-native:nativelib:([^\s,:]+)""".r.findFirstMatchIn(listed).map(_.group(1)).getOrElse("unknown")
+    if !version.contains("SNAPSHOT") then
+      throw new IllegalStateException(s"The bench would be linked with Scala Native $version, not a nightly")
+    version
+  }
 
   /** The release binary sbt linked for the bench. */
   private def nativeBinary(root: File): File = {
@@ -170,25 +186,121 @@ object Stacks {
         "kqueue",
         "gears kqueue",
         threaded = true,
-        () => { checked(root, nightly, "sbt", "-batch", "-no-colors", "ioCapBenchNative/nativeLink"); () },
+        () => {
+          nativeVersion(root): Unit // checked before anything is linked
+          checked(root, nightly, "sbt", "--server", "-batch", "-no-colors", "ioCapBenchNative/nativeLink")
+          ()
+        },
         () => Seq(nativeBinary(root).getPath()),
         root,
         env = Map("SCALANATIVE_GC_TRAP_BASED_YIELDPOINTS" -> "0"),
-        version = () => "`EventPollingBackend`, Scala Native nightly, release build"
+        version = () => s"`EventPollingBackend`, Scala Native ${nativeVersion(root)}, release build"
       ),
       Stack(
         "nio-pool",
         "gears NIO pool",
         threaded = true,
-        () => { checked(root, nightly, "sbt", "-batch", "-no-colors", "ioCapBenchJVM/compile"); () },
+        () => { checked(root, nightly, "sbt", "--server", "-batch", "-no-colors", "ioCapBenchJVM/compile"); () },
         // sbt forks the bench with the flag the pool backend needs; its own JVM only waits meanwhile.
-        () => Seq("sbt", "-batch", "-no-colors"),
+        () => Seq("sbt", "--server", "-batch", "-no-colors"),
         root,
         env = nightly,
         extraArgs = Seq("--backend", "pool"),
         version = () => "`NioPoolBackend`, with `--add-opens java.base/java.lang=ALL-UNNAMED`"
       ),
+      Stack(
+        "nio-threads",
+        "gears NIO threads",
+        threaded = true,
+        () => { checked(root, nightly, "sbt", "--server", "-batch", "-no-colors", "ioCapBenchJVM/compile"); () },
+        () => Seq("sbt", "--server", "-batch", "-no-colors"),
+        root,
+        env = nightly,
+        extraArgs = Seq("--backend", "threads"),
+        version = () => "`NioBackend`, its futures on the JDK's virtual threads"
+      ), {
+        val linked = new File(root, "target/out/sjs1")
+        def main(): File =
+          Files
+            .walk(linked.toPath)
+            .iterator()
+            .asScala
+            .map(_.toFile)
+            .filter(file => file.getName() == "main.js" && file.getParentFile().getName() == "iocapbench-opt")
+            .maxByOption(_.lastModified())
+            .getOrElse(throw new RuntimeException(s"no linked bench under $linked"))
+        Stack(
+          "gears-node",
+          "gears on Node.js",
+          threaded = false,
+          () => { checked(root, nightly, "sbt", "--server", "-batch", "-no-colors", "ioCapBenchJS/fullLinkJS"); () },
+          () => Seq("node", main().getPath()),
+          root,
+          version = () => "`NodeBackend`, Scala.js on WebAssembly with JSPI, Node.js " + first(root, "node", "--version")
+        )
+      },
       scalaCli("netty", "Netty", threaded = true),
+      scalaCli("loom", "virtual threads", threaded = true),
+      scalaCli("ox", "Ox", threaded = true), {
+        val dir = new File(here, "kotlin")
+        Stack(
+          "kotlin",
+          "Kotlin coroutines",
+          threaded = true,
+          () => { checked(dir, Map.empty, "gradle", "-q", "installDist"); () },
+          () => Seq(new File(dir, "build/install/kotlin-bench/bin/kotlin-bench").getPath()),
+          root,
+          version = () => "ktor-network on kotlinx.coroutines (see `io-bench/stacks/kotlin`)"
+        )
+      }, {
+        // fs2-io for Scala.js, packaged by scala-cli into the stack's own build directory, to JavaScript and to Wasm.
+        val dir = new File(here, "fs2-js")
+        def fs2Js(name: String, label: String, wasm: Boolean): Stack = {
+          val out = new File(dir, s".scala-build/bench-$name")
+          val target = if wasm then out else new File(out, "main.mjs")
+          Stack(
+            name,
+            label,
+            threaded = false,
+            () => {
+              out.mkdirs()
+              val emit = if wasm then Seq("--js-emit-wasm") else Nil
+              checked(
+                root,
+                Map.empty,
+                (Seq("scala-cli", "--power", "package", dir.getPath(), "--js-mode", "release") ++ emit ++
+                  Seq("-o", target.getPath(), "--force"))*
+              )
+              ()
+            },
+            () => Seq("node", (if wasm then new File(out, "main.js") else target).getPath()),
+            root,
+            version = () => deps(dir) + (if wasm then ", built to WebAssembly" else ", built to JavaScript")
+          )
+        }
+        fs2Js("fs2-js", "fs2-io, Scala.js", wasm = false)
+      }, {
+        val dir = new File(here, "fs2-js")
+        val out = new File(dir, ".scala-build/bench-fs2-wasm")
+        Stack(
+          "fs2-wasm",
+          "fs2-io, Scala.js on Wasm",
+          threaded = false,
+          () => {
+            out.mkdirs()
+            checked(
+              root,
+              Map.empty,
+              "scala-cli", "--power", "package", dir.getPath(), "--js-mode", "release", "--js-emit-wasm", "-o",
+              out.getPath(), "--force"
+            )
+            ()
+          },
+          () => Seq("node", new File(out, "main.js").getPath()),
+          root,
+          version = () => deps(dir) + ", built to WebAssembly"
+        )
+      },
       scalaCli("nio", "JDK selector", threaded = false),
       scalaCli("fs2", "fs2-io", threaded = true), {
         val dir = new File(here, "go")
@@ -229,6 +341,9 @@ object Stacks {
 
   // ---- running
 
+  /** The gears backends on the JVM, which sbt runs, forked with the flags the bench needs. */
+  private val viaSbtRun = Set("nio-pool", "nio-threads")
+
   private val line = """bench:\s+(\S+)\s+\d+ ops\s+[\d.]+ s\s+([\d.]+) us/op""".r
 
   private def figures(output: String): Seq[(String, Double)] =
@@ -254,7 +369,7 @@ object Stacks {
       options.repeat.toString
     )
     val command =
-      if stack.name == "nio-pool" then stack.command() :+ s"ioCapBenchJVM/run ${args.mkString(" ")}"
+      if viaSbtRun(stack.name) then stack.command() :+ s"ioCapBenchJVM/run ${args.mkString(" ")}"
       else stack.command() ++ args
     val (code, output) = exec(stack.dir, stack.env, command*)
     if code != 0 then System.err.println(s"${stack.label} on $workers ended with $code:\n${output.linesIterator.toSeq.takeRight(15).mkString("\n")}")
@@ -280,7 +395,7 @@ object Stacks {
     val commit = checked(root, Map.empty, "git", "rev-parse", "--short", "HEAD").trim
     val dirty = checked(root, Map.empty, "git", "status", "--porcelain", "--untracked-files=no").trim.nonEmpty
     // sbt's server may be running without the nightly plugin: it is started afresh, and stopped at the end.
-    val usesSbt = chosen.exists(stack => stack.name == "kqueue" || stack.name == "nio-pool")
+    val usesSbt = chosen.exists(stack => stack.name == "kqueue" || stack.name == "gears-node" || viaSbtRun(stack.name))
     if usesSbt then stopSbt(root)
     val report = new StringBuilder
     try {

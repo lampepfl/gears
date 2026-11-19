@@ -8,6 +8,25 @@ scalaVersion := "3.9.0"
 ThisBuild / resolvers ++= (if (sys.env.get("SCALA_NATIVE_NIGHTLY").contains("1")) Seq(Resolver.sonatypeCentralSnapshots)
                            else Nil)
 
+// Which Scala Native the build uses is decided as its plugins load (project/plugins.sbt), from the environment of the
+// JVM that loads them. `sbt` by default is a thin client of a server already running for the directory, an IDE's as
+// likely as not, started without SCALA_NATIVE_NIGHTLY: the variable is then the client's alone, the build goes on with
+// the release, and nothing says so. `sbt --server` is a JVM of its own, with the caller's environment. So it is checked
+// here, where the two can be told apart, and again where it matters (`ioCapBench`'s `nativeLink`).
+Global / onLoad := {
+  val before = (Global / onLoad).value
+  (state: State) => {
+    val asked = sys.env.get("SCALA_NATIVE_NIGHTLY").contains("1")
+    val nightly = scala.scalanative.nir.Versions.current.contains("SNAPSHOT")
+    if (asked != nightly)
+      sys.error(
+        s"SCALA_NATIVE_NIGHTLY is ${if (asked) "set" else "not set"}, but the build was made with Scala Native " +
+          s"${scala.scalanative.nir.Versions.current}: run `sbt --server`, a JVM with this environment."
+      )
+    before(state)
+  }
+}
+
 LocalRootProject / publish / skip := true
 
 val MUnitFramework = new TestFramework("munit.Framework")
@@ -225,19 +244,33 @@ lazy val ioPollerDemos =
 // (`ioCapBenchJVM/run`) and the native one (`ioCapBenchNative/nativeLink`), and by `io-bench/compare` over another branch's too.
 // A release build for Scala Native needs `SCALA_NATIVE_NIGHTLY=1` (see project/plugins.sbt).
 lazy val ioCapBench =
-  crossProject(JVMPlatform, NativePlatform)
+  crossProject(JSPlatform, JVMPlatform, NativePlatform)
     .crossType(CrossType.Full)
     .in(file("io-bench"))
     .settings(
       publish / skip := true,
-      scalacOptions += "-release:21",
       Compile / mainClass := Some("gears.async.io.bench.BenchMain")
     )
+    // Linked with `ioCapBenchJS/fullLinkJS` and run as `node --stack-size=204800 <linked>/main.js <arguments>`.
+    .jsSettings(jsWasmSettings)
+    .jsSettings(scalaJSUseMainModuleInitializer := true)
     .jvmSettings(
+      scalacOptions += "-release:21",
       run / fork := true,
       run / javaOptions ++= Seq("-Xms1g", "-Xmx1g", "--add-opens=java.base/java.lang=ALL-UNNAMED")
     )
     .nativeSettings(
-      nativeConfig ~= { _.withMultithreading(true).withMode(scala.scalanative.build.Mode.releaseFast) }
+      scalacOptions += "-release:21",
+      nativeConfig ~= { _.withMultithreading(true).withMode(scala.scalanative.build.Mode.releaseFast) },
+      // A release build with threads crashes now and then on Scala Native's release (0.5.12): never linked with it,
+      // whatever environment this JVM was started in.
+      Compile / nativeLink := Def.uncached {
+        if (!scala.scalanative.nir.Versions.current.contains("SNAPSHOT"))
+          sys.error(
+            s"The bench is linked with a Scala Native nightly, not ${scala.scalanative.nir.Versions.current}: " +
+              "run `SCALA_NATIVE_NIGHTLY=1 sbt --server ioCapBenchNative/nativeLink`, not through a server that is running."
+          )
+        (Compile / nativeLink).value
+      }
     )
     .dependsOn(ioPoller)

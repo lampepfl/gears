@@ -85,7 +85,7 @@ object Compare {
     output
   }
 
-  private def sbt(dir: File, command: String): String = checked(dir, nightly, "sbt", "-batch", "-no-colors", command)
+  private def sbt(dir: File, command: String): String = checked(dir, nightly, "sbt", "--server", "-batch", "-no-colors", command)
 
   private def git(dir: File, args: String*): String = checked(dir, Map.empty, ("git" +: args)*).trim
 
@@ -112,6 +112,17 @@ object Compare {
     git(root, "worktree", "add", "--detach", dir.getPath(), options.other)
     val bench = root.toPath.resolve("io-bench")
     for part <- Seq("shared", "jvm", "native") do copyTree(bench.resolve(part), dir.toPath.resolve("io-bench").resolve(part))
+    // The micro-benchmark of suspension is this branch's backend's own, by name: not the other's to build.
+    Files.deleteIfExists(dir.toPath.resolve("io-bench/native/src/main/scala/gears/async/io/bench/SuspendBench.scala")): Unit
+    // What this branch's bench shares between the JVM and Scala Native alone is, for a build of those two, shared.
+    copyTree(bench.resolve("jvm-native"), dir.toPath.resolve("io-bench").resolve("shared"))
+    // The same Scala Native nightly on both sides: the other branch's build is told this one's.
+    val nightlyVersion = """0\.5\.\d+-\d+-[0-9a-f]+-SNAPSHOT""".r
+    val plugins = "project/plugins.sbt"
+    nightlyVersion.findFirstIn(Files.readString(root.toPath.resolve(plugins))).foreach { ours =>
+      val theirs = dir.toPath.resolve(plugins)
+      Files.writeString(theirs, nightlyVersion.replaceAllIn(Files.readString(theirs), ours))
+    }
     val main = "src/main/scala/gears/async/io/bench/BenchMain.scala"
     for platform <- Seq("jvm", "native") do
       Files.copy(
@@ -122,6 +133,17 @@ object Compare {
     val build = dir.toPath.resolve("build.sbt")
     Files.writeString(build, Files.readString(build) + Files.readString(bench.resolve("other/build.sbt")))
     Side(options.other, dir, git(dir, "rev-parse", "--short", "HEAD"))
+  }
+
+  /** The Scala Native a side's bench is linked with, as its build resolves it: checked to be a nightly, since the
+    * release is what a build falls back to, saying nothing, when sbt is not given the environment that asks for one.
+    */
+  private def nativeVersion(side: Side): String = {
+    val listed = sbt(side.dir, "show ioCapBenchNative/libraryDependencies")
+    val version = """org\.scala-native:nativelib:([^\s,:]+)""".r.findFirstMatchIn(listed).map(_.group(1)).getOrElse("unknown")
+    if !version.contains("SNAPSHOT") then
+      throw new IllegalStateException(s"${side.dir}: the bench would be linked with Scala Native $version, not a nightly")
+    version
   }
 
   // ---- running
@@ -146,7 +168,7 @@ object Compare {
   /** One JVM that repeats the scenarios: the median of each one's figures after the warm-up. */
   private def runJvm(config: Config, options: Options): Map[String, Double] = {
     val args = benchArgs(config, options.jvmScale, options.jvmRepeats, options).mkString(" ")
-    val (_, output) = exec(config.side.dir, nightly, "sbt", "-batch", "-no-colors", s"ioCapBenchJVM/run $args")
+    val (_, output) = exec(config.side.dir, nightly, "sbt", "--server", "-batch", "-no-colors", s"ioCapBenchJVM/run $args")
     figures(output).groupMap(_._1)(_._2).view.mapValues(all => median(all.drop(options.jvmWarmups))).toMap
   }
 
@@ -226,7 +248,7 @@ object Compare {
           val figures = runJvm(config, options)
           config -> figures
         }.toMap
-        val names = figures(exec(here.dir, nightly, "sbt", "-batch", "-no-colors", "ioCapBenchJVM/run --scale 0.001")._2).map(_._1)
+        val names = figures(exec(here.dir, nightly, "sbt", "--server", "-batch", "-no-colors", "ioCapBenchJVM/run --scale 0.001")._2).map(_._1)
         names.foreach(order += _)
         report ++= s"\n## JVM\n\n${first(root, "java", "-version")}. `threads` is `NioBackend` on four selector workers and "
         report ++= "`pool` is `NioPoolBackend`, with the number of workers; `caller` is the other branch's `NioOnCaller` "
@@ -238,6 +260,7 @@ object Compare {
 
       if options.platforms.contains("native") then {
         println("native: building")
+        val versions = sides.map(nativeVersion).distinct
         sides.foreach(side => sbt(side.dir, "ioCapBenchNative/nativeLink"))
         val binaries = sides.map(side => side -> nativeBinary(side)).toMap
         val configs = options.workers.flatMap { workers =>
@@ -248,7 +271,8 @@ object Compare {
           config -> runNative(config, binaries(config.side), options)
         }.toMap
         val names = figures(exec(here.dir, Map.empty, binaries(here).getPath(), "--scale", "0.001")._2).map(_._1)
-        report ++= "\n## Scala Native, kqueue\n\nRelease builds on the Scala Native nightly, with the number of workers. "
+        report ++= s"\n## Scala Native, kqueue\n\nRelease builds on Scala Native ${versions.mkString(" and ")}, as each build "
+        report ++= "resolved it, with the number of workers. "
         report ++= s"Each configuration is run ${options.nativeRounds} times at scale ${options.nativeScale}: the median.\n\n"
         report ++= table(configs, results, names) + "\n"
       }

@@ -5,6 +5,11 @@
 - machine: Apple M3 Max, Darwin 27.2.0
 - date: 2026-11-18
 
+> **Scala Native's version was not checked for these figures.** They were meant to be of a nightly, but the build may
+> have been linked with the release, 0.5.12, which sbt falls back to when it is not given the environment that asks for
+> one (see `2026-11-19-realistic-stacks.md`, at its end). The kqueue figures are superseded by
+> `2026-11-19-kqueue-nightly.md` and `2026-11-19-stacks-nightly.md`, which name the version they were linked with.
+
 Microseconds per op, lower is better. Scala Native only: the changes since `2026-11-18-after-tuning.md` are to how a pool's workers share tasks, which the JVM backends were not measured for again.
 
 Release builds on the Scala Native nightly, with the number of workers. The two binaries were run in turn, not through `Compare`, each configuration 5 times at scale 1.0: the median.

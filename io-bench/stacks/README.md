@@ -10,6 +10,10 @@ meant to be used, so that the gears backends can be set beside them.
 | `fs2/` | fs2-io on Cats Effect |
 | `go/` | Go, goroutines over `net` |
 | `node/` | Node.js, `net` and `dgram` |
+| `loom/` | the JDK's virtual threads and blocking channels, by hand: the TCP scenarios and the realistic ones |
+| `ox/` | Ox, over the same blocking code as `loom/` |
+| `kotlin/` | Kotlin coroutines on the JVM, with ktor-network's sockets: the TCP scenarios and the realistic ones |
+| `fs2-js/` | fs2-io on Cats Effect for Scala.js, over Node.js, built to JavaScript and to WebAssembly: the realistic scenarios and `tcp-concurrent` |
 | `tokio/` | Tokio on Rust |
 
 `run/` has `Stacks`, which builds and runs them all with the gears backends and writes the table (see below).
@@ -32,6 +36,30 @@ work. `n(x)` is `max(1, floor(x * scale))`.
 | `udp-pingpong` | `n(100000)` | Two sockets, each bound to its own port, not connected. The client sends a message to the server's address and receives one, `ops` times over; the server receives a message and sends it to the client's address, as often. |
 | `udp-concurrent` | `n(5000) * connections` | As `udp-pingpong`, over `connections` pairs of sockets at once, each doing `n(5000)` rounds. |
 | `udp-connected` | `n(100000)` | As `udp-pingpong`, with each socket connected to the other, sending and receiving with no address. |
+| `tcp-realistic` | `n(2000) * connections` | A session cache that speaks Redis's protocol (RESP), and its clients, over `connections` connections made beforehand, each doing `n(2000)` requests, one answered before the next is sent. See below. |
+| `tcp-realistic-bulk` | `n(2000) * connections` | As `tcp-realistic`, the client sending its requests 16 at once, as one that pipelines does, and checking their answers as they come; the server answers every request that came together, in one write. A wait for each read there is, not for each request. |
+| `tcp-realistic-gather` | `n(2000) * connections` | As `tcp-realistic-bulk`, the server keeping each value as a buffer of its own and answering with a gathering write: a line for the value's length, the value's own buffer, a line's end, for every request that came together, in one write, with no copy of a value into an answer. In Node.js, the parts written between `cork` and `uncork`. The client is `tcp-realistic-bulk`'s. |
+| `work-realistic` | `n(2000) * connections` | The work of `tcp-realistic` with no connection between the two sides: each request written into an array, answered into another, and the answer checked. What the scenario costs beside its I/O. |
+
+## The realistic scenario
+
+`tcp-realistic` is a program of the kind these stacks are used for: a cache that speaks Redis's protocol, holding
+sessions, and clients that keep sessions in it, read them back and count requests. Only Node.js and the gears
+backends had it first; every stack here has it now.
+
+- **The protocol** is RESP as Redis clients send it: a command is an array of bulk strings
+  (`*3\r\n$3\r\nSET\r\n$<n>\r\n<key>\r\n$<n>\r\n<value>\r\n`), and an answer is a status (`+OK`), a bulk string, nothing
+  (`$-1`) or an integer (`:<n>`). Both sides find where a value ends in whatever bytes have come, however many reads
+  they came in, and both write and read the protocol by hand, with no library.
+- **The server** has a table for each connection, from key to bytes, and answers `SET`, `GET` and `INCR`. It keeps a
+  copy of what it is given, and a count as its digits, as Redis does.
+- **The client** of connection `c` sends request `i` of its `n(2000)`: if `i % 5 == 0`, `SET session:<c>:<i*7 % 50>` to a
+  session, a JSON document of about 500 bytes (a user, a token, an expiry, a cart of eight items) built for that
+  request; if `i % 5 == 3`, `INCR hits:<c>`; otherwise `GET` of the session at that key. It knows what each answer
+  must be, the document it last set there or nothing, the count so far, and fails the scenario if an answer differs.
+
+The two programs do the same work in the same steps, each in its own language. `work-realistic` is that work alone. In
+`tcp-realistic-bulk` what is left is the work and the bytes: a sixteenth of the reads and writes for each request.
 
 ## The command line
 
@@ -39,7 +67,7 @@ Every implementation takes the same arguments, each optional, in any order:
 
 ```
 --workers <n>       threads the stack runs its tasks on (default 1); ignored where the stack has one thread
---scenarios a,b,c   which to run, in the order given (default: all seven, in the order above)
+--scenarios a,b,c   which to run, in the order given (default: all of them, in the order above)
 --scale <x>         multiplies every count (default 1.0)
 --connections <n>   pairs in the concurrent scenarios (default 64)
 --repeat <n>        runs the scenarios that many times over, in one process (default 1)

@@ -1,0 +1,55 @@
+server,mode,test,requests per second,p50 ms,p95 ms,p99 ms
+Redis,single,SET,194174.77,0.175,0.191,0.287
+Redis,single,GET,189214.75,0.175,0.199,0.415
+Redis,single,INCR,190476.20,0.175,0.255,0.487
+Redis,pipelined,SET,1631321.38,0.527,0.695,0.727
+Redis,pipelined,GET,2081165.38,0.383,0.583,0.631
+Redis,pipelined,INCR,2083333.38,0.407,0.559,0.591
+plain Node.js,single,SET,193423.59,0.295,0.583,0.623
+plain Node.js,single,GET,190294.95,0.303,0.583,0.639
+plain Node.js,single,INCR,187441.42,0.303,0.583,0.655
+plain Node.js,pipelined,SET,1506024.12,0.655,0.743,1.327
+plain Node.js,pipelined,GET,1707941.88,0.567,0.759,1.151
+plain Node.js,pipelined,INCR,1661129.62,0.591,0.775,1.183
+gears on Node.js,single,SET,90171.33,0.687,0.807,1.367
+gears on Node.js,single,GET,112296.46,0.551,0.615,1.111
+gears on Node.js,single,INCR,112803.16,0.543,0.655,1.103
+gears on Node.js,pipelined,SET,261745.86,3.871,4.023,7.711
+gears on Node.js,pipelined,GET,567215.00,1.727,2.247,3.415
+gears on Node.js,pipelined,INCR,650406.50,1.527,1.807,3.031
+gears kqueue on 1,single,SET,199600.80,0.167,0.215,0.511
+gears kqueue on 1,single,GET,203045.69,0.167,0.191,0.327
+gears kqueue on 1,single,INCR,201409.88,0.175,0.263,0.519
+gears kqueue on 1,pipelined,SET,1600000.00,0.631,0.671,0.887
+gears kqueue on 1,pipelined,GET,1420454.50,0.719,0.751,0.959
+gears kqueue on 1,pipelined,INCR,892458.75,1.127,1.327,1.423
+gears kqueue on 4,single,SET,191387.56,0.175,0.223,0.335
+gears kqueue on 4,single,GET,178253.12,0.183,0.231,0.343
+gears kqueue on 4,single,INCR,167926.11,0.191,0.335,0.407
+gears kqueue on 4,pipelined,SET,2306805.00,0.263,0.567,0.927
+gears kqueue on 4,pipelined,GET,2008032.12,0.263,0.367,0.463
+gears kqueue on 4,pipelined,INCR,1813236.50,0.343,0.999,1.191
+gears NIO pool on 1,single,SET,188323.91,0.167,0.343,0.559
+gears NIO pool on 1,single,GET,193050.19,0.167,0.271,0.519
+gears NIO pool on 1,single,INCR,199600.80,0.167,0.191,0.503
+gears NIO pool on 1,pipelined,SET,2341920.50,0.327,0.487,0.623
+gears NIO pool on 1,pipelined,GET,2181025.00,0.247,0.287,0.399
+gears NIO pool on 1,pipelined,INCR,2400960.25,0.399,0.455,0.655
+gears NIO threads on 1,single,SET,113314.45,0.359,0.559,0.935
+gears NIO threads on 1,single,GET,116550.12,0.359,0.567,0.927
+gears NIO threads on 1,single,INCR,116414.43,0.351,0.535,0.919
+gears NIO threads on 1,pipelined,SET,1633987.00,0.327,0.399,0.479
+gears NIO threads on 1,pipelined,GET,1532567.12,0.343,0.423,0.471
+gears NIO threads on 1,pipelined,INCR,1801801.75,0.327,0.383,0.423
+gears NIO pool on 4,single,SET,168918.92,0.199,0.295,0.359
+gears NIO pool on 4,single,GET,162999.19,0.199,0.327,0.359
+gears NIO pool on 4,single,INCR,174216.03,0.191,0.239,0.335
+gears NIO pool on 4,pipelined,SET,2176278.50,0.239,0.327,0.383
+gears NIO pool on 4,pipelined,GET,1974333.62,0.263,0.351,0.407
+gears NIO pool on 4,pipelined,INCR,2403846.00,0.215,0.335,0.391
+gears NIO threads on 4,single,SET,112930.55,0.327,0.367,0.383
+gears NIO threads on 4,single,GET,113960.12,0.335,0.367,0.407
+gears NIO threads on 4,single,INCR,115273.77,0.327,0.367,0.399
+gears NIO threads on 4,pipelined,SET,1672240.88,0.327,0.391,0.431
+gears NIO threads on 4,pipelined,GET,1597444.12,0.327,0.415,0.447
+gears NIO threads on 4,pipelined,INCR,1757469.25,0.327,0.375,0.423

@@ -5,6 +5,11 @@
 - machine: Apple M3 Max, Darwin 27.2.0
 - date: 2026-11-18
 
+> **Scala Native's version was not checked for these figures.** They were meant to be of a nightly, but the build may
+> have been linked with the release, 0.5.12, which sbt falls back to when it is not given the environment that asks for
+> one (see `2026-11-19-realistic-stacks.md`, at its end). The kqueue figures are superseded by
+> `2026-11-19-kqueue-nightly.md` and `2026-11-19-stacks-nightly.md`, which name the version they were linked with.
+
 Microseconds per op, lower is better. A dash is a scenario the backend has no capability for.
 
 ## JVM

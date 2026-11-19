@@ -6,7 +6,7 @@ addSbtPlugin("org.portable-scala" % "sbt-scala-native-crossproject" % "1.4.0")
 val scalaNativeNightly = sys.env.get("SCALA_NATIVE_NIGHTLY").contains("1")
 resolvers ++= (if (scalaNativeNightly) Seq(Resolver.sonatypeCentralSnapshots) else Nil)
 addSbtPlugin(
-  "org.scala-native" % "sbt-scala-native" % (if (scalaNativeNightly) "0.5.13-20261015-c3918a9-SNAPSHOT" else "0.5.12")
+  "org.scala-native" % "sbt-scala-native" % (if (scalaNativeNightly) "0.5.13-20261114-143517b-SNAPSHOT" else "0.5.12")
 )
 addSbtPlugin("org.scala-js" % "sbt-scalajs" % "1.23.0")
 addSbtPlugin("org.scalameta" % "sbt-scalafmt" % "2.6.2")

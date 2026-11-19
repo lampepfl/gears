@@ -11,3 +11,7 @@ scala-cli run io-bench/stacks/fs2 -- --workers 4
 ```
 
 All seven scenarios are run; `udp-connected` uses `DatagramSocket.connect`.
+
+The realistic scenarios are those of `../fs2-js`, the same code: `Cache.scala` is the session cache, its client and
+the protocol, the same source as `CapBench`'s, copied. fs2 has no gathering write, so `tcp-realistic-gather` puts an
+answer's chunks together (`++`) and writes that.
