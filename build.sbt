@@ -123,61 +123,36 @@ lazy val ioReferenceDemos =
     )
     .dependsOn(ioReference, ioTestkit.jvm)
 
-// What the backends that run on a pool of workers share (`gears.async.io.shareable`): the workers, their timers and
-// inboxes, handles and the ops that wait on them, with nothing of a platform's own. A backend adds its poller, its
-// handles and what its ops call.
-lazy val ioShareable =
+// The backends that run a program on a pool of workers, each with a poller of its platform's (`io-poller`): on the
+// JVM the JDK's channels over selectors (`gears.async.io.nio`), and on Scala Native the system's own event queue
+// (`gears.async.io.eventpolling`), kqueue on macOS and FreeBSD and epoll on Linux. What the two share is
+// `gears.async.io.shareable`: the workers, their timers and inboxes, handles and the ops that wait on them, with
+// nothing of a platform's own. The native side's resources override
+// `setjmp` and `longjmp` in every program that links it with `_setjmp` and `_longjmp`, which leave the signal mask
+// alone (see setjmp_override.S).
+lazy val ioPoller =
   crossProject(JVMPlatform, NativePlatform)
-    .crossType(CrossType.Pure)
-    .in(file("io-shareable"))
+    .crossType(CrossType.Full)
+    .in(file("io-poller"))
     .settings(
-      name := "gears-io-shareable",
-      publish / skip := false,
-      versionScheme := Some("early-semver"),
-      scalacOptions += "-release:21"
-    )
-    .nativeSettings(nativeConfig ~= { _.withMultithreading(true) })
-    .dependsOn(root)
-
-// The JVM backend: the JDK's channels over selectors, on the pool of workers the kqueue backend runs on.
-lazy val ioNio =
-  (project in file("io-nio"))
-    .settings(
-      name := "gears-io-nio",
+      name := "gears-io-poller",
       publish / skip := false,
       versionScheme := Some("early-semver"),
       scalacOptions += "-release:21",
       libraryDependencies += munit % Test,
-      testFrameworks += MUnitFramework,
+      testFrameworks += MUnitFramework
+    )
+    .jvmSettings(
       Test / fork := true,
       // For `NioPoolBackend`, whose pool carries the virtual threads.
       Test / javaOptions += "--add-opens=java.base/java.lang=ALL-UNNAMED"
     )
-    .dependsOn(root.jvm, ioShareable.jvm, ioTestkit.jvm % Test)
-
-// The JVM backends' demo application: the testkit's gears demos over them, as `ioNioDemos/run <command>`.
-lazy val ioNioDemos =
-  (project in file("io-nio/demos"))
-    .settings(
-      publish / skip := true,
-      scalacOptions += "-release:21",
-      Compile / mainClass := Some("niodemos.NioDemos"),
-      run / fork := true,
-      // For `--backend nio-pool`.
-      run / javaOptions += "--add-opens=java.base/java.lang=ALL-UNNAMED"
-    )
-    .dependsOn(ioNio, ioTestkit.jvm)
-
-// A high performance native backend for macOS and FreeBSD. Its native resources override `setjmp` and `longjmp` in
-// every program that links it with `_setjmp` and `_longjmp`, which leave the signal mask alone (see setjmp_override.S).
-lazy val ioKqueue =
-  (project in file("io-kqueue"))
-    .enablePlugins(ScalaNativePlugin)
-    .settings(
-      publish / skip := false,
-      scalacOptions += "-release:21",
-      libraryDependencies += munit % Test,
-      testFrameworks += MUnitFramework,
+    .nativeSettings(
+      // The tests of one poller's own, which name it and so link its system calls: only on a system that has them.
+      Test / unmanagedSourceDirectories += {
+        val linux = sys.props.getOrElse("os.name", "").toLowerCase.contains("linux")
+        (Test / sourceDirectory).value / (if (linux) "scala-epoll" else "scala-kqueue")
+      },
       Test / fork := false,
       Test / logBuffered := false,
       Test / logLevel := Level.Info,
@@ -211,22 +186,29 @@ lazy val ioKqueue =
         }
       }
     )
-    .dependsOn(root.native, ioShareable.native, ioTestkit.native % Test)
+    .dependsOn(root, ioTestkit % Test)
 
-// The kqueue backend's demo application: the testkit's gears demos over it, as `ioKqueueDemos/run <command>`.
-lazy val ioKqueueDemos =
-  (project in file("io-kqueue/demos"))
-    .enablePlugins(ScalaNativePlugin)
+// The backends' demo applications: the testkit's gears demos over them, as `ioPollerDemosJVM/run <command>` and
+// `ioPollerDemosNative/run <command>`.
+lazy val ioPollerDemos =
+  crossProject(JVMPlatform, NativePlatform)
+    .crossType(CrossType.Full)
+    .in(file("io-poller/demos"))
     .settings(
       publish / skip := true,
       scalacOptions += "-release:21",
-      Compile / mainClass := Some("referencedemos.KqueueDemos"),
       run / fork := true
     )
-    .dependsOn(ioKqueue, ioTestkit.native)
+    .jvmSettings(
+      Compile / mainClass := Some("niodemos.NioDemos"),
+      // For `--backend nio-pool`.
+      run / javaOptions += "--add-opens=java.base/java.lang=ALL-UNNAMED"
+    )
+    .nativeSettings(Compile / mainClass := Some("referencedemos.EventPollingDemos"))
+    .dependsOn(ioPoller, ioTestkit)
 
 // The bench: scenarios over every capability (`io-bench/shared`), run over this branch's backends, the JVM's
-// (`ioCapBenchJVM/run`) and kqueue (`ioCapBenchNative/nativeLink`), and by `io-bench/compare` over another branch's too.
+// (`ioCapBenchJVM/run`) and the native one (`ioCapBenchNative/nativeLink`), and by `io-bench/compare` over another branch's too.
 // A release build for Scala Native needs `SCALA_NATIVE_NIGHTLY=1` (see project/plugins.sbt).
 lazy val ioCapBench =
   crossProject(JVMPlatform, NativePlatform)
@@ -244,5 +226,4 @@ lazy val ioCapBench =
     .nativeSettings(
       nativeConfig ~= { _.withMultithreading(true).withMode(scala.scalanative.build.Mode.releaseFast) }
     )
-    .jvmConfigure(_.dependsOn(ioNio))
-    .nativeConfigure(_.dependsOn(ioKqueue))
+    .dependsOn(ioPoller)

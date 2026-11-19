@@ -1,5 +1,5 @@
 package gears.async.io
-package kqueue
+package eventpolling
 
 import gears.async.io.shareable.MonitorPoller
 import gears.async.io.shareable.TimerHeap

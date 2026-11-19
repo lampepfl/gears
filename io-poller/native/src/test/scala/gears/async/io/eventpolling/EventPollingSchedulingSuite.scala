@@ -1,5 +1,5 @@
 package gears.async.io
-package kqueue
+package eventpolling
 
 import gears.async.Async
 import gears.async.AsyncOperations
@@ -16,7 +16,7 @@ import scala.util.Success
 /** What a resume may rely on: it happens promptly, but only once the listener resuming it has returned, as sources
   * complete their listeners while holding locks and partway through changing their state.
   */
-class KqueueSchedulingSuite extends munit.FunSuite {
+class EventPollingSchedulingSuite extends munit.FunSuite {
   override def munitTimeout: Duration = 60.seconds
 
   private def spin(nanos: Long): Unit = {
@@ -26,9 +26,9 @@ class KqueueSchedulingSuite extends munit.FunSuite {
 
   /** `Io.run` on a pool of the given size. */
   private def onPool[T](workers: Int, onStarvation: shareable.Starvation.Handler = shareable.Starvation.printWarning)(
-      program: Io[KqueueOps.type] ?=> Async.Spawn ?=> T
+      program: Io[EventPollingOps.type] ?=> Async.Spawn ?=> T
   ): T = {
-    val pool = KqueueScheduler(workers, onStarvation)
+    val pool = EventPollingScheduler(workers, onStarvation)
     given poolSupport: (AsyncSupport { type Scheduler = pool.Scheduler }) = pool
     given poolScheduler: pool.Scheduler = pool
     try Async.blocking(Future(program(using pool)).await)
@@ -139,7 +139,7 @@ class KqueueSchedulingSuite extends munit.FunSuite {
     val previous = Thread.getDefaultUncaughtExceptionHandler()
     Thread.setDefaultUncaughtExceptionHandler((_, _) => ()) // reported there too, which is not what is tested here
     try {
-      given KqueueBackend.type = KqueueBackend
+      given EventPollingBackend.type = EventPollingBackend
       val fatal = new LinkageError("expected: a task throwing a fatal error")
       @volatile var unwound = false
       val thrown =
@@ -160,7 +160,7 @@ class KqueueSchedulingSuite extends munit.FunSuite {
     val previous = Thread.getDefaultUncaughtExceptionHandler()
     Thread.setDefaultUncaughtExceptionHandler((_, _) => ())
     try {
-      given KqueueBackend.type = KqueueBackend
+      given EventPollingBackend.type = EventPollingBackend
       val result = Io.run { io ?=>
         summon[Async].scheduler.execute(() => throw new RuntimeException("expected: a throwing task"))
         io.perform(io.ops.timer(20.millis))
@@ -225,12 +225,12 @@ class KqueueSchedulingSuite extends munit.FunSuite {
   }
 
   test("a negative timer is refused") {
-    intercept[IllegalArgumentException](KqueueOps.timer((-1).milli))
+    intercept[IllegalArgumentException](EventPollingOps.timer((-1).milli))
   }
 
   test("every task a pool accepts as it shuts down is run") {
     for _ <- 1 to 300 do {
-      val pool = KqueueScheduler(2)
+      val pool = EventPollingScheduler(2)
       val ran = AtomicInteger(0)
       val accepted = AtomicInteger(0)
       val submitter = new Thread(() =>
@@ -432,8 +432,8 @@ class KqueueSchedulingSuite extends munit.FunSuite {
   }
 
   test("what a run opened and left open, of every kind, is closed as the run ends") {
-    given KqueueBackend.type = KqueueBackend
-    val ops = KqueueOps
+    given EventPollingBackend.type = EventPollingBackend
+    val ops = EventPollingOps
     val path = java.nio.file.Files.createTempFile("gears-run-end", ".txt")
     val left = Io.run { io ?=>
       // With the `Async` of whichever future performs it: the program's own is not a future's it spawned.
@@ -461,8 +461,8 @@ class KqueueSchedulingSuite extends munit.FunSuite {
   }
 
   test("a handle is refused by a run other than the one that opened it, while that one still runs") {
-    given KqueueBackend.type = KqueueBackend
-    val ops = KqueueOps
+    given EventPollingBackend.type = EventPollingBackend
+    val ops = EventPollingOps
     val path = java.nio.file.Files.createTempFile("gears-foreign", ".txt")
     try
       Io.run { io ?=>
@@ -489,7 +489,7 @@ class KqueueSchedulingSuite extends munit.FunSuite {
         @volatile var refusals: List[(String, Throwable | Null)] = Nil
         val other = new Thread(() =>
           refusals = Io.run { theirs ?=>
-            // No cast is needed: with the backend known, both runs' ops are `KqueueOps`, and their types the same.
+            // No cast is needed: with the backend known, both runs' ops are `EventPollingOps`, and their types the same.
             foreign.map((name, op) =>
               name -> (try { theirs.perform(op); null }
               catch case failed: Exception => failed)
@@ -513,23 +513,23 @@ class KqueueSchedulingSuite extends munit.FunSuite {
   }
 
   test("an op that uses no handle is no run's: built outside, it is performed by one run and then by another") {
-    given KqueueBackend.type = KqueueBackend
-    val timer = KqueueOps.timer(1) // repeatable
+    given EventPollingBackend.type = EventPollingBackend
+    val timer = EventPollingOps.timer(1) // repeatable
     val ran = AtomicInteger(0)
     for _ <- 1 to 2 do
       Io.run { io ?=>
         io.perform(timer)
-        io.perform(KqueueOps.blocking(() => ran.incrementAndGet(): Unit))
+        io.perform(EventPollingOps.blocking(() => ran.incrementAndGet(): Unit))
       }
     assertEquals(ran.get(), 2)
   }
 
   test("an op being performed in one run is refused by another meanwhile, and is the first run's still") {
-    given KqueueBackend.type = KqueueBackend
-    val timer = KqueueOps.timer(200)
+    given EventPollingBackend.type = EventPollingBackend
+    val timer = EventPollingOps.timer(200)
     Io.run { io ?=>
       val waiting = Future(io.perform(timer))
-      io.perform(KqueueOps.timer(20)) // so that it waits
+      io.perform(EventPollingOps.timer(20)) // so that it waits
       @volatile var refusal: Throwable | Null = null
       val other = new Thread(() =>
         refusal = Io.run { theirs ?=>
@@ -538,25 +538,25 @@ class KqueueSchedulingSuite extends munit.FunSuite {
         }
       )
       other.start()
-      io.perform(KqueueOps.blocking(() => other.join()))
+      io.perform(EventPollingOps.blocking(() => other.join()))
       assert(refusal.isInstanceOf[IllegalStateException], String.valueOf(refusal))
       waiting.await // undisturbed
     }
   }
 
   test("a run's Io is refused on a thread that is not one of its pool's workers, another run's among them") {
-    given KqueueBackend.type = KqueueBackend
+    given EventPollingBackend.type = EventPollingBackend
     Io.run { io ?=>
       @volatile var refusal: Throwable | Null = null
       val other = new Thread(() =>
         refusal = Io.run { theirs ?=>
           // The first run's `Io`, from a future of this one: performing with it would run on no worker of its pool.
-          try { io.perform(KqueueOps.timer(1)); null }
+          try { io.perform(EventPollingOps.timer(1)); null }
           catch case failed: Exception => failed
         }
       )
       other.start()
-      io.perform(KqueueOps.blocking(() => other.join()))
+      io.perform(EventPollingOps.blocking(() => other.join()))
       assert(refusal.isInstanceOf[IllegalStateException], String.valueOf(refusal))
     }
   }
@@ -565,7 +565,7 @@ class KqueueSchedulingSuite extends munit.FunSuite {
     * worker's, as it is when the worker has nothing else to run at that moment: the thread before, and the thread
     * after.
     */
-  private def blockingInPlace(io: Io[KqueueOps.type])(body: () => Unit)(using Async): (Thread, Thread) = {
+  private def blockingInPlace(io: Io[EventPollingOps.type])(body: () => Unit)(using Async): (Thread, Thread) = {
     var tries = 0
     while tries < 200 do
       io.perform(io.ops.timer(1)) // lets whatever else is ready run first

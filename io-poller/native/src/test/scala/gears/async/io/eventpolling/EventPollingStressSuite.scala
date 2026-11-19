@@ -1,5 +1,5 @@
 package gears.async.io
-package kqueue
+package eventpolling
 
 import gears.async.Async
 import gears.async.Future
@@ -10,11 +10,11 @@ import scala.concurrent.duration.*
 /** Timers that complete as soon as they are scheduled, so that completion races the performer's wait for it, and
   * submissions race each worker going to sleep.
   */
-class KqueueStressSuite extends munit.FunSuite {
+class EventPollingStressSuite extends munit.FunSuite {
   override def munitTimeout: Duration = 60.seconds
 
   test("a run stops its workers before it returns") {
-    given KqueueBackend.type = KqueueBackend
+    given EventPollingBackend.type = EventPollingBackend
     val worker = Io.run { io ?=>
       io.perform(io.ops.timer(1))
       Thread.currentThread()
@@ -23,7 +23,7 @@ class KqueueStressSuite extends munit.FunSuite {
   }
 
   test("a run stops its workers when the program fails") {
-    given KqueueBackend.type = KqueueBackend
+    given EventPollingBackend.type = EventPollingBackend
     var worker: Thread | Null = null
     intercept[IllegalStateException](Io.run { io ?=>
       worker = Thread.currentThread()
@@ -33,7 +33,7 @@ class KqueueStressSuite extends munit.FunSuite {
   }
 
   test("a run ending with many timers pending cancels them, and shuts down without waiting for them") {
-    given KqueueBackend.type = KqueueBackend
+    given EventPollingBackend.type = EventPollingBackend
     val workers = java.util.concurrent.ConcurrentHashMap.newKeySet[Thread]()
     val scheduledRan = java.util.concurrent.atomic.AtomicBoolean(false)
     val started = System.nanoTime()
@@ -55,7 +55,7 @@ class KqueueStressSuite extends munit.FunSuite {
   }
 
   test("a scheduler that has shut down refuses work") {
-    val pool = KqueueScheduler(1)
+    val pool = EventPollingScheduler(1)
     pool.shutdown()
     pool.shutdown() // nothing left to do
     intercept[IllegalStateException](pool.execute(() => ()))
@@ -63,7 +63,7 @@ class KqueueStressSuite extends munit.FunSuite {
   }
 
   test("many short timers all complete") {
-    given KqueueBackend.type = KqueueBackend
+    given EventPollingBackend.type = EventPollingBackend
     Io.run { io ?=>
       for round <- 1 to 3000 do {
         val futures = for _ <- 1 to 16 yield Future(io.perform(io.ops.timer(0)))
@@ -73,7 +73,7 @@ class KqueueStressSuite extends munit.FunSuite {
   }
 
   test("a timer cancelled as it fires leaves its next performance to run its full time") {
-    given KqueueBackend.type = KqueueBackend
+    given EventPollingBackend.type = EventPollingBackend
     Io.run { io ?=>
       val delay = 300.micros
       val timer = io.ops.timer(delay)
@@ -91,7 +91,7 @@ class KqueueStressSuite extends munit.FunSuite {
   }
 
   test("a timer cancelled by a waiter resumed from the same batch of timers still finishes") {
-    given KqueueBackend.type = KqueueBackend
+    given EventPollingBackend.type = EventPollingBackend
     Io.run { io ?=>
       for round <- 1 to 200 do {
         val deadline = System.nanoTime() + 5_000_000L
@@ -108,7 +108,7 @@ class KqueueStressSuite extends munit.FunSuite {
   }
 
   test("timers shorter than a millisecond complete, the worker sleeping for less than one") {
-    given KqueueBackend.type = KqueueBackend
+    given EventPollingBackend.type = EventPollingBackend
     Io.run { io ?=>
       for round <- 1 to 300 do {
         val futures = for _ <- 1 to 4 yield Future(io.perform(io.ops.timer(300.micros)))

@@ -1,5 +1,5 @@
 package gears.async.io
-package kqueue
+package eventpolling
 
 import gears.async.Future
 import gears.async.io.testkit.*

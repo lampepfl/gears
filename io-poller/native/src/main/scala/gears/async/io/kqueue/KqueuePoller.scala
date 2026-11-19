@@ -1,37 +1,17 @@
 package gears.async.io.kqueue
 
+import gears.async.io.eventpolling.EventPoller
 import gears.async.io.kqueue.internal.KqueueLoop
-import gears.async.io.shareable.EventSource
-import gears.async.io.shareable.Poller
 import gears.async.io.shareable.ReadinessOp
-import gears.async.io.shareable.TimerHeap.TimerOp
 
 import scala.scalanative.unsafe.*
 import scala.scalanative.unsigned.*
 
-trait KqueuePoller(maxEvents: Int) extends Poller, EventSource {
+/** The event poller of macOS and FreeBSD: a kqueue, with a filter for each direction of each descriptor it watches. */
+trait KqueuePoller(maxEvents: Int) extends EventPoller {
 
-  /** Its timers include every kqueue op: the worker it is part of takes its pool's ops. */
-  type Timer >: KqueueOp <: TimerOp
+  protected final def queueName: String = "kqueue"
 
-  /** Whether the worker's heap of timers is being edited (see `TimerHeapImpl.claimHeap`). */
-  private val heapClaimed = new java.util.concurrent.atomic.AtomicBoolean(false)
-
-  /** A flag, taken with one atomic operation and given up with another: a thread that finds it taken, which is rare, as
-    * nearly every edit is the worker's own, tries again at once a few times, the edit being a few instructions long,
-    * and then gives way between tries, in case whoever holds it is not running.
-    */
-  protected final def claimHeap(): Unit =
-    if !heapClaimed.compareAndSet(false, true) then
-      var tries = 0
-      while !heapClaimed.compareAndSet(false, true) do
-        tries += 1
-        if tries < 64 then Thread.onSpinWait() else Thread.`yield`()
-
-  protected final def releaseHeap(): Unit = heapClaimed.set(false)
-
-  /** It listens for this backend's handles that are waited for, each of which has a descriptor. */
-  type Handle = KqueueWaitable
   private val kq = KqueueLoop.open()
 
   private val zone = Zone.open()
@@ -55,60 +35,22 @@ trait KqueuePoller(maxEvents: Int) extends Poller, EventSource {
   private val markerTrigger = KqueueLoop.allocateQueue(1)(using zone)
   KqueueLoop.triggerUser(markerTrigger(0), PollMarker)
 
-  /** Guards writes to `handles`, which a close clears from its own thread. This worker's thread, which alone puts
-    * handles there, reads it without: all it can miss is that a close has just taken one out, and a closed handle has
-    * no waiter.
+  /** A filter for the direction that came, edge-triggered, or the one that went taken off: the other is left as it
+    * is. A filter already gone because its descriptor closed is no failure of taking it off.
     */
-  private val handlesLock = new Object
+  protected final def watch(fd: Int, before: Int, after: Int, certain: Boolean): Unit = {
+    val came = after & ~before
+    val went = before & ~after
+    if (came & EventPoller.Read) != 0 then register(fd, read = true)
+    if (came & EventPoller.Write) != 0 then register(fd, read = false)
+    if (went & EventPoller.Read) != 0 then KqueueLoop.deleteFileIfOpen(kq, fd, read = true): Unit
+    if (went & EventPoller.Write) != 0 then KqueueLoop.deleteFileIfOpen(kq, fd, read = false): Unit
+  }
 
-  /** The handle this kqueue listens for, by descriptor number, which is all an event names. The waiters are the
-    * handle's own.
-    */
-  @volatile private var handles = new Array[KqueueWaitable | Null](64)
-
-  /** Has the kqueue report `handle` each time it becomes readable, or writable, and at once if it is now: an
-    * edge-triggered filter, added once and left until the handle closes, when the kernel takes it with the descriptor,
-    * or gives this listener up (`stopListening`). An op that waits meanwhile costs no system call.
-    */
-  override def startListening(handle: KqueueWaitable, read: Boolean): Unit = {
-    val fd = handle.fd
-    handlesLock.synchronized {
-      if fd >= handles.length then handles = java.util.Arrays.copyOf(handles, Math.max(fd + 1, 2 * handles.length))
-      handles(fd) = handle
-    }
+  private def register(fd: Int, read: Boolean): Unit =
     KqueueLoop.createAndRegisterEvents(kq, 1) { changes =>
       KqueueLoop.addFile(changes(0), fd, read, clear = true)
     }
-  }
-
-  /** Takes the filter off the kqueue, and the handle from `handles` unless this still listens for its other direction.
-    */
-  override def stopListening(handle: KqueueWaitable, read: Boolean): Unit = {
-    val fd = handle.fd
-    if !closed then KqueueLoop.deleteFileIfOpen(kq, fd, read): Unit
-    if !handle.readiness(!read).listenedBy(this) then
-      handlesLock.synchronized {
-        if fd < handles.length && (handles(fd) eq handle) then handles(fd) = null
-      }
-  }
-
-  /** Before the handle's descriptor is released, so that its number, another handle's next, never finds this one. */
-  override def forgetHandle(handle: KqueueWaitable): Unit = {
-    val fd = handle.fd
-    handlesLock.synchronized {
-      if fd < handles.length && (handles(fd) eq handle) then handles(fd) = null
-    }
-  }
-
-  /** `fd` became ready: its handle's waiter does its work, or, finding it not ready after all, waits on for the next
-    * time. With no waiter the handle only counts it, for an op that is about to wait (see
-    * `HandleReadiness.registerWaiter`), and to give this listener up once that has happened too often.
-    */
-  private def dispatch(fd: Int, read: Boolean, available: Long): Unit = {
-    val current = handles
-    val handle = if fd < current.length then current(fd) else null
-    if handle != null then handle.readiness(read).report(this, available)
-  }
 
   /** How much `event` reports its descriptor ready for, bytes to read or room to write, unless it also reports the end
     * of the stream or an error, which no later event follows.
@@ -117,39 +59,25 @@ trait KqueuePoller(maxEvents: Int) extends Poller, EventSource {
     if KqueueLoop.isEOF(event) || KqueueLoop.isError(event) then ReadinessOp.Unknown
     else KqueueLoop.data(event).toLong
 
-  /** Set before the kqueue is closed, which the worker does as it leaves its loop. */
-  @volatile private var closed = false
-
-  /** A worker that has left has nothing to wake, and a `wake` racing its `close` may find the kqueue gone: neither is a
-    * failure. Should the descriptor have been reused by then, the worst this does is wake another kqueue once.
-    */
-  def wake(): Unit =
-    if broken then wakeWaiting()
-    else if !closed then
-      try KqueueLoop.createAndRegisterEvents(kq, 1)(events => KqueueLoop.triggerUser(events(0), WakeEvent))
-      catch
-        case _: java.io.IOException if closed => ()
-        // The kqueue is failing: its worker is then between polls, not waiting in one, or is about to give it up.
-        case _: java.io.IOException => wakeWaiting()
-
-  /** How many polls may fail one after another before the kqueue is given up. */
-  private inline val PollAttempts = 3
-
-  /** Polls that have failed since one last succeeded. Worker thread only. */
-  private var pollFailures = 0
-
-  /** Set once the kqueue is given up: from then on this waits without it, and reports no handle ready. */
-  @volatile private var broken = false
-
-  /** The worker's thread, once it has waited here: what a wake-up unparks when there is no kqueue to trigger. */
-  @volatile private var waitingThread: Thread | Null = null
-
-  override protected def drivenBy(thread: Thread): Unit = waitingThread = thread
-
-  private def wakeWaiting(): Unit = {
-    val thread = waitingThread
-    if thread != null then java.util.concurrent.locks.LockSupport.unpark(thread)
+  protected final def report(index: Int): Unit = {
+    val event = events(index)
+    // A wake-up, or the marker, has nothing to hand over: the worker looks at its inbox and timers after the poll.
+    if KqueueLoop.isReadEvent(event) then dispatch(KqueueLoop.fileIdent(event), read = true, available(event))
+    else if KqueueLoop.isWriteEvent(event) then dispatch(KqueueLoop.fileIdent(event), read = false, available(event))
   }
+
+  protected final def trigger(): Unit =
+    KqueueLoop.createAndRegisterEvents(kq, 1)(events => KqueueLoop.triggerUser(events(0), WakeEvent))
+
+  /** With work left the look must not be kept: the one that triggers the marker. */
+  protected final def lookNow(): Int = pollKqueue(0)
+
+  /** With a timeout of zero and no marker: where nothing is pending, what the system takes over a timeout of zero is a
+    * wait of microseconds that an answer on its way ends, at less than a poll that puts the thread to sleep costs.
+    */
+  override protected final def lookBeforeWaiting(): Int = pollBriefly()
+
+  protected final def waitFor(timeout: Long): Int = pollKqueue(timeout)
 
   /** One poll of the kqueue into `events` by a worker about to wait: at once if there is something, and otherwise for
     * as long as the system takes over a timeout of zero (see `KqueueLoop.pollEventsBriefly`). The number of events.
@@ -172,70 +100,7 @@ trait KqueuePoller(maxEvents: Int) extends Poller, EventSource {
       )
     else KqueueLoop.pollEventsForever(kq, events, maxEvents)
 
-  /** A poll failed, other than by being interrupted. A kqueue that fails is not something to recover from by trying for
-    * ever, which would keep the worker turning at full speed and its ops waiting: after a few attempts, a little apart
-    * in case the failure passes, it is given up and its owner told (`pollerFailed`), once. Nothing is rebuilt: what
-    * broke it, most likely its descriptor closed from elsewhere, is a bug to be seen, not papered over.
-    */
-  private def pollFailed(failure: java.io.IOException): Unit = {
-    pollFailures += 1
-    if pollFailures < PollAttempts then Thread.sleep(pollFailures.toLong) // a millisecond, then two
-    else
-      broken = true
-      pollerFailed(new java.io.IOException(s"kqueue $id gave up after $pollFailures failed polls", failure))
-  }
-
-  /** Waiting with no kqueue: parked until the deadline or a wake-up, so that the worker still fires its timers and runs
-    * what it is given, and the program can unwind. No handle is ever reported ready.
-    */
-  private def waitWithoutKqueue(timeout: Long): Unit =
-    if timeout > 0 then java.util.concurrent.locks.LockSupport.parkNanos(this, timeout)
-    else if timeout < 0 then java.util.concurrent.locks.LockSupport.park(this)
-
-  protected def waitForDeadline(deadlineTask: Long): Unit = {
-    val now = System.nanoTime()
-    // A wake-up is reported once, and the worker's budgets may have left work behind after the one that came with it:
-    // then, as when a deadline is already due, this only looks at what the kqueue has, and does not wait.
-    val timeout =
-      if !isEmpty() then 0L
-      else if deadlineTask >= 0 then Math.max(deadlineTask - now, 0)
-      else -1L
-    val polled =
-      if broken then
-        waitWithoutKqueue(timeout)
-        0
-      else
-        try
-          val found =
-            // With work left this only looks, and must not be kept: the look that triggers the marker.
-            if timeout == 0 then pollKqueue(0)
-            else
-              // About to wait. First with a timeout of zero and no marker: under load something is there already,
-              // and where nothing is, what the system takes over a timeout of zero is a wait of microseconds that an
-              // answer on its way ends, at less than a poll that waits costs, which tells the GC that the thread
-              // is leaving (see `Unblocked`) and puts it to sleep.
-              val ready = pollBriefly()
-              if ready > 0 then ready else pollKqueue(timeout)
-          pollFailures = 0
-          found
-        catch
-          case failure: java.io.IOException =>
-            pollFailed(failure)
-            0
-    var i = 0
-    while i < polled do
-      val event = events(i)
-      // A wake-up has nothing to hand over: the worker looks at its inbox and timers as `waitForDeadline` returns.
-      if KqueueLoop.isReadEvent(event) then dispatch(KqueueLoop.fileIdent(event), read = true, available(event))
-      else if KqueueLoop.isWriteEvent(event) then dispatch(KqueueLoop.fileIdent(event), read = false, available(event))
-      i += 1
-  }
-
-  override def close(): Unit = {
-    closed = true
-    // A kqueue that was given up may have nothing left to close.
+  protected final def closeQueue(): Unit =
     try KqueueLoop.close(kq)
-    catch case _: java.io.IOException if broken => ()
-    zone.close()
-  }
+    finally zone.close()
 }

@@ -1,5 +1,5 @@
 package gears.async.io
-package kqueue
+package eventpolling
 
 import gears.async.io.shareable.AbstractBaseHandle
 import gears.async.io.shareable.AbstractReadinessHandle
@@ -403,7 +403,7 @@ class HandleStateSuite extends munit.FunSuite {
       import gears.async.io.shareable.*
       abstract class Monitored extends AbstractBaseHandle(new HandleOwner), AbstractReadinessHandle, BaseReadableHandle { type Source = MonitorPoller }
       abstract class Misfit(handle: Monitored, buf: java.nio.ByteBuffer) extends AbstractReadOp[Monitored](handle, buf) {
-        type Source = gears.async.io.kqueue.KqueuePoller
+        type Source = gears.async.io.eventpolling.EventPoller
       }
     """)
     assert(mismatched.contains("Source"), mismatched)
@@ -412,7 +412,7 @@ class HandleStateSuite extends munit.FunSuite {
       import gears.async.io.shareable.*
       abstract class Monitored extends AbstractBaseHandle(new HandleOwner), AbstractReadinessHandle, BaseReadableHandle { type Source = MonitorPoller }
       abstract class Astray(handle: Monitored, buf: java.nio.ByteBuffer) extends AbstractReadOp[Monitored](handle, buf) {
-        def there(source: gears.async.io.kqueue.KqueuePoller)(using gears.async.Async): Unit = performWhenReady(source)
+        def there(source: gears.async.io.eventpolling.EventPoller)(using gears.async.Async): Unit = performWhenReady(source)
       }
     """)
     assert(elsewhere.nonEmpty, "performed on a source that is not its handle's")
@@ -421,9 +421,9 @@ class HandleStateSuite extends munit.FunSuite {
   test("a file is no handle a kqueue listens for, nor one a waiting read is built on") {
     assert(
       compileErrors(
-        "def listen(poller: gears.async.io.kqueue.KqueuePoller, file: gears.async.io.kqueue.KqueueFile): Unit = poller.startListening(file, true)"
+        "def listen(poller: gears.async.io.eventpolling.EventPoller, file: gears.async.io.eventpolling.EventPollingFile): Unit = poller.startListening(file, true)"
       ).nonEmpty
     )
-    assert(compileErrors("def waits(file: gears.async.io.kqueue.KqueueFile) = file.readiness(true)").nonEmpty)
+    assert(compileErrors("def waits(file: gears.async.io.eventpolling.EventPollingFile) = file.readiness(true)").nonEmpty)
   }
 }

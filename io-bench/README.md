@@ -8,7 +8,7 @@ another branch's.
 - `shared/` has `CapBench`: the scenarios, written against the interface alone, so the same source runs over any
   backend. Each prints one line, `bench: <name> <ops> ops <seconds> s <microseconds> us/op`.
 - `jvm/` and `native/` have each platform's buffers (`BenchPlatform`) and its `BenchMain`, which runs `CapBench` over
-  this branch's backends: `NioBackend` and `NioPoolBackend` on the JVM, `KqueueBackend` on Scala Native.
+  this branch's backends: `NioBackend` and `NioPoolBackend` on the JVM, `EventPollingBackend` on Scala Native.
 - `other/` has the `BenchMain`s and the build definition for the branch compared against, `async-io-backends`, whose
   backends are started differently. They are not built here.
 - `compare/` has `Compare`, which builds and runs both sides and writes the comparison.

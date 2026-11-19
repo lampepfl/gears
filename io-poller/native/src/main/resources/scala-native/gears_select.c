@@ -1,6 +1,8 @@
 // `select` for gears' FIFO watcher (gears.async.io.posix.FifoWatcher): on macOS the only call that reports a FIFO
 // whose writer closed. Unlimited, so that descriptors past FD_SETSIZE can be watched: on macOS this macro selects
-// select$DARWIN_EXTSN, which takes a set of any size; elsewhere select takes one as large as nfds needs.
+// select$DARWIN_EXTSN, which takes a set of any size. Nothing on any other system, where the watcher is not used:
+// their event queues report the end of a FIFO themselves.
+#if defined(__APPLE__)
 #define _DARWIN_UNLIMITED_SELECT 1
 #include <errno.h>
 #include <stdint.h>
@@ -32,3 +34,4 @@ int gears_select_readable(const int *fds, int count, int *ready) {
   errno = saved;
   return n;
 }
+#endif

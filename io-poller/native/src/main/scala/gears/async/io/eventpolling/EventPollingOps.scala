@@ -1,4 +1,4 @@
-package gears.async.io.kqueue
+package gears.async.io.eventpolling
 
 import gears.async.io.Blocking
 import gears.async.io.BufferPool
@@ -32,71 +32,71 @@ import gears.async.io.shareable.LendingPool
 import java.nio.ByteBuffer
 import scala.concurrent.duration.FiniteDuration
 
-sealed trait KqueueInterface extends Interface {
-  override type Op = KqueueOp
+sealed trait EventPollingInterface extends Interface {
+  override type Op = EventPollingOp
 
-  override def timer(duration: FiniteDuration): KqueueTimerOp & Repeatable = {
+  override def timer(duration: FiniteDuration): EventPollingTimerOp & Repeatable = {
     if duration.length < 0 then throw new IllegalArgumentException(s"A timer's time is not negative: $duration")
-    KqueueMakeTimer(duration)
+    EventPollingMakeTimer(duration)
   }
 
-  override def deadlineTimer(nanoTime: Long): KqueueDeadlineOp & Repeatable = KqueueMakeDeadline(nanoTime)
+  override def deadlineTimer(nanoTime: Long): EventPollingDeadlineOp & Repeatable = EventPollingMakeDeadline(nanoTime)
 }
 
-sealed trait KqueuePipeOps extends Pipes { self: KqueueByteStreams & KqueueInterface =>
-  override def pipe(read: Slot[Readable], write: Slot[Writable]): KqueuePipeOp = KqueueMakePipe(read, write)
+sealed trait EventPollingPipeOps extends Pipes { self: EventPollingByteStreams & EventPollingInterface =>
+  override def pipe(read: Slot[Readable], write: Slot[Writable]): EventPollingPipeOp = EventPollingMakePipe(read, write)
 }
 
-sealed trait KqueueHandles extends Handles { self: KqueueInterface =>
-  override type Handle = KqueueHandle
+sealed trait EventPollingHandles extends Handles { self: EventPollingInterface =>
+  override type Handle = EventPollingHandle
 
-  override def close(handle: KqueueHandle): KqueueCloseOp = KqueueCloseHandle(handle)
+  override def close(handle: EventPollingHandle): EventPollingCloseOp = EventPollingCloseHandle(handle)
 }
 
-sealed trait KqueueByteStreams extends ByteStreams { self: KqueueInterface & KqueueHandles =>
-  override type Readable = KqueueReadable
-  override type Writable = KqueueWritable
+sealed trait EventPollingByteStreams extends ByteStreams { self: EventPollingInterface & EventPollingHandles =>
+  override type Readable = EventPollingReadable
+  override type Writable = EventPollingWritable
 
   // A file is not waited for: its reads and writes as a stream are file ops, at the position it carries.
 
-  override def read(handle: Readable, buf: ByteBuffer): KqueueOp & Repeatable = handle match
-    case file: KqueueFile              => KqueueFileRead(file, Array(buf), -1L)
-    case waited: KqueueWaitingReadable => KqueueRead(waited, buf)
+  override def read(handle: Readable, buf: ByteBuffer): EventPollingOp & Repeatable = handle match
+    case file: EventPollingFile              => EventPollingFileRead(file, Array(buf), -1L)
+    case waited: EventPollingWaitingReadable => EventPollingRead(waited, buf)
 
-  override def write(handle: Writable, buf: ByteBuffer): KqueueOp & Repeatable = handle match
-    case file: KqueueFile              => KqueueFileWrite(file, Array(buf), -1L)
-    case waited: KqueueWaitingWritable => KqueueWrite(waited, buf)
+  override def write(handle: Writable, buf: ByteBuffer): EventPollingOp & Repeatable = handle match
+    case file: EventPollingFile              => EventPollingFileWrite(file, Array(buf), -1L)
+    case waited: EventPollingWaitingWritable => EventPollingWrite(waited, buf)
 
-  override def read(handle: Readable, bufs: Array[ByteBuffer]): KqueueOp & Repeatable = handle match
-    case file: KqueueFile              => KqueueFileRead(file, bufs, -1L)
-    case waited: KqueueWaitingReadable => KqueueScatterRead(waited, bufs)
+  override def read(handle: Readable, bufs: Array[ByteBuffer]): EventPollingOp & Repeatable = handle match
+    case file: EventPollingFile              => EventPollingFileRead(file, bufs, -1L)
+    case waited: EventPollingWaitingReadable => EventPollingScatterRead(waited, bufs)
 
-  override def write(handle: Writable, bufs: Array[ByteBuffer]): KqueueOp & Repeatable = handle match
-    case file: KqueueFile              => KqueueFileWrite(file, bufs, -1L)
-    case waited: KqueueWaitingWritable => KqueueGatherWrite(waited, bufs)
+  override def write(handle: Writable, bufs: Array[ByteBuffer]): EventPollingOp & Repeatable = handle match
+    case file: EventPollingFile              => EventPollingFileWrite(file, bufs, -1L)
+    case waited: EventPollingWaitingWritable => EventPollingGatherWrite(waited, bufs)
 
-  override def read(handle: Readable, pool: BufferPool, into: Slot[Received]): KqueueOp & Repeatable =
+  override def read(handle: Readable, pool: BufferPool, into: Slot[Received]): EventPollingOp & Repeatable =
     pool match
       case pool: LendingPool =>
         handle match
-          case file: KqueueFile              => KqueueFilePooledRead(file, pool, into)
-          case waited: KqueueWaitingReadable => KqueuePooledRead(waited, pool, into)
+          case file: EventPollingFile              => EventPollingFilePooledRead(file, pool, into)
+          case waited: EventPollingWaitingReadable => EventPollingPooledRead(waited, pool, into)
       case _ => throw new IllegalArgumentException("A pooled read takes a pool of this backend's (Backend.pool)")
 }
 
 /** Socket options: every one that applies to a kind of socket, IP or Unix, changed at any time but `ReusePort`, which
   * is set before the socket binds.
   */
-sealed trait KqueueSocketOptions extends SocketOptionOps { self: KqueueInterface & KqueueHandles =>
+sealed trait EventPollingSocketOptions extends SocketOptionOps { self: EventPollingInterface & EventPollingHandles =>
   override def supports(option: SocketOption[?], kind: SocketOption.Kind): Boolean = option.appliesTo(kind)
 
   override def canChange(option: SocketOption[?], kind: SocketOption.Kind): Boolean =
     SocketOption.onSocket(option, kind) && option != SocketOption.ReusePort
 
-  override def option[V](handle: KqueueHandle, option: SocketOption[V]): V =
+  override def option[V](handle: EventPollingHandle, option: SocketOption[V]): V =
     onSocket(handle, option)(socket => PosixSocketOptions.get(socket.fd, socket.ipv6, option).asInstanceOf[V])
 
-  override def setOption[V](handle: KqueueHandle, option: SocketOption[V], value: V): Unit = {
+  override def setOption[V](handle: EventPollingHandle, option: SocketOption[V], value: V): Unit = {
     option.check(value)
     onSocket(handle, option) { socket =>
       if !canChange(option, socket.kind) then
@@ -106,8 +106,8 @@ sealed trait KqueueSocketOptions extends SocketOptionOps { self: KqueueInterface
   }
 
   /** Runs `body` on `handle`, an open socket that `option` applies to; else an `IllegalArgumentException`. */
-  private def onSocket[A](handle: KqueueHandle, option: SocketOption[?])(body: KqueueSocket => A): A = handle match
-    case socket: KqueueSocket =>
+  private def onSocket[A](handle: EventPollingHandle, option: SocketOption[?])(body: EventPollingSocket => A): A = handle match
+    case socket: EventPollingSocket =>
       socket.claimWork()
       try
         if !SocketOption.onSocket(option, socket.kind) then throw Checks.notFor(option, socket.kind)
@@ -116,70 +116,70 @@ sealed trait KqueueSocketOptions extends SocketOptionOps { self: KqueueInterface
     case _ => throw new IllegalArgumentException(s"$option applies to sockets, not $handle")
 }
 
-sealed trait KqueueStreamSockets extends StreamSockets {
-  self: KqueueInterface & KqueueHandles & KqueueByteStreams =>
-  override type Connection = KqueueConnection
-  override type Listener = KqueueListener
+sealed trait EventPollingStreamSockets extends StreamSockets {
+  self: EventPollingInterface & EventPollingHandles & EventPollingByteStreams =>
+  override type Connection = EventPollingConnection
+  override type Listener = EventPollingListener
 
-  override def accept(handle: KqueueListener, into: Slot[KqueueConnection]): KqueueAcceptOp & Repeatable =
-    KqueueAccept(handle, into)
+  override def accept(handle: EventPollingListener, into: Slot[EventPollingConnection]): EventPollingAcceptOp & Repeatable =
+    EventPollingAccept(handle, into)
 
   override def acceptAll(
-      handle: KqueueListener,
-      into: Slot[Array[KqueueConnection]],
+      handle: EventPollingListener,
+      into: Slot[Array[EventPollingConnection]],
       max: Int
-  ): KqueueAcceptOp & Repeatable = KqueueAcceptAll(handle, into, max)
+  ): EventPollingAcceptOp & Repeatable = EventPollingAcceptAll(handle, into, max)
 
-  override def shutdownOutput(handle: KqueueConnection): KqueueOp = KqueueShutdownOutput(handle)
+  override def shutdownOutput(handle: EventPollingConnection): EventPollingOp = EventPollingShutdownOutput(handle)
 
-  override def localAddress(handle: KqueueListener | KqueueConnection): IpSocketAddress | UnixAddress =
-    KqueueSockets.addressOf(handle, peer = false)
+  override def localAddress(handle: EventPollingListener | EventPollingConnection): IpSocketAddress | UnixAddress =
+    EventPollingSockets.addressOf(handle, peer = false)
 
-  override def peerAddress(handle: KqueueConnection): IpSocketAddress | UnixAddress =
-    KqueueSockets.addressOf(handle, peer = true)
+  override def peerAddress(handle: EventPollingConnection): IpSocketAddress | UnixAddress =
+    EventPollingSockets.addressOf(handle, peer = true)
 }
 
-sealed trait KqueueIpStreams extends IpStreams {
-  self: KqueueInterface & KqueueHandles & KqueueByteStreams & KqueueStreamSockets & KqueueSocketOptions =>
+sealed trait EventPollingIpStreams extends IpStreams {
+  self: EventPollingInterface & EventPollingHandles & EventPollingByteStreams & EventPollingStreamSockets & EventPollingSocketOptions =>
 
-  override def connect(address: IpSocketAddress, options: SocketOptions, into: Slot[KqueueConnection]): KqueueOp = {
+  override def connect(address: IpSocketAddress, options: SocketOptions, into: Slot[EventPollingConnection]): EventPollingOp = {
     Checks.checkOptions(options, supports, SocketOption.Kind.Connection)
-    KqueueConnect(address, options, into)
+    EventPollingConnect(address, options, into)
   }
 
-  override def listen(address: IpSocketAddress, options: SocketOptions, into: Slot[KqueueListener]): KqueueOp = {
+  override def listen(address: IpSocketAddress, options: SocketOptions, into: Slot[EventPollingListener]): EventPollingOp = {
     Checks.checkOptions(options, supports, SocketOption.Kind.Listener)
-    KqueueListen(address, options, into)
+    EventPollingListen(address, options, into)
   }
 }
 
-sealed trait KqueueUnixStreams extends UnixStreams {
-  self: KqueueInterface & KqueueHandles & KqueueByteStreams & KqueueStreamSockets & KqueueSocketOptions =>
+sealed trait EventPollingUnixStreams extends UnixStreams {
+  self: EventPollingInterface & EventPollingHandles & EventPollingByteStreams & EventPollingStreamSockets & EventPollingSocketOptions =>
 
-  override def connect(address: UnixAddress, options: SocketOptions, into: Slot[KqueueConnection]): KqueueOp = {
+  override def connect(address: UnixAddress, options: SocketOptions, into: Slot[EventPollingConnection]): EventPollingOp = {
     Checks.checkOptions(options, supports, SocketOption.Kind.UnixConnection)
-    KqueueConnect(Checks.unix(address), options, into)
+    EventPollingConnect(Checks.unix(address), options, into)
   }
 
-  override def listen(address: UnixAddress, options: SocketOptions, into: Slot[KqueueListener]): KqueueOp = {
+  override def listen(address: UnixAddress, options: SocketOptions, into: Slot[EventPollingListener]): EventPollingOp = {
     Checks.checkOptions(options, supports, SocketOption.Kind.UnixListener)
-    KqueueListen(Checks.unix(address), options, into)
+    EventPollingListen(Checks.unix(address), options, into)
   }
 }
 
-sealed trait KqueueIpDatagrams extends IpDatagrams { self: KqueueInterface & KqueueHandles & KqueueSocketOptions =>
-  override type BoundDatagram = KqueueBoundDatagram
-  override type ConnectedDatagram = KqueueConnectedDatagram
+sealed trait EventPollingIpDatagrams extends IpDatagrams { self: EventPollingInterface & EventPollingHandles & EventPollingSocketOptions =>
+  override type BoundDatagram = EventPollingBoundDatagram
+  override type ConnectedDatagram = EventPollingConnectedDatagram
 
   override def bindDatagram(
       local: IpSocketAddress,
       options: SocketOptions,
-      into: Slot[KqueueBoundDatagram]
-  ): KqueueOp = {
+      into: Slot[EventPollingBoundDatagram]
+  ): EventPollingOp = {
     val kind = SocketOption.Kind.BoundDatagram
     Checks.checkOptions(options, supports, kind)
-    KqueueOpenDatagram(local, null, options, kind, into)((fd, ipv6, _, owner) =>
-      new KqueueBoundDatagram(fd, ipv6, owner)
+    EventPollingOpenDatagram(local, null, options, kind, into)((fd, ipv6, _, owner) =>
+      new EventPollingBoundDatagram(fd, ipv6, owner)
     )
   }
 
@@ -187,63 +187,63 @@ sealed trait KqueueIpDatagrams extends IpDatagrams { self: KqueueInterface & Kqu
       local: IpSocketAddress | Null,
       remote: IpSocketAddress,
       options: SocketOptions,
-      into: Slot[KqueueConnectedDatagram]
-  ): KqueueOp = {
+      into: Slot[EventPollingConnectedDatagram]
+  ): EventPollingOp = {
     val kind = SocketOption.Kind.ConnectedDatagram
     Checks.checkOptions(options, supports, kind)
     val (from, to) = IpAddresses.pair(local, remote)
-    KqueueOpenDatagram(from, to, options, kind, into)((fd, ipv6, _, owner) =>
-      new KqueueConnectedDatagram(fd, ipv6, owner)
+    EventPollingOpenDatagram(from, to, options, kind, into)((fd, ipv6, _, owner) =>
+      new EventPollingConnectedDatagram(fd, ipv6, owner)
     )
   }
 
   override def receive(
-      handle: KqueueBoundDatagram,
+      handle: EventPollingBoundDatagram,
       buf: ByteBuffer,
       from: Slot[IpSocketAddress]
-  ): KqueueDatagramOp & Repeatable = KqueueReceive(handle, buf, from)
+  ): EventPollingDatagramOp & Repeatable = EventPollingReceive(handle, buf, from)
 
-  override def receive(handle: KqueueConnectedDatagram, buf: ByteBuffer): KqueueDatagramOp & Repeatable =
-    KqueueReceive[IpSocketAddress](handle, buf, null)
+  override def receive(handle: EventPollingConnectedDatagram, buf: ByteBuffer): EventPollingDatagramOp & Repeatable =
+    EventPollingReceive[IpSocketAddress](handle, buf, null)
 
-  override def send(handle: KqueueBoundDatagram, buf: ByteBuffer, to: IpSocketAddress): KqueueDatagramOp & Repeatable =
-    KqueueSend(handle, Array(buf), to)
+  override def send(handle: EventPollingBoundDatagram, buf: ByteBuffer, to: IpSocketAddress): EventPollingDatagramOp & Repeatable =
+    EventPollingSend(handle, Array(buf), to)
 
-  override def send(handle: KqueueConnectedDatagram, buf: ByteBuffer): KqueueDatagramOp & Repeatable =
-    KqueueSend(handle, Array(buf), null)
+  override def send(handle: EventPollingConnectedDatagram, buf: ByteBuffer): EventPollingDatagramOp & Repeatable =
+    EventPollingSend(handle, Array(buf), null)
 
   override def send(
-      handle: KqueueBoundDatagram,
+      handle: EventPollingBoundDatagram,
       bufs: Array[ByteBuffer],
       to: IpSocketAddress
-  ): KqueueDatagramOp & Repeatable = KqueueSend(handle, bufs, to)
+  ): EventPollingDatagramOp & Repeatable = EventPollingSend(handle, bufs, to)
 
-  override def send(handle: KqueueConnectedDatagram, bufs: Array[ByteBuffer]): KqueueDatagramOp & Repeatable =
-    KqueueSend(handle, bufs, null)
+  override def send(handle: EventPollingConnectedDatagram, bufs: Array[ByteBuffer]): EventPollingDatagramOp & Repeatable =
+    EventPollingSend(handle, bufs, null)
 
   @annotation.targetName("datagramLocalAddress")
-  override def localAddress(handle: KqueueBoundDatagram | KqueueConnectedDatagram): IpSocketAddress =
-    KqueueSockets.addressOf(handle, peer = false).asInstanceOf[IpSocketAddress]
+  override def localAddress(handle: EventPollingBoundDatagram | EventPollingConnectedDatagram): IpSocketAddress =
+    EventPollingSockets.addressOf(handle, peer = false).asInstanceOf[IpSocketAddress]
 
   @annotation.targetName("datagramPeerAddress")
-  override def peerAddress(handle: KqueueConnectedDatagram): IpSocketAddress =
-    KqueueSockets.addressOf(handle, peer = true).asInstanceOf[IpSocketAddress]
+  override def peerAddress(handle: EventPollingConnectedDatagram): IpSocketAddress =
+    EventPollingSockets.addressOf(handle, peer = true).asInstanceOf[IpSocketAddress]
 }
 
-sealed trait KqueueUnixDatagrams extends UnixDatagrams {
-  self: KqueueInterface & KqueueHandles & KqueueSocketOptions =>
-  override type UnixBoundDatagram = KqueueUnixBoundDatagram
-  override type UnixConnectedDatagram = KqueueUnixConnectedDatagram
+sealed trait EventPollingUnixDatagrams extends UnixDatagrams {
+  self: EventPollingInterface & EventPollingHandles & EventPollingSocketOptions =>
+  override type UnixBoundDatagram = EventPollingUnixBoundDatagram
+  override type UnixConnectedDatagram = EventPollingUnixConnectedDatagram
 
   override def bindDatagram(
       local: UnixAddress,
       options: SocketOptions,
-      into: Slot[KqueueUnixBoundDatagram]
-  ): KqueueOp = {
+      into: Slot[EventPollingUnixBoundDatagram]
+  ): EventPollingOp = {
     val kind = SocketOption.Kind.UnixBoundDatagram
     Checks.checkOptions(options, supports, kind)
-    KqueueOpenDatagram(Checks.unix(local), null, options, kind, into)((fd, _, bound, owner) =>
-      new KqueueUnixBoundDatagram(fd, bound, owner)
+    EventPollingOpenDatagram(Checks.unix(local), null, options, kind, into)((fd, _, bound, owner) =>
+      new EventPollingUnixBoundDatagram(fd, bound, owner)
     )
   }
 
@@ -251,101 +251,101 @@ sealed trait KqueueUnixDatagrams extends UnixDatagrams {
       local: UnixAddress | Null,
       remote: UnixAddress,
       options: SocketOptions,
-      into: Slot[KqueueUnixConnectedDatagram]
-  ): KqueueOp = {
+      into: Slot[EventPollingUnixConnectedDatagram]
+  ): EventPollingOp = {
     val kind = SocketOption.Kind.UnixConnectedDatagram
     Checks.checkOptions(options, supports, kind)
     val from = if local == null then null else Checks.unix(local)
-    KqueueOpenDatagram(from, Checks.unix(remote), options, kind, into)((fd, _, bound, owner) =>
-      new KqueueUnixConnectedDatagram(fd, bound, owner)
+    EventPollingOpenDatagram(from, Checks.unix(remote), options, kind, into)((fd, _, bound, owner) =>
+      new EventPollingUnixConnectedDatagram(fd, bound, owner)
     )
   }
 
   @annotation.targetName("receiveUnix")
   override def receive(
-      handle: KqueueUnixBoundDatagram,
+      handle: EventPollingUnixBoundDatagram,
       buf: ByteBuffer,
       from: Slot[UnixAddress]
-  ): KqueueDatagramOp & Repeatable = KqueueReceive(handle, buf, from)
+  ): EventPollingDatagramOp & Repeatable = EventPollingReceive(handle, buf, from)
 
   @annotation.targetName("receiveUnixConnected")
-  override def receive(handle: KqueueUnixConnectedDatagram, buf: ByteBuffer): KqueueDatagramOp & Repeatable =
-    KqueueReceive[UnixAddress](handle, buf, null)
+  override def receive(handle: EventPollingUnixConnectedDatagram, buf: ByteBuffer): EventPollingDatagramOp & Repeatable =
+    EventPollingReceive[UnixAddress](handle, buf, null)
 
-  override def send(handle: KqueueUnixBoundDatagram, buf: ByteBuffer, to: UnixAddress): KqueueDatagramOp & Repeatable =
-    KqueueSend(handle, Array(buf), Checks.unix(to))
+  override def send(handle: EventPollingUnixBoundDatagram, buf: ByteBuffer, to: UnixAddress): EventPollingDatagramOp & Repeatable =
+    EventPollingSend(handle, Array(buf), Checks.unix(to))
 
   @annotation.targetName("sendUnixConnected")
-  override def send(handle: KqueueUnixConnectedDatagram, buf: ByteBuffer): KqueueDatagramOp & Repeatable =
-    KqueueSend(handle, Array(buf), null)
+  override def send(handle: EventPollingUnixConnectedDatagram, buf: ByteBuffer): EventPollingDatagramOp & Repeatable =
+    EventPollingSend(handle, Array(buf), null)
 
   override def send(
-      handle: KqueueUnixBoundDatagram,
+      handle: EventPollingUnixBoundDatagram,
       bufs: Array[ByteBuffer],
       to: UnixAddress
-  ): KqueueDatagramOp & Repeatable = KqueueSend(handle, bufs, Checks.unix(to))
+  ): EventPollingDatagramOp & Repeatable = EventPollingSend(handle, bufs, Checks.unix(to))
 
   @annotation.targetName("sendUnixConnectedMany")
-  override def send(handle: KqueueUnixConnectedDatagram, bufs: Array[ByteBuffer]): KqueueDatagramOp & Repeatable =
-    KqueueSend(handle, bufs, null)
+  override def send(handle: EventPollingUnixConnectedDatagram, bufs: Array[ByteBuffer]): EventPollingDatagramOp & Repeatable =
+    EventPollingSend(handle, bufs, null)
 
   @annotation.targetName("unixDatagramLocalAddress")
-  override def localAddress(handle: KqueueUnixBoundDatagram | KqueueUnixConnectedDatagram): UnixAddress =
-    KqueueSockets.addressOf(handle, peer = false).asInstanceOf[UnixAddress]
+  override def localAddress(handle: EventPollingUnixBoundDatagram | EventPollingUnixConnectedDatagram): UnixAddress =
+    EventPollingSockets.addressOf(handle, peer = false).asInstanceOf[UnixAddress]
 
   @annotation.targetName("unixDatagramPeerAddress")
-  override def peerAddress(handle: KqueueUnixConnectedDatagram): UnixAddress =
-    KqueueSockets.addressOf(handle, peer = true).asInstanceOf[UnixAddress]
+  override def peerAddress(handle: EventPollingUnixConnectedDatagram): UnixAddress =
+    EventPollingSockets.addressOf(handle, peer = true).asInstanceOf[UnixAddress]
 }
 
-sealed trait KqueueBlockingOps extends Blocking { self: KqueueInterface =>
-  override def blocking(body: () => Unit): KqueueOp = KqueueBlocking(body)
-  override def blocking[A <: AnyRef](body: () => A, into: Slot[A]): KqueueOp = KqueueBlockingValue(body, into)
+sealed trait EventPollingBlockingOps extends Blocking { self: EventPollingInterface =>
+  override def blocking(body: () => Unit): EventPollingOp = EventPollingBlocking(body)
+  override def blocking[A <: AnyRef](body: () => A, into: Slot[A]): EventPollingOp = EventPollingBlockingValue(body, into)
 }
 
-sealed trait KqueueRegularFiles extends RegularFiles {
-  self: KqueueInterface & KqueueHandles & KqueueByteStreams =>
-  override type File = KqueueFile
+sealed trait EventPollingRegularFiles extends RegularFiles {
+  self: EventPollingInterface & EventPollingHandles & EventPollingByteStreams =>
+  override type File = EventPollingFile
 
-  override def open(path: String, write: Boolean, into: Slot[KqueueFile]): KqueueOp = KqueueOpenFile(path, write, into)
+  override def open(path: String, write: Boolean, into: Slot[EventPollingFile]): EventPollingOp = EventPollingOpenFile(path, write, into)
 
-  override def read(handle: KqueueFile, buf: ByteBuffer, offset: Long): KqueueOp & Repeatable = {
+  override def read(handle: EventPollingFile, buf: ByteBuffer, offset: Long): EventPollingOp & Repeatable = {
     Checks.checkOffset(offset)
-    KqueueFileRead(handle, Array(buf), offset)
+    EventPollingFileRead(handle, Array(buf), offset)
   }
 
-  override def write(handle: KqueueFile, buf: ByteBuffer, offset: Long): KqueueOp & Repeatable = {
+  override def write(handle: EventPollingFile, buf: ByteBuffer, offset: Long): EventPollingOp & Repeatable = {
     Checks.checkOffset(offset)
-    KqueueFileWrite(handle, Array(buf), offset)
+    EventPollingFileWrite(handle, Array(buf), offset)
   }
 
-  override def sync(handle: KqueueFile): KqueueOp & Repeatable = KqueueFileSync(handle)
+  override def sync(handle: EventPollingFile): EventPollingOp & Repeatable = EventPollingFileSync(handle)
 }
 
-sealed trait KqueueResolving extends Resolving { self: KqueueInterface =>
-  override def resolve(host: String, into: Slot[List[IpAddress]]): KqueueOp = KqueueResolve(host, into)
+sealed trait EventPollingResolving extends Resolving { self: EventPollingInterface =>
+  override def resolve(host: String, into: Slot[List[IpAddress]]): EventPollingOp = EventPollingResolve(host, into)
 }
 
-sealed trait KqueueFifos extends Fifos { self: KqueueInterface & KqueueHandles & KqueueByteStreams =>
-  override def openFifoForReading(path: String, into: Slot[KqueueReadable]): KqueueOp =
-    KqueueOpenFifo[KqueueReadable](path, write = false, into)(new FifoRead(_, _))
+sealed trait EventPollingFifos extends Fifos { self: EventPollingInterface & EventPollingHandles & EventPollingByteStreams =>
+  override def openFifoForReading(path: String, into: Slot[EventPollingReadable]): EventPollingOp =
+    EventPollingOpenFifo[EventPollingReadable](path, write = false, into)(new FifoRead(_, _))
 
-  override def openFifoForWriting(path: String, into: Slot[KqueueWritable]): KqueueOp =
-    KqueueOpenFifo[KqueueWritable](path, write = true, into)(new FifoWrite(_, _))
+  override def openFifoForWriting(path: String, into: Slot[EventPollingWritable]): EventPollingOp =
+    EventPollingOpenFifo[EventPollingWritable](path, write = true, into)(new FifoWrite(_, _))
 }
 
-object KqueueOps
-    extends KqueueInterface,
-      KqueueHandles,
-      KqueueByteStreams,
-      KqueuePipeOps,
-      KqueueSocketOptions,
-      KqueueStreamSockets,
-      KqueueIpStreams,
-      KqueueUnixStreams,
-      KqueueIpDatagrams,
-      KqueueUnixDatagrams,
-      KqueueBlockingOps,
-      KqueueRegularFiles,
-      KqueueResolving,
-      KqueueFifos {}
+object EventPollingOps
+    extends EventPollingInterface,
+      EventPollingHandles,
+      EventPollingByteStreams,
+      EventPollingPipeOps,
+      EventPollingSocketOptions,
+      EventPollingStreamSockets,
+      EventPollingIpStreams,
+      EventPollingUnixStreams,
+      EventPollingIpDatagrams,
+      EventPollingUnixDatagrams,
+      EventPollingBlockingOps,
+      EventPollingRegularFiles,
+      EventPollingResolving,
+      EventPollingFifos {}

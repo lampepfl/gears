@@ -174,7 +174,7 @@ object Stacks {
         () => Seq(nativeBinary(root).getPath()),
         root,
         env = Map("SCALANATIVE_GC_TRAP_BASED_YIELDPOINTS" -> "0"),
-        version = () => "`KqueueBackend`, Scala Native nightly, release build"
+        version = () => "`EventPollingBackend`, Scala Native nightly, release build"
       ),
       Stack(
         "nio-pool",

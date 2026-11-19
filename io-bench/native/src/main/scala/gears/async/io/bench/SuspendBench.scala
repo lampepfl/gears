@@ -4,7 +4,7 @@ package bench
 import gears.async.Async
 import gears.async.Future
 import gears.async.Listener
-import gears.async.io.kqueue.KqueueBackend
+import gears.async.io.eventpolling.EventPollingBackend
 
 import scala.scalanative.runtime.Continuations
 
@@ -98,7 +98,7 @@ object SuspendBench {
     def chosen(what: String): Boolean = only.forall(_ == what)
     if chosen("runtime") then for _ <- 1 to 2 do for depth <- Seq(0, 8, 32, 128) do raw(depth, rounds)
     if chosen("await") || chosen("op") then
-      KqueueBackend.runOn(1, shareable.Starvation.printWarning) { io ?=>
+      EventPollingBackend.runOn(1, shareable.Starvation.printWarning) { io ?=>
         for _ <- 1 to 2 do
           if chosen("await") then awaits(rounds)
           if chosen("op") then

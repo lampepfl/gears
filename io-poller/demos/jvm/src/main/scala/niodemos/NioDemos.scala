@@ -6,7 +6,7 @@ import gears.async.io.nio.{NioBackend, NioOps, NioPoolBackend}
 import gears.io.demos.{DemoBackends, DemoCommands, DemoRunner}
 
 /** The gears demos over the JVM backends: the testkit's demo command line (`DemoCommands`), run as
-  * `sbt "ioNioDemos/run <command>"`, on the JDK's virtual threads, or with `--backend nio-pool` on virtual threads
+  * `sbt "ioPollerDemosJVM/run <command>"`, on the JDK's virtual threads, or with `--backend nio-pool` on virtual threads
   * that the backend's own pool carries. The demos that need FIFOs or Unix datagram sockets, which the JDK lacks, fail
   * saying so.
   */

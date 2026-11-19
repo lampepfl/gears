@@ -1,5 +1,5 @@
 package gears.async.io
-package kqueue
+package eventpolling
 
 import gears.async.Async
 import gears.async.AsyncSupport
@@ -21,24 +21,24 @@ import scala.util.Success
 import scala.util.Try
 
 /** An op like a read: it has no deadline of its own, and only a time limit puts it on the heap. */
-private[kqueue] final class WaitingOp extends RepeatableAbstractTimerHeapOp, HeldOnOwnKind[WaitingOp] {
+private[eventpolling] final class WaitingOp extends RepeatableAbstractTimerHeapOp, HeldOnOwnKind[WaitingOp] {
   def wakeup(resumedAt: Long): Try[Unit] = WorkpoolScheduler.SuccessUnit
 }
 
-private[kqueue] object WaitingOps extends Interface {
+private[eventpolling] object WaitingOps extends Interface {
   type Op = WaitingOp
   def timer(duration: FiniteDuration): Op & Repeatable = ???
   def deadlineTimer(nanoTime: Long): Op & Repeatable & gears.async.io.Deadline = ???
 }
 
-private[kqueue] object WaitingBackend extends Backend {
+private[eventpolling] object WaitingBackend extends Backend {
   type Interface = WaitingOps.type
   def pool(bufferSize: Int, buffers: Int): BufferPool = ???
   private[io] def run[T](program: Io[Interface] ?=> Async.Spawn ?=> T): T = ???
 }
 
 /** One worker, so that a task runs until it suspends, and in the order it was submitted. */
-private[kqueue] final class WaitingScheduler
+private[eventpolling] final class WaitingScheduler
     extends WorkpoolScheduler[WaitingOps.type](WaitingBackend, WaitingOps, 1)
     with NativeSuspend {
   override protected def selectWorker() = workerOfCurrentThread()
@@ -141,7 +141,7 @@ class NoDeadlineOpSuite extends munit.FunSuite {
   }
 
   test("a deadline already passed, even a negative one, is on the heap and fires") {
-    given KqueueBackend.type = KqueueBackend
+    given EventPollingBackend.type = EventPollingBackend
     Io.run { io ?=>
       io.perform(io.ops.deadlineTimer(-5L))
     }

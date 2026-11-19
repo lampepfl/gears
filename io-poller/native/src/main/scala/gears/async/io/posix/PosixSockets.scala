@@ -413,9 +413,11 @@ object PosixSockets {
     decode(address, !length)
   }
 
-  /** Decodes a socket address filled in by the kernel. An unnamed Unix socket has the empty path. */
+  /** Decodes a socket address filled in by the kernel. An unnamed Unix socket has the empty path: macOS gives it an
+    * address with no path, and Linux gives a packet from one no address at all, of no length, which no IP socket's is.
+    */
   def decode(addr: Ptr[socket.sockaddr], length: socket.socklen_t): IpSocketAddress | UnixAddress = {
-    val family = addr.sa_family.toInt
+    val family = if length.toInt == 0 then socket.AF_UNIX else addr.sa_family.toInt
     if family == socket.AF_UNIX then {
       val unix = addr.asInstanceOf[Ptr[un.sockaddr_un]]
       val headerLength = sizeOf[un.sockaddr_un] - sizeOf[CArray[CChar, un._108]]

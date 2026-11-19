@@ -1,4 +1,4 @@
-package gears.async.io.kqueue
+package gears.async.io.eventpolling
 
 import gears.async.io.posix.NativeBuffer
 import gears.async.io.shareable.LendingPool

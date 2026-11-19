@@ -1,4 +1,4 @@
-package gears.async.io.kqueue
+package gears.async.io.eventpolling
 
 import gears.async.Async
 import gears.async.io.Deadline
@@ -42,125 +42,116 @@ import gears.async.io.shareable.AbstractSendOp
 import gears.async.io.shareable.AbstractWriteOp
 import gears.async.io.shareable.HandleOwner
 import gears.async.io.shareable.LendingPool
-import gears.async.io.shareable.TimerHeapOp
+import gears.async.io.shareable.PoolOp
 import gears.async.io.shareable.Worker
 
 import java.nio.ByteBuffer
 import scala.concurrent.duration.FiniteDuration
 
-sealed trait KqueueOp extends TimerHeapOp:
+/** An op of this backend's, of one of the kinds a pool's worker performs (see `PoolOp`). */
+sealed trait EventPollingOp extends PoolOp[EventPoller]:
 
-  /** A kqueue worker takes any kqueue op among its timers (see `KqueuePoller.Timer`). */
-  type Source = KqueuePoller
-  final def _holdTimer(worker: KqueuePoller): Unit = worker.addTimer(this)
+  /** A worker takes any op of this backend's among its timers (see `EventPoller.Timer`). */
+  final def _holdTimer(worker: EventPoller): Unit = worker.addTimer(this)
 
-/** An op that waits for its handle to be ready, on the worker that listens for it (see `ReadyWaiting`). */
-sealed trait KqueueReadinessOp extends KqueueOp:
-  def performWhenReady(self: KqueuePoller)(using Async): Unit
+sealed trait EventPollingReadinessOp extends EventPollingOp, PoolOp.Readiness[EventPoller]
 
-/** An op done as it is performed, with nothing to wait for (see `ImmediateOp`). */
-sealed trait KqueueImmediateOp extends KqueueOp:
-  def perform(owner: HandleOwner): Unit
+sealed trait EventPollingImmediateOp extends EventPollingOp, PoolOp.Immediate[EventPoller]
 
-sealed trait KqueueReadableOp extends KqueueReadinessOp
+sealed trait EventPollingReadableOp extends EventPollingReadinessOp
 
-sealed trait KqueueWritableOp extends KqueueReadinessOp
+sealed trait EventPollingWritableOp extends EventPollingReadinessOp
 
-sealed trait KqueueAcceptOp extends KqueueReadinessOp
+sealed trait EventPollingAcceptOp extends EventPollingReadinessOp
 
-/** An op whose work is done off the workers' threads (see `WorkOffThread`). */
-sealed trait KqueueOffThreadOp extends KqueueOp:
-  def performOffThread(worker: Worker & KqueuePoller)(using Async): Unit
-  def performInPlace(worker: Worker & KqueuePoller)(using Async): Unit
+sealed trait EventPollingOffThreadOp extends EventPollingOp, PoolOp.OffThread[EventPoller]
 
-sealed trait KqueueDatagramOp extends KqueueReadinessOp
+sealed trait EventPollingDatagramOp extends EventPollingReadinessOp
 
-sealed trait KqueueConnectOp extends KqueueOp:
-  def performConnect(self: KqueuePoller)(using Async): Unit
+sealed trait EventPollingConnectOp extends EventPollingOp, PoolOp.Connect[EventPoller]
 
-sealed trait KqueueTimerOp extends KqueueOp
+sealed trait EventPollingTimerOp extends EventPollingOp, PoolOp.Timed[EventPoller]
 
-sealed trait KqueuePipeOp extends KqueueImmediateOp
+sealed trait EventPollingPipeOp extends EventPollingImmediateOp
 
-sealed trait KqueueDeadlineOp extends KqueueOp with Deadline
+sealed trait EventPollingDeadlineOp extends EventPollingOp, PoolOp.Timed[EventPoller], Deadline
 
-sealed trait KqueueCloseOp extends KqueueOp:
-  def performClose(self: KqueuePoller)(using Async): Unit
+sealed trait EventPollingCloseOp extends EventPollingOp, PoolOp.Close[EventPoller]
 
-private[kqueue] final class KqueueRead(handle: KqueueWaitingReadable, buf: ByteBuffer)
+private[eventpolling] final class EventPollingRead(handle: EventPollingWaitingReadable, buf: ByteBuffer)
     extends AbstractReadOp(handle, buf),
-      KqueueReadableOp,
-      PosixReadOps[KqueueWaitingReadable]
+      EventPollingReadableOp,
+      PosixReadOps[EventPollingWaitingReadable]
 
-private[kqueue] final class KqueueWrite(handle: KqueueWaitingWritable, buf: ByteBuffer)
+private[eventpolling] final class EventPollingWrite(handle: EventPollingWaitingWritable, buf: ByteBuffer)
     extends AbstractWriteOp(handle, buf),
-      KqueueWritableOp,
-      PosixWriteOps[KqueueWaitingWritable]
+      EventPollingWritableOp,
+      PosixWriteOps[EventPollingWaitingWritable]
 
-private[kqueue] final class KqueueScatterRead(handle: KqueueWaitingReadable, bufs: Array[ByteBuffer])
+private[eventpolling] final class EventPollingScatterRead(handle: EventPollingWaitingReadable, bufs: Array[ByteBuffer])
     extends AbstractScatterReadOp(handle, bufs),
-      KqueueReadableOp,
-      PosixReadOps[KqueueWaitingReadable]
+      EventPollingReadableOp,
+      PosixReadOps[EventPollingWaitingReadable]
 
-private[kqueue] final class KqueuePooledRead(handle: KqueueWaitingReadable, pool: LendingPool, into: Slot[Received])
+private[eventpolling] final class EventPollingPooledRead(handle: EventPollingWaitingReadable, pool: LendingPool, into: Slot[Received])
     extends AbstractPooledReadOp(handle, pool, into),
-      KqueueReadableOp,
-      PosixReadOps[KqueueWaitingReadable]
+      EventPollingReadableOp,
+      PosixReadOps[EventPollingWaitingReadable]
 
-private[kqueue] final class KqueueGatherWrite(handle: KqueueWaitingWritable, bufs: Array[ByteBuffer])
+private[eventpolling] final class EventPollingGatherWrite(handle: EventPollingWaitingWritable, bufs: Array[ByteBuffer])
     extends AbstractGatherWriteOp(handle, bufs),
-      KqueueWritableOp,
-      PosixWriteOps[KqueueWaitingWritable]
+      EventPollingWritableOp,
+      PosixWriteOps[EventPollingWaitingWritable]
 
-private[kqueue] final class KqueueCloseHandle(handle: KqueueHandle) extends AbstractCloseOp(handle) with KqueueCloseOp
+private[eventpolling] final class EventPollingCloseHandle(handle: EventPollingHandle) extends AbstractCloseOp(handle) with EventPollingCloseOp
 
-private[kqueue] final class KqueueMakePipe(readSlot: Slot[KqueueReadable], writeSlot: Slot[KqueueWritable])
+private[eventpolling] final class EventPollingMakePipe(readSlot: Slot[EventPollingReadable], writeSlot: Slot[EventPollingWritable])
     extends AbstractMakePipeOp(readSlot, writeSlot)
-    with KqueuePipeOpener
-    with KqueuePipeOp
+    with EventPollingPipeOpener
+    with EventPollingPipeOp
 
-private[kqueue] final class KqueueMakeTimer(duration: FiniteDuration)
+private[eventpolling] final class EventPollingMakeTimer(duration: FiniteDuration)
     extends AbstractMakeTimerOp(duration)
-    with KqueueTimerOp
+    with EventPollingTimerOp
 
-private[kqueue] final class KqueueMakeDeadline(initial: Long)
+private[eventpolling] final class EventPollingMakeDeadline(initial: Long)
     extends AbstractMakeDeadlineOp(initial)
-    with KqueueDeadlineOp
+    with EventPollingDeadlineOp
 
 // ---- Stream sockets
 
-private[kqueue] final class KqueueConnect(address: SocketAddress, options: SocketOptions, into: Slot[KqueueConnection])
+private[eventpolling] final class EventPollingConnect(address: SocketAddress, options: SocketOptions, into: Slot[EventPollingConnection])
     extends AbstractConnectOp(into),
-      KqueueConnectOp:
-  def _startConnect(owner: HandleOwner): KqueueConnection = KqueueSockets.startConnect(address, options, owner)
-  def _finishConnect(socket: KqueueConnection): Boolean = KqueueSockets.finishConnect(socket)
+      EventPollingConnectOp:
+  def _startConnect(owner: HandleOwner): EventPollingConnection = EventPollingSockets.startConnect(address, options, owner)
+  def _finishConnect(socket: EventPollingConnection): Boolean = EventPollingSockets.finishConnect(socket)
 
-private[kqueue] final class KqueueListen(address: SocketAddress, options: SocketOptions, into: Slot[KqueueListener])
+private[eventpolling] final class EventPollingListen(address: SocketAddress, options: SocketOptions, into: Slot[EventPollingListener])
     extends AbstractOpenOp(into),
-      KqueueImmediateOp:
-  def _open(owner: HandleOwner): KqueueListener = KqueueSockets.listen(address, options, owner)
+      EventPollingImmediateOp:
+  def _open(owner: HandleOwner): EventPollingListener = EventPollingSockets.listen(address, options, owner)
 
-private[kqueue] final class KqueueAccept(listener: KqueueListener, into: Slot[KqueueConnection])
+private[eventpolling] final class EventPollingAccept(listener: EventPollingListener, into: Slot[EventPollingConnection])
     extends AbstractAcceptOp(listener, into),
-      KqueueAcceptOp:
-  def _accept(listener: KqueueListener): KqueueConnection | Null = KqueueSockets.accept(listener)
+      EventPollingAcceptOp:
+  def _accept(listener: EventPollingListener): EventPollingConnection | Null = EventPollingSockets.accept(listener)
 
-private[kqueue] final class KqueueAcceptAll(listener: KqueueListener, into: Slot[Array[KqueueConnection]], max: Int)
+private[eventpolling] final class EventPollingAcceptAll(listener: EventPollingListener, into: Slot[Array[EventPollingConnection]], max: Int)
     extends AbstractAcceptAllOp(listener, into, max),
-      KqueueAcceptOp:
-  def _accept(listener: KqueueListener): KqueueConnection | Null = KqueueSockets.accept(listener)
+      EventPollingAcceptOp:
+  def _accept(listener: EventPollingListener): EventPollingConnection | Null = EventPollingSockets.accept(listener)
 
-private[kqueue] final class KqueueShutdownOutput(connection: KqueueConnection)
+private[eventpolling] final class EventPollingShutdownOutput(connection: EventPollingConnection)
     extends AbstractHandleCallOp(connection),
-      KqueueImmediateOp:
-  def _call(connection: KqueueConnection): Unit = PosixSockets.shutdownOutput(connection.fd)
+      EventPollingImmediateOp:
+  def _call(connection: EventPollingConnection): Unit = PosixSockets.shutdownOutput(connection.fd)
 
 // ---- Datagram sockets
 
 /** Opens a datagram socket of kind `kind`, bound to `local` and connected to `remote` where given, as the handle `make`
   * makes of it.
   */
-private[kqueue] final class KqueueOpenDatagram[D <: KqueueDatagramSocket](
+private[eventpolling] final class EventPollingOpenDatagram[D <: EventPollingDatagramSocket](
     local: SocketAddress | Null,
     remote: SocketAddress | Null,
     options: SocketOptions,
@@ -168,65 +159,65 @@ private[kqueue] final class KqueueOpenDatagram[D <: KqueueDatagramSocket](
     into: Slot[D]
 )(make: (Int, Boolean, UnixBinding | Null, HandleOwner) => D)
     extends AbstractOpenOp(into),
-      KqueueImmediateOp:
-  def _open(owner: HandleOwner): D = KqueueSockets.openDatagram(local, remote, options, kind, owner)(make)
+      EventPollingImmediateOp:
+  def _open(owner: HandleOwner): D = EventPollingSockets.openDatagram(local, remote, options, kind, owner)(make)
 
-private[kqueue] final class KqueueReceive[A <: AnyRef](
-    socket: KqueueDatagramSocket,
+private[eventpolling] final class EventPollingReceive[A <: AnyRef](
+    socket: EventPollingDatagramSocket,
     buf: ByteBuffer,
     from: Slot[A] | Null
 ) extends AbstractReceiveOp(socket, buf, from),
-      KqueueDatagramOp:
-  def _receive(socket: KqueueDatagramSocket, buf: ByteBuffer, from: Slot[A] | Null): Boolean =
+      EventPollingDatagramOp:
+  def _receive(socket: EventPollingDatagramSocket, buf: ByteBuffer, from: Slot[A] | Null): Boolean =
     PosixDatagrams.receive(socket.fd, buf, from)
 
 /** Sends to `to`, or to the socket's peer if it is null, which a connected socket's send has it. */
-private[kqueue] final class KqueueSend(socket: KqueueDatagramSocket, bufs: Array[ByteBuffer], to: SocketAddress | Null)
+private[eventpolling] final class EventPollingSend(socket: EventPollingDatagramSocket, bufs: Array[ByteBuffer], to: SocketAddress | Null)
     extends AbstractSendOp(socket, bufs, connected = to == null),
-      KqueueDatagramOp:
-  def _send(socket: KqueueDatagramSocket, bufs: Array[ByteBuffer]): Boolean =
+      EventPollingDatagramOp:
+  def _send(socket: EventPollingDatagramSocket, bufs: Array[ByteBuffer]): Boolean =
     PosixDatagrams.send(socket.fd, socket.ipv6, bufs, to)
 
 // ---- Blocking code
 
-private[kqueue] final class KqueueBlocking(body: () => Unit) extends AbstractBlockingOp(body), KqueueOffThreadOp
+private[eventpolling] final class EventPollingBlocking(body: () => Unit) extends AbstractBlockingOp(body), EventPollingOffThreadOp
 
-private[kqueue] final class KqueueBlockingValue[A <: AnyRef](body: () => A, into: Slot[A])
+private[eventpolling] final class EventPollingBlockingValue[A <: AnyRef](body: () => A, into: Slot[A])
     extends AbstractBlockingValueOp(body, into),
-      KqueueOffThreadOp
+      EventPollingOffThreadOp
 
 // ---- Regular files: `start` is the offset a positional op begins at, or negative for the file's stream position
 
-private[kqueue] final class KqueueOpenFile(path: String, write: Boolean, into: Slot[KqueueFile])
+private[eventpolling] final class EventPollingOpenFile(path: String, write: Boolean, into: Slot[EventPollingFile])
     extends AbstractOpenFileOp(path, write, into),
-      KqueueOffThreadOp:
-  def _openFile(path: String, write: Boolean, owner: HandleOwner): KqueueFile =
-    new KqueueFile(Descriptors.openFile(path, write), owner)
+      EventPollingOffThreadOp:
+  def _openFile(path: String, write: Boolean, owner: HandleOwner): EventPollingFile =
+    new EventPollingFile(Descriptors.openFile(path, write), owner)
 
-private[kqueue] final class KqueueFileRead(file: KqueueFile, bufs: Array[ByteBuffer], start: Long)
+private[eventpolling] final class EventPollingFileRead(file: EventPollingFile, bufs: Array[ByteBuffer], start: Long)
     extends AbstractFileReadOp(file, bufs, start),
-      KqueueOffThreadOp:
-  def _readAt(file: KqueueFile, buf: ByteBuffer, offset: Long): Int = PosixFiles.readAt(file.fd, buf, offset)
+      EventPollingOffThreadOp:
+  def _readAt(file: EventPollingFile, buf: ByteBuffer, offset: Long): Int = PosixFiles.readAt(file.fd, buf, offset)
 
-private[kqueue] final class KqueueFileWrite(file: KqueueFile, bufs: Array[ByteBuffer], start: Long)
+private[eventpolling] final class EventPollingFileWrite(file: EventPollingFile, bufs: Array[ByteBuffer], start: Long)
     extends AbstractFileWriteOp(file, bufs, start),
-      KqueueOffThreadOp:
-  def _writeAt(file: KqueueFile, buf: ByteBuffer, offset: Long): Int = PosixFiles.writeAt(file.fd, buf, offset)
+      EventPollingOffThreadOp:
+  def _writeAt(file: EventPollingFile, buf: ByteBuffer, offset: Long): Int = PosixFiles.writeAt(file.fd, buf, offset)
 
-private[kqueue] final class KqueueFilePooledRead(file: KqueueFile, pool: LendingPool, into: Slot[Received])
+private[eventpolling] final class EventPollingFilePooledRead(file: EventPollingFile, pool: LendingPool, into: Slot[Received])
     extends AbstractFilePooledReadOp(file, pool, into),
-      KqueueOffThreadOp:
-  def _readAt(file: KqueueFile, buf: ByteBuffer, offset: Long): Int = PosixFiles.readAt(file.fd, buf, offset)
+      EventPollingOffThreadOp:
+  def _readAt(file: EventPollingFile, buf: ByteBuffer, offset: Long): Int = PosixFiles.readAt(file.fd, buf, offset)
 
-private[kqueue] final class KqueueFileSync(file: KqueueFile) extends AbstractFileSyncOp(file), KqueueOffThreadOp:
-  def _sync(file: KqueueFile): Unit = PosixFiles.sync(file.fd)
+private[eventpolling] final class EventPollingFileSync(file: EventPollingFile) extends AbstractFileSyncOp(file), EventPollingOffThreadOp:
+  def _sync(file: EventPollingFile): Unit = PosixFiles.sync(file.fd)
 
 // ---- Name resolution
 
 /** There is no `getaddrinfo` that does not block, so the lookup runs off the workers, the way libuv and tokio do it. */
-private[kqueue] final class KqueueResolve(host: String, into: Slot[List[IpAddress]])
+private[eventpolling] final class EventPollingResolve(host: String, into: Slot[List[IpAddress]])
     extends AbstractResolveOp(host, into),
-      KqueueOffThreadOp:
+      EventPollingOffThreadOp:
   def _lookup(host: String): List[IpAddress] = PosixResolver.lookup(host) match
     case Right(addresses) => addresses
     case Left(error)      => throw new java.io.IOException(s"Failed to resolve $host: $error")
@@ -234,10 +225,10 @@ private[kqueue] final class KqueueResolve(host: String, into: Slot[List[IpAddres
 // ---- FIFOs
 
 /** Opens the FIFO at `path`, without waiting for its other end, as the handle `make` makes of its descriptor. */
-private[kqueue] final class KqueueOpenFifo[K <: KqueueHandle](path: String, write: Boolean, into: Slot[K])(
+private[eventpolling] final class EventPollingOpenFifo[K <: EventPollingHandle](path: String, write: Boolean, into: Slot[K])(
     make: (Int, HandleOwner) => K
 ) extends AbstractOpenOp(into),
-      KqueueImmediateOp:
+      EventPollingImmediateOp:
   gears.async.io.shareable.Checks.checkPath(path)
   def _open(owner: HandleOwner): K =
     val fd = Descriptors.openFifo(path, write)

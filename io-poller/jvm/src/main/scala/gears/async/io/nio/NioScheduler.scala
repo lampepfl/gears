@@ -5,7 +5,8 @@ import gears.async.Cancellable
 import gears.async.io.Backend
 import gears.async.io.shareable.HandleOwner
 import gears.async.io.shareable.Starvation
-import gears.async.io.shareable.Worker
+import gears.async.io.shareable.PoolOp
+import gears.async.io.shareable.PoolOpWorker
 import gears.async.io.shareable.WorkpoolScheduler
 
 import java.util.concurrent.ThreadFactory
@@ -53,26 +54,16 @@ abstract class NioScheduler(
     */
   protected def futuresOnOwnThreads: Boolean = false
 
-  class NioWorker(id: Int, owner: HandleOwner) extends Worker(id, owner), NioPoller {
+  class NioWorker(id: Int, owner: HandleOwner) extends PoolOpWorker[NioPoller](id, owner), NioPoller {
     type Op = NioOp
 
-    override def performOp(op: NioOp)(using Async): Unit =
-      op match
-        case timer: NioMakeTimer =>
-          // On a thread of its own a timer already due gives the other threads their turn, and is done.
-          if futuresOnOwnThreads && timer.isDue then Thread.`yield`()
-          else
-            timer.holdTimerOn(this)
-            timer.parkUntilSettled()
-        case deadline: NioMakeDeadline =>
-          deadline.holdTimerOn(this)
-          deadline.parkUntilSettled()
-        case close: NioCloseOp         => close.performClose(this)
-        case ready: NioReadinessOp     => ready.performWhenReady(this)
-        case immediate: NioImmediateOp => immediate.perform(handleOwner)
-        case work: NioOffThreadOp      =>
-          if futuresOnOwnThreads then work.performOnCaller(this) else work.performOffThread(this)
-        case connect: NioConnectOp => connect.performConnect(this)
+    // On a thread of its own a timer already due gives the other threads their turn, and is done.
+    override protected[io] def performTimed(timed: PoolOp.Timed[NioPoller])(using Async): Unit = timed match
+      case timer: NioMakeTimer if futuresOnOwnThreads && timer.isDue => Thread.`yield`()
+      case _                                                         => super.performTimed(timed)
+
+    protected[io] def performBlocking(work: PoolOp.OffThread[NioPoller])(using Async): Unit =
+      if futuresOnOwnThreads then work.performOnCaller(this) else work.performOffThread(this)
   }
 }
 

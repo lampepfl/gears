@@ -1,6 +1,7 @@
 package gears.async.io
 package kqueue
 
+import gears.async.io.eventpolling.*
 import gears.async.Async
 import gears.async.AsyncSupport
 import gears.async.Future
@@ -39,10 +40,10 @@ class KqueuePollFailureSuite extends munit.FunSuite {
     }
   }
 
-  private def pipe(io: KqueueScheduler)(using Async): (KqueueReadable, KqueueWritable) = {
-    val read = Slot[KqueueReadable]()
-    val write = Slot[KqueueWritable]()
-    io.perform(KqueueOps.pipe(read, write))
+  private def pipe(io: EventPollingScheduler)(using Async): (EventPollingReadable, EventPollingWritable) = {
+    val read = Slot[EventPollingReadable]()
+    val write = Slot[EventPollingWritable]()
+    io.perform(EventPollingOps.pipe(read, write))
     (read.clear(), write.clear())
   }
 
@@ -61,20 +62,20 @@ class KqueuePollFailureSuite extends munit.FunSuite {
       given poolScheduler: pool.Scheduler = pool
       try
         Async.blocking(Future {
-          pool.perform(KqueueOps.timer(1))
+          pool.perform(EventPollingOps.timer(1))
           assert(pool.fatalFailure == null)
           pool.failing.set(true)
           // Timers are the workers' own heaps, which need no kqueue: this one sees the failure through.
           val deadline = System.nanoTime() + 5_000_000_000L
-          while pool.fatalFailure == null && System.nanoTime() < deadline do pool.perform(KqueueOps.timer(1))
+          while pool.fatalFailure == null && System.nanoTime() < deadline do pool.perform(EventPollingOps.timer(1))
           val failure = pool.fatalFailure
           assert(failure.isInstanceOf[IOException], String.valueOf(failure))
           assert(failure.getMessage().contains("gave up"), failure.getMessage())
 
           // Given up, not retried for ever: after a moment no more polls are made.
-          pool.perform(KqueueOps.timer(50))
+          pool.perform(EventPollingOps.timer(50))
           val polls = pool.failedPolls.get()
-          pool.perform(KqueueOps.timer(50))
+          pool.perform(EventPollingOps.timer(50))
           assertEquals(pool.failedPolls.get(), polls)
           assert(polls <= 2 * 3, s"$polls failed polls for two workers")
 
@@ -94,12 +95,12 @@ class KqueuePollFailureSuite extends munit.FunSuite {
       given poolSupport: (AsyncSupport { type Scheduler = pool.Scheduler }) = pool
       given poolScheduler: pool.Scheduler = pool
       try
-        // As `KqueueBackend.run` runs a program: under the pool's group, which a fatal failure cancels.
+        // As `EventPollingBackend.run` runs a program: under the pool's group, which a fatal failure cancels.
         val outcome = Async.blocking {
           Async.withNewCompletionGroup(pool.rootGroup)(Future {
             val (in, out) = pipe(pool)
-            val reader = Future(pool.perform(KqueueOps.read(in, ByteBuffer.allocate(1))))
-            pool.perform(KqueueOps.timer(20)) // it waits, on a kqueue that is about to fail
+            val reader = Future(pool.perform(EventPollingOps.read(in, ByteBuffer.allocate(1))))
+            pool.perform(EventPollingOps.timer(20)) // it waits, on a kqueue that is about to fail
             pool.failing.set(true)
             reader.awaitResult
           }.awaitResult)

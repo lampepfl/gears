@@ -1,7 +1,6 @@
 package gears.async.io.nio
 
-import gears.async.io.shareable.EventSource
-import gears.async.io.shareable.Poller
+import gears.async.io.shareable.PoolSource
 import gears.async.io.shareable.ReadinessOp
 import gears.async.io.shareable.TimerHeap.TimerOp
 
@@ -23,7 +22,7 @@ import java.util.function.Consumer
   * Unlike a worker's own thread on Scala Native, the threads that perform ops here are not the worker's: every method
   * but `waitForDeadline` may be called from any thread.
   */
-trait NioPoller extends Poller, EventSource {
+trait NioPoller extends PoolSource {
 
   /** Its timers include every op of this backend's: the worker it is part of takes its pool's ops. */
   type Timer >: NioOp <: TimerOp
@@ -46,12 +45,6 @@ trait NioPoller extends Poller, EventSource {
   private val registering = new Object
 
   @volatile private var closed = false
-
-  /** Set once the selector is given up: from then on this waits without it, and reports no handle ready. */
-  @volatile private var broken = false
-
-  /** The worker's thread, once it has waited here: what a wake-up unparks when there is no selector to wake. */
-  @volatile private var waitingThread: Thread | Null = null
 
   /** Registers the handle's channel here, with no interest yet: `arm` sets it, as each op begins to wait. */
   override def startListening(handle: NioChannelHandle, read: Boolean): Unit =
@@ -109,7 +102,7 @@ trait NioPoller extends Poller, EventSource {
     if closing.isEmpty() then false
     else
       val closed = closing.toArray(new Array[NioChannelHandle](0))
-      if !broken then
+      if !hasGivenUp then
         try selector.selectNow(dispatch): Unit
         catch
           case failure: IOException             => selectFailed(failure)
@@ -145,9 +138,7 @@ trait NioPoller extends Poller, EventSource {
   }
 
   def wake(): Unit =
-    if broken then
-      val thread = waitingThread
-      if thread != null then java.util.concurrent.locks.LockSupport.unpark(thread)
+    if hasGivenUp then wakeWaiting()
     else if !closed then
       try selector.wakeup(): Unit
       catch case _: ClosedSelectorException => ()
@@ -155,10 +146,7 @@ trait NioPoller extends Poller, EventSource {
   /** A selector that fails is given up, and its owner told (`pollerFailed`), once: the worker goes on firing its timers
     * and running what it is given, so that the program can unwind, and no handle is reported ready.
     */
-  private def selectFailed(failure: Throwable): Unit = {
-    broken = true
-    pollerFailed(new IOException(s"selector $id gave up", failure))
-  }
+  private def selectFailed(failure: Throwable): Unit = giveUp(new IOException(s"selector $id gave up", failure))
 
   protected def waitForDeadline(deadlineTask: Long): Unit =
     if !finishCloses() then waitOnSelector(deadlineTask)
@@ -169,10 +157,7 @@ trait NioPoller extends Poller, EventSource {
       if !isEmpty() then 0L
       else if deadlineTask >= 0 then Math.max(deadlineTask - now, 0)
       else -1L
-    if waitingThread == null then waitingThread = Thread.currentThread()
-    if broken then
-      if timeout > 0 then java.util.concurrent.locks.LockSupport.parkNanos(this, timeout)
-      else if timeout < 0 then java.util.concurrent.locks.LockSupport.park(this)
+    if hasGivenUp then waitWithoutQueue(timeout)
     else
       try
         if timeout == 0 then selector.selectNow(dispatch): Unit

@@ -1,5 +1,5 @@
 package gears.async.io
-package kqueue
+package eventpolling
 
 import gears.async.Async
 import gears.async.AsyncSupport
@@ -20,7 +20,7 @@ import scala.util.Success
 import scala.util.Try
 
 /** A timer whose work, once it is due, keeps its worker for `work` milliseconds, as real work would. */
-private[kqueue] final class SlowOp(time: FiniteDuration, work: Long)
+private[eventpolling] final class SlowOp(time: FiniteDuration, work: Long)
     extends AbstractMakeTimerOp(time),
       HeldOnOwnKind[SlowOp] {
   val started = AtomicInteger(0)
@@ -33,19 +33,19 @@ private[kqueue] final class SlowOp(time: FiniteDuration, work: Long)
   }
 }
 
-private[kqueue] object SlowOps extends Interface {
+private[eventpolling] object SlowOps extends Interface {
   type Op = SlowOp
   def timer(duration: FiniteDuration): Op & Repeatable = ???
   def deadlineTimer(nanoTime: Long): Op & Repeatable & gears.async.io.Deadline = ???
 }
 
-private[kqueue] object SlowBackend extends Backend {
+private[eventpolling] object SlowBackend extends Backend {
   type Interface = SlowOps.type
   def pool(bufferSize: Int, buffers: Int): BufferPool = ???
   private[io] def run[T](program: Io[Interface] ?=> Async.Spawn ?=> T): T = ???
 }
 
-private[kqueue] final class SlowScheduler
+private[eventpolling] final class SlowScheduler
     extends WorkpoolScheduler[SlowOps.type](SlowBackend, SlowOps, 2)
     with NativeSuspend {
   override protected def selectWorker() = workerOfCurrentThread()

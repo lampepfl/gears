@@ -1,5 +1,5 @@
 package gears.async.io
-package kqueue
+package eventpolling
 
 import gears.async.Async
 import gears.async.io.shareable.Starvation
@@ -25,11 +25,11 @@ trait FailsOnStarvation extends ContractSuite {
   /** How many workers the pool of each of the suite's programs has: `Io.run`'s one for each processor. */
   protected def workers: Int = Runtime.getRuntime.availableProcessors
 
-  /** As `Io.run` over `KqueueBackend`, which the suites mixing this in all run over, on a pool that reports its starved
+  /** As `Io.run` over `EventPollingBackend`, which the suites mixing this in all run over, on a pool that reports its starved
     * workers here.
     */
   override protected def running[T](body: Io[backend.Interface] ?=> Async.Spawn ?=> T): T =
-    KqueueBackend.runOn(workers, onStarvation)(io ?=> body(using io.asInstanceOf[Io[backend.Interface]]))
+    EventPollingBackend.runOn(workers, onStarvation)(io ?=> body(using io.asInstanceOf[Io[backend.Interface]]))
 
   private val onStarvation: Starvation.Handler = report => {
     starved.add(report): Unit

@@ -35,7 +35,7 @@ import gears.async.io.shareable.AbstractWriteOp
 import gears.async.io.shareable.HandleOwner
 import gears.async.io.shareable.LendingPool
 import gears.async.io.shareable.Moved
-import gears.async.io.shareable.TimerHeapOp
+import gears.async.io.shareable.PoolOp
 import gears.async.io.shareable.Worker
 
 import java.nio.ByteBuffer
@@ -43,34 +43,25 @@ import java.nio.channels.DatagramChannel
 import java.nio.channels.Pipe
 import scala.concurrent.duration.FiniteDuration
 
-sealed trait NioOp extends TimerHeapOp:
+/** An op of this backend's, of one of the kinds a pool's worker performs (see `PoolOp`). */
+sealed trait NioOp extends PoolOp[NioPoller]:
 
   /** A worker takes any op of this backend's among its timers (see `NioPoller.Timer`). */
-  type Source = NioPoller
   final def _holdTimer(worker: NioPoller): Unit = worker.addTimer(this)
 
-/** An op that waits for its handle to be ready, on the worker that listens for it (see `ReadyWaiting`). */
-sealed trait NioReadinessOp extends NioOp:
-  def performWhenReady(self: NioPoller)(using Async): Unit
+sealed trait NioReadinessOp extends NioOp, PoolOp.Readiness[NioPoller]
 
-/** An op done as it is performed, with nothing to wait for (see `ImmediateOp`). */
-sealed trait NioImmediateOp extends NioOp:
-  def perform(owner: HandleOwner): Unit
+sealed trait NioImmediateOp extends NioOp, PoolOp.Immediate[NioPoller]
 
-/** An op whose work is done off the workers' threads (see `WorkOffThread`). */
-sealed trait NioOffThreadOp extends NioOp:
-  def performOffThread(worker: Worker & NioPoller)(using Async): Unit
-  def performOnCaller(worker: Worker & NioPoller)(using Async): Unit
+sealed trait NioOffThreadOp extends NioOp, PoolOp.OffThread[NioPoller]
 
-sealed trait NioConnectOp extends NioOp:
-  def performConnect(self: NioPoller)(using Async): Unit
+sealed trait NioConnectOp extends NioOp, PoolOp.Connect[NioPoller]
 
-sealed trait NioTimerOp extends NioOp
+sealed trait NioTimerOp extends NioOp, PoolOp.Timed[NioPoller]
 
-sealed trait NioDeadlineOp extends NioOp with Deadline
+sealed trait NioDeadlineOp extends NioOp, PoolOp.Timed[NioPoller], Deadline
 
-sealed trait NioCloseOp extends NioOp:
-  def performClose(self: NioPoller)(using Async): Unit
+sealed trait NioCloseOp extends NioOp, PoolOp.Close[NioPoller]
 
 /** A stream read's calls on the JDK's channels: mixed into the op. A channel that has nothing to read reads nothing,
   * which is a read that would block, and says -1 at the end of its stream.

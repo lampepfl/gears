@@ -1,5 +1,5 @@
 package gears.async.io
-package kqueue
+package eventpolling
 
 import gears.async.Async
 import gears.async.AsyncSupport
@@ -14,49 +14,49 @@ import java.net.NetworkInterface
 import scala.jdk.CollectionConverters.*
 
 /** Each suite sees only the capabilities required by its contracts. */
-class KqueueContractSuite extends OpsContract with FailsOnStarvation {
-  val backend: Backend = KqueueBackend
+class EventPollingContractSuite extends OpsContract with FailsOnStarvation {
+  val backend: Backend = EventPollingBackend
 }
 
-class KqueueThreadedTimerSuite extends ThreadedTimerContract with FailsOnStarvation {
-  val backend: Backend = KqueueBackend
+class EventPollingThreadedTimerSuite extends ThreadedTimerContract with FailsOnStarvation {
+  val backend: Backend = EventPollingBackend
 }
 
-class KqueueBlockingSuite extends BlockingContract with FailsOnStarvation {
-  val backend: Backend { type Interface <: Blocking } = KqueueBackend
+class EventPollingBlockingSuite extends BlockingContract with FailsOnStarvation {
+  val backend: Backend { type Interface <: Blocking } = EventPollingBackend
 }
 
-class KqueuePipeSuite extends PipeContract with FailsOnStarvation {
-  val backend: KqueueBackend.type = KqueueBackend
+class EventPollingPipeSuite extends PipeContract with FailsOnStarvation {
+  val backend: EventPollingBackend.type = EventPollingBackend
 }
 
 /** Runs the same stream contracts using TCP, without exposing Pipes to the suite. */
-class KqueueSocketStreamSuite extends StreamContract with IpStreamFixture with FailsOnStarvation {
-  val backend: Backend { type Interface <: IpStreams } = KqueueBackend
+class EventPollingSocketStreamSuite extends StreamContract with IpStreamFixture with FailsOnStarvation {
+  val backend: Backend { type Interface <: IpStreams } = EventPollingBackend
 }
 
-class KqueueIpStreamSuite extends IpStreamContract with FailsOnStarvation {
-  val backend: Backend { type Interface <: IpStreams } = KqueueBackend
+class EventPollingIpStreamSuite extends IpStreamContract with FailsOnStarvation {
+  val backend: Backend { type Interface <: IpStreams } = EventPollingBackend
 }
 
-class KqueueIpDatagramSuite extends IpDatagramContract with FailsOnStarvation {
-  val backend: Backend { type Interface <: IpDatagrams } = KqueueBackend
+class EventPollingIpDatagramSuite extends IpDatagramContract with FailsOnStarvation {
+  val backend: Backend { type Interface <: IpDatagrams } = EventPollingBackend
 }
 
-class KqueueUnixDatagramSuite extends UnixDatagramContract with FailsOnStarvation {
-  val backend: Backend { type Interface <: UnixDatagrams } = KqueueBackend
+class EventPollingUnixDatagramSuite extends UnixDatagramContract with FailsOnStarvation {
+  val backend: Backend { type Interface <: UnixDatagrams } = EventPollingBackend
 }
 
-class KqueueUnixStreamSuite extends UnixStreamContract with FailsOnStarvation {
-  val backend: Backend { type Interface <: UnixStreams } = KqueueBackend
+class EventPollingUnixStreamSuite extends UnixStreamContract with FailsOnStarvation {
+  val backend: Backend { type Interface <: UnixStreams } = EventPollingBackend
 }
 
-class KqueueFileSuite extends FileContract with FailsOnStarvation {
-  val backend: Backend { type Interface <: RegularFiles } = KqueueBackend
+class EventPollingFileSuite extends FileContract with FailsOnStarvation {
+  val backend: Backend { type Interface <: RegularFiles } = EventPollingBackend
 }
 
-class KqueueResolveSuite extends ResolveContract with FailsOnStarvation {
-  val backend: Backend { type Interface <: Resolving } = KqueueBackend
+class EventPollingResolveSuite extends ResolveContract with FailsOnStarvation {
+  val backend: Backend { type Interface <: Resolving } = EventPollingBackend
 
   override protected def namedScopedAddresses: List[(String, IpAddress)] =
     NetworkInterface
@@ -78,28 +78,28 @@ class KqueueResolveSuite extends ResolveContract with FailsOnStarvation {
       }
 }
 
-class KqueueFifoSuite extends FifoContract with FailsOnStarvation {
-  val backend: Backend { type Interface <: Fifos } = KqueueBackend
+class EventPollingFifoSuite extends FifoContract with FailsOnStarvation {
+  val backend: Backend { type Interface <: Fifos } = EventPollingBackend
 }
 
-class KqueueFifoFileSuite extends FifoFileContract with FailsOnStarvation {
-  val backend: Backend { type Interface <: Fifos & RegularFiles } = KqueueBackend
+class EventPollingFifoFileSuite extends FifoFileContract with FailsOnStarvation {
+  val backend: Backend { type Interface <: Fifos & RegularFiles } = EventPollingBackend
 }
 
-class KqueueSimpleIOSuite extends SimpleIOChecks with PipeFixture with FailsOnStarvation {
-  val backend: KqueueBackend.type = KqueueBackend
+class EventPollingSimpleIOSuite extends SimpleIOChecks with PipeFixture with FailsOnStarvation {
+  val backend: EventPollingBackend.type = EventPollingBackend
 }
 
-class KqueueSimpleIOSocketSuite extends SimpleIOChecks with IpStreamFixture with FailsOnStarvation {
-  val backend: Backend { type Interface <: IpStreams } = KqueueBackend
+class EventPollingSimpleIOSocketSuite extends SimpleIOChecks with IpStreamFixture with FailsOnStarvation {
+  val backend: Backend { type Interface <: IpStreams } = EventPollingBackend
 }
 
-class KqueueSimpleIOIpStreamSuite extends SimpleIOIpStreamChecks with FailsOnStarvation {
-  val backend: Backend { type Interface <: IpStreams } = KqueueBackend
+class EventPollingSimpleIOIpStreamSuite extends SimpleIOIpStreamChecks with FailsOnStarvation {
+  val backend: Backend { type Interface <: IpStreams } = EventPollingBackend
 }
 
-class KqueueSimpleIOResolveSuite extends SimpleIOResolveChecks with FailsOnStarvation {
-  val backend: Backend { type Interface <: Resolving } = KqueueBackend
+class EventPollingSimpleIOResolveSuite extends SimpleIOResolveChecks with FailsOnStarvation {
+  val backend: Backend { type Interface <: Resolving } = EventPollingBackend
 }
 
 /** Runs a suite's programs on a pool of `count` workers rather than `Io.run`'s one for each processor. On one worker
@@ -109,55 +109,55 @@ trait OnWorkers(count: Int) extends FailsOnStarvation {
   override protected def workers: Int = count
 }
 
-class KqueueOnOneContractSuite extends OpsContract with OnWorkers(1) with FailsOnStarvation {
-  val backend: Backend = KqueueBackend
+class EventPollingOnOneContractSuite extends OpsContract with OnWorkers(1) with FailsOnStarvation {
+  val backend: Backend = EventPollingBackend
 }
 
-class KqueueOnOneBlockingSuite extends BlockingContract with OnWorkers(1) with FailsOnStarvation {
-  val backend: Backend { type Interface <: Blocking } = KqueueBackend
+class EventPollingOnOneBlockingSuite extends BlockingContract with OnWorkers(1) with FailsOnStarvation {
+  val backend: Backend { type Interface <: Blocking } = EventPollingBackend
 }
 
-class KqueueOnOnePipeSuite extends PipeContract with OnWorkers(1) with FailsOnStarvation {
-  val backend: KqueueBackend.type = KqueueBackend
+class EventPollingOnOnePipeSuite extends PipeContract with OnWorkers(1) with FailsOnStarvation {
+  val backend: EventPollingBackend.type = EventPollingBackend
 }
 
-class KqueueOnOneSocketStreamSuite
+class EventPollingOnOneSocketStreamSuite
     extends StreamContract
     with IpStreamFixture
     with OnWorkers(1)
     with FailsOnStarvation {
-  val backend: Backend { type Interface <: IpStreams } = KqueueBackend
+  val backend: Backend { type Interface <: IpStreams } = EventPollingBackend
 }
 
-class KqueueOnOneIpStreamSuite extends IpStreamContract with OnWorkers(1) with FailsOnStarvation {
-  val backend: Backend { type Interface <: IpStreams } = KqueueBackend
+class EventPollingOnOneIpStreamSuite extends IpStreamContract with OnWorkers(1) with FailsOnStarvation {
+  val backend: Backend { type Interface <: IpStreams } = EventPollingBackend
 }
 
-class KqueueOnOneIpDatagramSuite extends IpDatagramContract with OnWorkers(1) with FailsOnStarvation {
-  val backend: Backend { type Interface <: IpDatagrams } = KqueueBackend
+class EventPollingOnOneIpDatagramSuite extends IpDatagramContract with OnWorkers(1) with FailsOnStarvation {
+  val backend: Backend { type Interface <: IpDatagrams } = EventPollingBackend
 }
 
-class KqueueOnOneUnixStreamSuite extends UnixStreamContract with OnWorkers(1) with FailsOnStarvation {
-  val backend: Backend { type Interface <: UnixStreams } = KqueueBackend
+class EventPollingOnOneUnixStreamSuite extends UnixStreamContract with OnWorkers(1) with FailsOnStarvation {
+  val backend: Backend { type Interface <: UnixStreams } = EventPollingBackend
 }
 
-class KqueueOnOneFileSuite extends FileContract with OnWorkers(1) with FailsOnStarvation {
-  val backend: Backend { type Interface <: RegularFiles } = KqueueBackend
+class EventPollingOnOneFileSuite extends FileContract with OnWorkers(1) with FailsOnStarvation {
+  val backend: Backend { type Interface <: RegularFiles } = EventPollingBackend
 }
 
-class KqueueOnTwoIpStreamSuite extends IpStreamContract with OnWorkers(2) with FailsOnStarvation {
-  val backend: Backend { type Interface <: IpStreams } = KqueueBackend
+class EventPollingOnTwoIpStreamSuite extends IpStreamContract with OnWorkers(2) with FailsOnStarvation {
+  val backend: Backend { type Interface <: IpStreams } = EventPollingBackend
 }
 
-class KqueueOnTwoIpDatagramSuite extends IpDatagramContract with OnWorkers(2) with FailsOnStarvation {
-  val backend: Backend { type Interface <: IpDatagrams } = KqueueBackend
+class EventPollingOnTwoIpDatagramSuite extends IpDatagramContract with OnWorkers(2) with FailsOnStarvation {
+  val backend: Backend { type Interface <: IpDatagrams } = EventPollingBackend
 }
 
 // What a run leaves when it ends: on the pool and on one worker.
-class KqueueRunEndSuite extends RunEndContract with FailsOnStarvation {
-  val backend: Backend { type Interface <: Blocking & Pipes } = KqueueBackend
+class EventPollingRunEndSuite extends RunEndContract with FailsOnStarvation {
+  val backend: Backend { type Interface <: Blocking & Pipes } = EventPollingBackend
 }
 
-class KqueueOnOneRunEndSuite extends RunEndContract with OnWorkers(1) with FailsOnStarvation {
-  val backend: Backend { type Interface <: Blocking & Pipes } = KqueueBackend
+class EventPollingOnOneRunEndSuite extends RunEndContract with OnWorkers(1) with FailsOnStarvation {
+  val backend: Backend { type Interface <: Blocking & Pipes } = EventPollingBackend
 }
