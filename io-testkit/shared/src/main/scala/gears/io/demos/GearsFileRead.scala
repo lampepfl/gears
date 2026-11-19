@@ -34,7 +34,7 @@ object GearsFileRead {
           if chunk.position() == 0 then { // the end: no writer has the FIFO open
             if heard then { // everything the writer sent is in `contents`
               println(s"End of file reached. Contents are ${contents.size} long.")
-              println(s"File contents: `${contents.toString(StandardCharsets.UTF_8)}`")
+              println(s"File contents: `${new String(contents.toByteArray(), StandardCharsets.UTF_8)}`")
               contents.reset() // Start over for the next writer
               heard = false
             }
