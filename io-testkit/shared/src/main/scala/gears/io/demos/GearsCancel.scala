@@ -8,6 +8,7 @@ import gears.async.io.Io
 import gears.async.io.Pipes
 import gears.async.io.Slot
 import gears.async.io.testkit.BufferArena
+import gears.async.io.testkit.HostThreads
 import gears.io.testkit.SimpleIO
 
 import java.nio.charset.StandardCharsets
@@ -24,7 +25,7 @@ object GearsCancel {
 
   /** A blocking body that sleeps for `millis`, recording whether cancellation interrupted it. */
   private def sleeper(millis: Long, interrupted: AtomicBoolean): () => Unit = () => {
-    try Thread.sleep(millis)
+    try HostThreads.sleep(millis)
     catch {
       case e: InterruptedException =>
         interrupted.set(true)
@@ -44,7 +45,7 @@ object GearsCancel {
   /** Waits up to two seconds for `interrupted` to be set. */
   private def interruptedSoon(interrupted: AtomicBoolean): Boolean = {
     val deadline = System.nanoTime() + 2_000_000_000L
-    while !interrupted.get() && System.nanoTime() < deadline do Thread.sleep(10)
+    while !interrupted.get() && System.nanoTime() < deadline do HostThreads.sleep(10)
     interrupted.get()
   }
 

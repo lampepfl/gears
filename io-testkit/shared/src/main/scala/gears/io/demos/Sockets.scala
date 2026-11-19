@@ -8,10 +8,8 @@ import gears.async.io.IpStreams
 import gears.async.io.StreamSockets
 import gears.async.io.UnixAddress
 import gears.async.io.UnixStreams
+import gears.async.io.testkit.HostFiles
 import gears.io.testkit.SimpleIO
-
-import java.nio.file.Files
-import java.nio.file.Paths
 
 /** Where a stream demo's server listens: an IP address, or a Unix path on a backend with Unix stream sockets. */
 type StreamAddress = IpSocketAddress | UnixAddress
@@ -68,7 +66,7 @@ object Sockets {
 
   /** Removes a Unix socket file left behind, if `address` names one. */
   def removeFile(address: StreamAddress): Unit = address match {
-    case UnixAddress(path) => Files.deleteIfExists(Paths.get(path)): Unit
+    case UnixAddress(path) => HostFiles.deleteIfExists(path)
     case _                 => ()
   }
 }
