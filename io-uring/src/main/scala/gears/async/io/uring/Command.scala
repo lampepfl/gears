@@ -6,6 +6,7 @@ import gears.async.CompletionGroup
 import gears.async.Listener
 import gears.async.io.posix.Unblocked
 import gears.async.io.shareable.BackendOp
+import gears.async.io.shareable.Checks
 import gears.async.io.shareable.OpPerformer
 import gears.async.io.shareable.RepeatableAbstractTimerHeapOp
 import gears.async.io.shareable.SingleUseAbstractTimerHeapOp
@@ -102,6 +103,8 @@ private[uring] abstract class Command extends RepeatableAbstractTimerHeapOp, Uri
 
   private[uring] final def outOfRing(): Unit = stage = Command.Stage.Idle
 
+  private[uring] final def backlogged(): Unit = stage = Command.Stage.Backlogged
+
   private[uring] def readyToSubmit(): Boolean = true
 
   private[uring] def leaveParking(): Boolean = false
@@ -123,19 +126,22 @@ private[uring] abstract class Command extends RepeatableAbstractTimerHeapOp, Uri
   }
 
   private var ringOf: Ring | Null = null
+  private var ringCount: java.util.concurrent.atomic.AtomicInteger | Null = null
 
+  // - a pooled read started again after parking is counted on its ring already
   private[uring] final def onRing(ring: Ring): Unit =
     if ringOf ne ring then {
-      handle.onRing(ring)
+      ringCount = handle.onRing(ring)
       ringOf = ring
     }
 
   /** Lets go of its direction and its count on its ring. */
   private[uring] final def release(): Unit = {
-    val ring = ringOf
-    if ring != null then {
+    val count = ringCount
+    if count != null then {
       ringOf = null
-      handle.offRing(ring)
+      ringCount = null
+      count.decrementAndGet(): Unit
     }
     direction match {
       case Command.Direction.Reading => handle.reading.set(false)
@@ -219,7 +225,7 @@ private[uring] abstract class Command extends RepeatableAbstractTimerHeapOp, Uri
 private[uring] object Command {
   enum Direction { case Neither, Reading, Writing }
 
-  enum Stage { case Idle, Prepared, Submitted, Parked }
+  enum Stage { case Idle, Prepared, Submitted, Parked, Backlogged }
 
   case object LetGo
 
@@ -233,33 +239,6 @@ private[uring] trait OneShot extends Command {
     if !used.compareAndSet(false, true) then throw new IllegalStateException(s"$this is one-shot, and was performed")
     super.check()
   }
-}
-
-private[uring] object Checks {
-  def checkFillable(buf: ByteBuffer): Unit =
-    if buf.isReadOnly() then throw new IllegalArgumentException(s"A read-only buffer cannot be read into: $buf")
-
-  def checkFillable(bufs: Array[ByteBuffer]): Unit = {
-    if bufs.isEmpty then throw new IllegalArgumentException("A vectored op takes at least one buffer")
-    bufs.foreach(checkFillable)
-  }
-
-  def checkBuffers(bufs: Array[ByteBuffer]): Unit =
-    if bufs.isEmpty then throw new IllegalArgumentException("A vectored op takes at least one buffer")
-
-  def anyRemaining(bufs: Array[ByteBuffer]): Boolean = bufs.exists(_.hasRemaining())
-
-  def bufferFull(buf: ByteBuffer) =
-    new IllegalArgumentException(s"The buffer is full, so a read into it can read nothing: $buf")
-
-  def buffersFull(bufs: Array[ByteBuffer]) =
-    new IllegalArgumentException(s"No buffer has room, so a read into them can read nothing: ${bufs.mkString(", ")}")
-
-  def notEmpty(slots: Slot[?]*): Unit =
-    if !slots.forall(_.isEmpty) then
-      throw new IllegalArgumentException(
-        "The op's slot still holds a value, not yet cleared, which the op would overwrite"
-      )
 }
 
 private[uring] final class Staging(bufs: Array[ByteBuffer], copyIn: Boolean, copyOut: Boolean) {
@@ -373,6 +352,7 @@ private[uring] final class ReadIntoBuffer(val handle: UringHandle, buf: ByteBuff
 
 private[uring] final class ReadIntoBuffers(val handle: UringHandle, bufs: Array[ByteBuffer])
     extends Transfer(bufs, copyIn = false) {
+  Checks.checkBuffers(bufs)
   Checks.checkFillable(bufs)
   override protected def direction = Command.Direction.Reading
   override def check(): Unit = if !Checks.anyRemaining(bufs) then throw Checks.buffersFull(bufs)
@@ -424,7 +404,7 @@ private[uring] final class WriteFromBuffers(val handle: UringHandle, bufs: Array
 //   more than half free; a file's read takes one before it is submitted
 private[uring] final class PooledRead(val handle: UringHandle, pool: NativePool, into: Slot[Received]) extends Command {
   override protected def direction = Command.Direction.Reading
-  override def check(): Unit = Checks.notEmpty(into)
+  override def check(): Unit = Checks.checkEmpty(into)
   private var held: pool.PoolBuffer | Null = null
   private var pollNext = false
 
@@ -532,7 +512,7 @@ private[uring] final class Connect(
 
   override def check(): Unit = {
     super.check()
-    Checks.notEmpty(into)
+    Checks.checkEmpty(into)
   }
 
   override def begin(worker: UringWorker): Unit = {
@@ -569,7 +549,7 @@ private[uring] final class Connect(
 }
 
 private[uring] final class Accept(val handle: ListenerHandle, into: Slot[ConnectionHandle]) extends Command {
-  override def check(): Unit = Checks.notEmpty(into)
+  override def check(): Unit = Checks.checkEmpty(into)
   override def turns: Turns | Null = handle.accepts
   override protected def readinessEvents: Int = Linux.POLLIN
 
@@ -595,7 +575,7 @@ private[uring] final class Accept(val handle: ListenerHandle, into: Slot[Connect
 
 private[uring] final class AcceptAll(val handle: ListenerHandle, into: Slot[Array[ConnectionHandle]], max: Int)
     extends Command {
-  override def check(): Unit = Checks.notEmpty(into)
+  override def check(): Unit = Checks.checkEmpty(into)
   override def turns: Turns | Null = handle.accepts
   protected def prepare(sqe: Ptr[io_uring_sqe]): Unit = io_uring_prep_poll_add(sqe, fd, Linux.POLLIN.toUInt)
 
@@ -643,11 +623,8 @@ private[uring] final class ReceiveFrom(
 ) extends Command {
   Checks.checkFillable(buf)
   override def check(): Unit = {
-    if from != null then Checks.notEmpty(from.nn)
-    if buf.capacity() == 0 then
-      throw new IllegalArgumentException(
-        s"The buffer has no capacity, so a packet received into it would be dropped: $buf"
-      )
+    if from != null then Checks.checkEmpty(from.nn)
+    if buf.capacity() == 0 then throw Checks.noCapacity(buf)
   }
   override def turns: Turns | Null = handle.receives
   override protected def readinessEvents: Int = Linux.POLLIN
@@ -711,7 +688,7 @@ private[uring] final class SendTo(
   private var size = 0L
 
   private def setUp(): Unit = {
-    size = bufs.foldLeft(0L)(_ + _.remaining())
+    size = Checks.remaining(bufs)
     val nameLength = if to == null then 0 else Addresses.write(to.nn, handle.ipv6, header.name)
     header.set(header.fill(staging.begin(), room = false), nameLength)
   }

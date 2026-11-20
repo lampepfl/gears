@@ -26,9 +26,6 @@ private[uring] object uring {
   type __u32 = CUnsignedInt
   type __u64 = CUnsignedLongLong
 
-  type __kernel_time64_t = CLongLong
-  type __kernel_timespec = CStruct2[__kernel_time64_t, CLongLong]
-
   type __kernel_rwf_t = CUnsignedInt
 
   type iovec = CStruct2[Ptr[Byte], size_t]
@@ -232,12 +229,8 @@ private[uring] object uringStructOps {
     inline def msg_flags_=(msg_flags: __u32): Unit = !at[__u32](28) = msg_flags
     inline def accept_flags: __u32 = !at[__u32](28)
     inline def accept_flags_=(accept_flags: __u32): Unit = !at[__u32](28) = accept_flags
-    inline def cancel_flags: __u32 = !at[__u32](28)
-    inline def cancel_flags_=(cancel_flags: __u32): Unit = !at[__u32](28) = cancel_flags
     inline def poll32_events: __u32 = !at[__u32](28)
     inline def poll32_events_=(poll32_events: __u32): Unit = !at[__u32](28) = poll32_events
-    inline def open_flags: __u32 = !at[__u32](28)
-    inline def open_flags_=(open_flags: __u32): Unit = !at[__u32](28) = open_flags
 
     inline def user_data: __u64 = !at[__u64](32)
     inline def user_data_=(user_data: __u64): Unit = !at[__u64](32) = user_data
@@ -258,20 +251,6 @@ private[uring] object uringStructOps {
     inline def res_=(res: __s32): Unit = !at[__s32](8) = res
     inline def flags: __u32 = !at[__u32](12)
     inline def flags_=(flags: __u32): Unit = !at[__u32](12) = flags
-  }
-
-  implicit final class __kernel_timespecOps(val __kernel_timespec: Ptr[__kernel_timespec]) extends AnyVal {
-    inline def tv_sec: __kernel_time64_t = __kernel_timespec._1
-    inline def tv_sec_=(tv_sec: __kernel_time64_t): Unit = !__kernel_timespec.at1 = tv_sec
-    inline def tv_nsec: CLongLong = __kernel_timespec._2
-    inline def tv_nsec_=(tv_nsec: CLongLong): Unit = !__kernel_timespec.at2 = tv_nsec
-  }
-
-  implicit final class iovecOps(val iovec: Ptr[iovec]) extends AnyVal {
-    inline def iov_base: Ptr[Byte] = iovec._1
-    inline def iov_base_=(iov_base: Ptr[Byte]): Unit = !iovec.at1 = iov_base
-    inline def iov_len: size_t = iovec._2
-    inline def iov_len_=(iov_len: size_t): Unit = !iovec.at2 = iov_len
   }
 
   implicit final class msghdrOps(val msghdr: Ptr[msghdr]) extends AnyVal {

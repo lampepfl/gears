@@ -55,17 +55,18 @@ private[uring] final class Ring(entries: Int, completions: Int) {
     if sleeping.getAndSet(false) then
       synchronized {
         if !closed then {
-          val n = unistd.write(wakeFd, wakeWrite.asInstanceOf[ByteArray].at(0), 8.toUSize)
-          if n < 0 && errno.errno != errno.EAGAIN then throw Results.failed(s"Failed to wake io_uring")
+          // - a failed write is the ring's to find out as it waits, not the waker's
+          unistd.write(wakeFd, wakeWrite.asInstanceOf[ByteArray].at(0), 8.toUSize): Unit
         }
       }
   }
 
-  def await(deadline: Long, hasWork: => Boolean, spin: Boolean)(dispatch: (Long, Int) => Unit): Unit = {
+  // - `hasWork` is asked after `onSubmit`, which may resume futures: asked before, the worker could sleep with work
+  def await(deadline: Long, hasWork: () => Boolean, spin: Boolean)(dispatch: (Long, Int) => Unit): Unit = {
     armWake()
     onSubmit()
     var res = 0
-    if signalled.get() || hasWork then res = submitPrepared()
+    if signalled.get() || hasWork() then res = submitPrepared()
     else {
       val arrived = spin && {
         checkSubmitted(submitPrepared())
@@ -116,27 +117,38 @@ private[uring] final class Ring(entries: Int, completions: Int) {
 
   var afterSubmit: () => Unit = () => ()
 
-  def nextSqe(): Ptr[io_uring_sqe] = {
-    var sqe = io_uring_get_sqe(ring)
-    if sqe == null then {
-      onSubmit()
-      val res = io_uring_submit(ring)
-      afterSubmit()
-      if res < 0 && res != -errno.EBUSY then throw Ring.failure("Failed to submit to io_uring", res)
-      sqe = io_uring_get_sqe(ring)
-      if sqe == null then throw new IOException("The io_uring submission queue is full")
+  def isClosed: Boolean = closed
+
+  /** The next free entry, submitting what is prepared to make room if there is none: null if there is still none, the
+    * kernel refusing for a moment, or the ring is closed.
+    */
+  def nextSqe(): Ptr[io_uring_sqe] | Null =
+    if closed then null
+    else {
+      var sqe = io_uring_get_sqe(ring)
+      if sqe == null then {
+        onSubmit()
+        val res = io_uring_submit(ring)
+        afterSubmit()
+        checkSubmitted(res)
+        sqe = io_uring_get_sqe(ring)
+      }
+      sqe
     }
-    sqe
-  }
 
-  def pending(sqe: Ptr[io_uring_sqe], id: Long): Boolean = io_uring_sqe_pending(ring, sqe, id.toULong) != 0
+  def pending(sqe: Ptr[io_uring_sqe], id: Long): Boolean = !closed && io_uring_sqe_pending(ring, sqe, id.toULong) != 0
 
-  def nop(sqe: Ptr[io_uring_sqe]): Unit = {
-    io_uring_prep_nop(sqe)
-    sqe.user_data = Ring.InternalId.toULong
-  }
+  def nop(sqe: Ptr[io_uring_sqe]): Unit =
+    if !closed then {
+      io_uring_prep_nop(sqe)
+      sqe.user_data = Ring.InternalId.toULong
+    }
 
-  def cancelNow(id: Long): Int = io_uring_cancel_now(ring, id.toULong, 1)
+  /** 0 if cancelled, the kernel having let go; `-ENOENT` if it had finished, its completion in the ring; and without
+    * `wait`, `-EALREADY` or `-ETIME` for one a kernel worker runs, whose completion comes once it lets go.
+    */
+  def cancelNow(id: Long, wait: Boolean): Int =
+    if closed then -errno.ENOENT else io_uring_cancel_now(ring, id.toULong, if wait then 1 else 0)
 
   def cancelFd(fd: Int): Unit = synchronized(if !closed then io_uring_cancel_fd(ring, fd): Unit)
 
@@ -173,9 +185,11 @@ private[uring] final class Ring(entries: Int, completions: Int) {
   private def armWake(): Unit =
     if !wakeArmed && !closed then {
       val sqe = nextSqe()
-      io_uring_prep_read(sqe, wakeFd, wakeBuffer.asInstanceOf[ByteArray].at(0), 8.toUInt, 0.toULong)
-      sqe.user_data = Ring.WakeId.toULong
-      wakeArmed = true
+      if sqe != null then {
+        io_uring_prep_read(sqe, wakeFd, wakeBuffer.asInstanceOf[ByteArray].at(0), 8.toUInt, 0.toULong)
+        sqe.user_data = Ring.WakeId.toULong
+        wakeArmed = true
+      }
     }
 
   def close(): Unit = synchronized {

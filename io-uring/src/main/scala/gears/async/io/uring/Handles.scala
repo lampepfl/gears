@@ -19,19 +19,23 @@ import scala.scalanative.posix.fcntl
 // - a command claims the handle's work until the kernel has let go of its entry: the descriptor is closed only then
 sealed abstract class UringHandle(fd: Int, kind: String, owner: HandleOwner) extends PosixKernelHandle(fd, owner) {
   private val rings = new ConcurrentHashMap[Ring, AtomicInteger]()
+  @volatile private var lastRing: Ring | Null = null
+  @volatile private var lastCount: AtomicInteger | Null = null
 
-  private[uring] def onRing(ring: Ring): Unit = {
-    var n = rings.get(ring)
+  /** Counts an entry on `ring`: the count, for the command to take it off again. */
+  private[uring] def onRing(ring: Ring): AtomicInteger = {
+    var n = if lastRing eq ring then lastCount else null
     if n == null then {
-      rings.putIfAbsent(ring, new AtomicInteger()): Unit
       n = rings.get(ring)
+      if n == null then {
+        rings.putIfAbsent(ring, new AtomicInteger()): Unit
+        n = rings.get(ring)
+      }
+      lastCount = n
+      lastRing = ring
     }
     n.nn.incrementAndGet(): Unit
-  }
-
-  private[uring] def offRing(ring: Ring): Unit = {
-    val n = rings.get(ring)
-    if n != null then n.decrementAndGet(): Unit
+    n.nn
   }
 
   private[uring] def entriesOnRings: Int = {

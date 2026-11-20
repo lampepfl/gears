@@ -68,9 +68,7 @@ private[uring] final class NativePool(val bufferSize: Int, val buffers: Int) ext
         parkedCount.addAndGet(-all.length)
         all
       }
-      for read <- reads do
-        try read.owner.nn.startTurn(read)
-        catch case _: IllegalStateException => ()
+      for read <- reads do read.owner.nn.startTurn(read)
     }
 
   def take(): PoolBuffer | Null = {

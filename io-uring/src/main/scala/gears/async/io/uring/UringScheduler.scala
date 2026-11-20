@@ -26,7 +26,9 @@ final class UringScheduler private[uring] (rings: Array[Ring], onStarvation: Sta
       NativeSuspend {
   override protected def selectWorker() = workerOfCurrentThread()
 
-  override def makeWorker(id: Int, owner: HandleOwner): UringWorker = new UringWorker(id, owner, rings(id))
+  override def makeWorker(id: Int, owner: HandleOwner): UringWorker = new UringWorker(id, owner, rings(id), this)
+
+  private[uring] def workerOfThread(thread: Thread): AnyRef | Null = workerOf(thread)
 
   private[uring] def failRing(cause: IOException): Unit = workerOfCurrentThread().asInstanceOf[UringWorker].fail(cause)
 }
@@ -49,7 +51,12 @@ object UringScheduler {
         for i <- 0 until made do rings(i).close()
         throw e
     }
-    new UringScheduler(rings, onStarvation)
+    try new UringScheduler(rings, onStarvation)
+    catch {
+      case e: Throwable =>
+        rings.foreach(_.close())
+        throw e
+    }
   }
 
   inline val Entries = 256
@@ -63,7 +70,7 @@ object UringScheduler {
 /** A worker whose poller is its ring: it prepares its commands' entries and reaps their completions on its own thread,
   * which is whichever thread drives it.
   */
-final class UringWorker private[uring] (id: Int, owner: HandleOwner, ring: Ring)
+final class UringWorker private[uring] (id: Int, owner: HandleOwner, ring: Ring, pool: UringScheduler)
     extends PoolOpWorker[UringWorker](id, owner),
       PoolSource {
   type Op = UringOp
@@ -89,14 +96,8 @@ final class UringWorker private[uring] (id: Int, owner: HandleOwner, ring: Ring)
 
   // ---- the ring, its own thread's alone
 
-  @volatile private var ringThread: Thread | Null = null
-
-  override protected def drivenBy(thread: Thread): Unit = {
-    super.drivenBy(thread)
-    ringThread = thread
-  }
-
-  private def isCurrent: Boolean = Thread.currentThread() eq ringThread
+  // - the thread that drives this worker now: one that stepped out of it to block is no longer
+  private def isCurrent: Boolean = pool.workerOfThread(Thread.currentThread()) eq this
 
   // - ring work runs only on this worker: inbox tasks may be stolen, or moved by the starvation monitor
   private val ringTasks = new java.util.concurrent.ConcurrentLinkedQueue[Runnable]()
@@ -107,6 +108,11 @@ final class UringWorker private[uring] (id: Int, owner: HandleOwner, ring: Ring)
       ringTasks.add(task)
       wake()
     }
+
+  private def runLater(task: Runnable): Unit = {
+    ringTasks.add(task)
+    wake()
+  }
 
   private def runRingTasks(): Unit = {
     var task = ringTasks.poll()
@@ -120,6 +126,8 @@ final class UringWorker private[uring] (id: Int, owner: HandleOwner, ring: Ring)
   private val inFlight = scala.collection.mutable.LongMap.empty[Command]
   private val prepared = scala.collection.mutable.ArrayBuffer.empty[Command]
   private val submitted = scala.collection.mutable.ArrayBuffer.empty[Command]
+  // - commands that found the submission queue full, submitted again once a turn's submission has made room
+  private val backlog = scala.collection.mutable.ArrayBuffer.empty[Command]
   private var nextId = Ring.InternalId + 1
 
   ring.onSubmit = () => {
@@ -153,7 +161,7 @@ final class UringWorker private[uring] (id: Int, owner: HandleOwner, ring: Ring)
           ring.nop(c.sqe)
           withdrawn(c)
           c.deliver(Failure(c.handle.closedFailure), done = false)
-        } else ring.cancelNow(c.id): Unit
+        } else ring.cancelNow(c.id, wait = false): Unit
     )
     submitted.clear()
   }
@@ -207,8 +215,14 @@ final class UringWorker private[uring] (id: Int, owner: HandleOwner, ring: Ring)
   }
 
   private def submit(c: Command): Unit = {
-    if hasGivenUp then throw new IOException("The io_uring worker's ring failed")
-    val sqe = ring.nextSqe()
+    if hasGivenUp || ring.isClosed then throw new IOException("The io_uring worker's ring failed")
+    val found = ring.nextSqe()
+    if found == null then {
+      c.backlogged()
+      backlog += c
+      return
+    }
+    val sqe = found.nn
     try c.prepareSubmission(sqe)
     catch {
       case failure: Throwable =>
@@ -287,8 +301,9 @@ final class UringWorker private[uring] (id: Int, owner: HandleOwner, ring: Ring)
   }
 
   /** Starts `c`, whose turn it is now, which was parked, or which a close ended the wait of, on this worker. */
+  // - never at once: it may be asked as the ring submits, or as it is torn down
   private[uring] def startTurn(c: Command): Unit =
-    runOnRing { () =>
+    runLater { () =>
       c.resume()
       val handle = c.handle
       if c.wantOut || c.settled || handle.isClosing then
@@ -333,8 +348,15 @@ final class UringWorker private[uring] (id: Int, owner: HandleOwner, ring: Ring)
         ring.nop(c.sqe)
         withdrawn(c)
         true
+      case Command.Stage.Backlogged =>
+        backlog -= c
+        c.outOfRing()
+        c.discardSubmission()
+        endUse(c)
+        true
       case Command.Stage.Submitted =>
-        ring.cancelNow(c.id) == 0 && {
+        // - without waiting: one a kernel worker runs lets go with its completion, which `dispatch` takes
+        ring.cancelNow(c.id, wait = false) == 0 && {
           withdrawn(c)
           true
         }
@@ -357,19 +379,44 @@ final class UringWorker private[uring] (id: Int, owner: HandleOwner, ring: Ring)
       if hasGivenUp then wakeWaiting()
       else ring.wake()
 
+  private val hasWork: () => Boolean = () => !isEmpty() || !ringTasks.isEmpty() || backlog.nonEmpty
+
+  private var failedWaits = 0
+
   protected def waitForDeadline(deadlineTask: Long): Unit = {
     runRingTasks()
     if hasGivenUp then {
       val timeout =
-        if !isEmpty() || !ringTasks.isEmpty() then 0L
+        if hasWork() then 0L
         else if deadlineTask < 0 then -1L
         else math.max(deadlineTask - System.nanoTime(), 0L)
       waitWithoutQueue(timeout)
     } else
-      try ring.await(deadlineTask, !isEmpty() || !ringTasks.isEmpty(), spin = inFlight.nonEmpty)(dispatch)
-      catch case failure: IOException => fail(failure)
+      try {
+        ring.await(deadlineTask, hasWork, spin = inFlight.nonEmpty)(dispatch)
+        failedWaits = 0
+      } catch {
+        case failure: IOException =>
+          // - a few tries, a little apart, as `EventPoller` makes, in case the failure passes
+          failedWaits += 1
+          if failedWaits < UringWorker.WaitAttempts then Thread.sleep(failedWaits.toLong) else fail(failure)
+      }
+    submitBacklog()
     runRingTasks()
   }
+
+  private def submitBacklog(): Unit =
+    if backlog.nonEmpty && !hasGivenUp then {
+      val waiting = backlog.toArray
+      backlog.clear()
+      for c <- waiting do {
+        c.outOfRing()
+        if c.handle.isClosing then settle(c, Failure(c.handle.closedFailure), done = false)
+        else
+          try submit(c)
+          catch case failure: Throwable => settle(c, Failure(failure), done = false)
+      }
+    }
 
   /** The ring failed: what the kernel holds is cancelled, waiting, before the ring is torn down, and its ops fail. */
   private[uring] def fail(cause: IOException): Unit = {
@@ -383,7 +430,7 @@ final class UringWorker private[uring] (id: Int, owner: HandleOwner, ring: Ring)
     val held = inFlight.values.toList
     val letGo = held.map(c =>
       c.state != Command.Stage.Submitted || ring.pending(c.sqe, c.id) || {
-        val res = ring.cancelNow(c.id)
+        val res = ring.cancelNow(c.id, wait = true)
         res == 0 || res == -errno.ENOENT
       }
     )
@@ -391,6 +438,13 @@ final class UringWorker private[uring] (id: Int, owner: HandleOwner, ring: Ring)
     inFlight.clear()
     prepared.clear()
     submitted.clear()
+    val waiting = backlog.toList
+    backlog.clear()
+    for c <- waiting do {
+      c.outOfRing()
+      c.discardSubmission()
+      settle(c, outcome, done = false)
+    }
     for (c, free) <- held.zip(letGo) do {
       c.outOfRing()
       if free then c.discardSubmission() else UringScheduler.kept.add(c)
@@ -404,4 +458,8 @@ final class UringWorker private[uring] (id: Int, owner: HandleOwner, ring: Ring)
     if !hasGivenUp then letGoOfAll(Failure(new StacklessCancellation))
     else ring.close()
   }
+}
+
+private[uring] object UringWorker {
+  inline val WaitAttempts = 3
 }

@@ -317,6 +317,47 @@ class UringSuite extends munit.FunSuite {
     assert(buf.array().forall(_ == 0), "the kernel wrote into the buffer after it was given back")
   }
 
+  test("a pooled read started again as a close's commands are dropped, then cancelled, takes nothing") {
+    onPool(1) { io ?=>
+      for round <- 1 to 20 do {
+        val pool = UringBackend.pool(16, 1)
+        val (r1, w1) = pipe()
+        val (r2, w2) = pipe()
+        val first = Future(Try(io.perform(ops.read(r1, pool, Slot[Received]()))))
+        val (second, performed) = performing(ops.read(r2, pool, Slot[Received]()))
+        Future {
+          close(r1)
+          second.cancel()
+        }.await
+        second.awaitResult: Unit
+        first.awaitResult: Unit
+        rawWrite(w2, "x")
+        AsyncOperations.sleep(20)
+        assertEquals(rawRead(r2), "x", s"round $round: the cancelled read ($performed) took the byte")
+        assertEquals(pool.available, 1)
+        List(r2, w1, w2).foreach(close)
+        pool.close()
+      }
+    }
+  }
+
+  test("a ring that fails with an accept waiting its turn fails that accept too, rather than submitting to it") {
+    val second = new AtomicReference[Try[Unit] | Null](null)
+    val failure = Try(onPool(1) { io ?=>
+      val into = Slot[ListenerHandle]()
+      io.perform(ops.listen(IpSocketAddress(IpAddress.IPv4Loopback, 0), into))
+      val l = into.clear()
+      Future(Try(io.perform(ops.accept(l, Slot[ConnectionHandle]()))))
+      AsyncOperations.sleep(20)
+      Future(second.set(Try(io.perform(ops.accept(l, Slot[ConnectionHandle]())))))
+      AsyncOperations.sleep(20)
+      io.asInstanceOf[UringScheduler].failRing(new java.io.IOException("failed for the test"))
+      AsyncOperations.sleep(50)
+    })
+    assert(failure.failed.toOption.exists(_.isInstanceOf[java.io.IOException]), failure)
+    assert(second.get() != null && second.get().nn.isFailure, s"the waiting accept: ${second.get()}")
+  }
+
   test("an entry counts as pending until a submission takes it, also once the queue's counters wrap") {
     import uringStructOps.*
     val ring = new Ring(8, 16)
@@ -334,7 +375,7 @@ class UringSuite extends munit.FunSuite {
         entries.foreach((sqe, id) => assert(ring.pending(sqe, id), s"round $round: prepared, not yet submitted"))
         // - the slots the last round's entries had, now another entry's
         before.foreach((sqe, id) => assert(!ring.pending(sqe, id), s"round $round: taken by the kernel, slot reused"))
-        ring.await(System.nanoTime(), hasWork = true, spin = false)((_, _) => ())
+        ring.await(System.nanoTime(), hasWork = () => true, spin = false)((_, _) => ())
         entries.foreach((sqe, id) => assert(!ring.pending(sqe, id), s"round $round: submitted"))
         before = entries
       }
