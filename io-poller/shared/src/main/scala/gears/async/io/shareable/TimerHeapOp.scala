@@ -2,6 +2,7 @@ package gears.async.io.shareable
 
 import gears.async.Async
 import gears.async.CompletionGroup
+import gears.async.GearsCancellationException
 import gears.async.Listener
 import gears.async.io.Repeatable
 import gears.async.io.shareable.TimerHeapOp.CancelledSentinel
@@ -75,7 +76,7 @@ abstract class AbstractTimerHeapOp private[shareable] ()
         case outcome => outcome
     out match
       case result: Try[Unit]             => result.get
-      case TimerHeapOp.CancelledSentinel => throw new CancellationException()
+      case TimerHeapOp.CancelledSentinel => throw new GearsCancellationException()
   }
 
   // async state management

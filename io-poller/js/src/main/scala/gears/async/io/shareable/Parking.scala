@@ -2,9 +2,9 @@ package gears.async.io.shareable
 
 import gears.async.Async
 import gears.async.Cancellable
+import gears.async.GearsCancellationException
 import gears.async.Listener
 
-import java.util.concurrent.CancellationException
 import scala.scalajs.js
 import scala.scalajs.js.wasm.JSPI.allowOrphanJSAwait
 
@@ -44,7 +44,7 @@ private[io] object Parking {
   /** Suspends until `source` has its item, or the performer's group is cancelled, which throws. */
   def parkOn[T](source: Async.Source[T])(using async: Async): T = {
     val group = async.group
-    if group.isCancelled then throw new CancellationException()
+    if group.isCancelled then throw new GearsCancellationException()
     val parked = new Parked[T](source)
     val onCancel: Cancellable = parked
     onCancel.link(group)
@@ -53,7 +53,7 @@ private[io] object Parking {
         source.onComplete(parked)
         js.await(parked.promise)
       } finally onCancel.unlink()
-    if got.asInstanceOf[AnyRef] eq Cancelled then throw new CancellationException() else got.asInstanceOf[T]
+    if got.asInstanceOf[AnyRef] eq Cancelled then throw new GearsCancellationException() else got.asInstanceOf[T]
   }
 
   /** Suspends until `source` has its item, whatever becomes of the performer's group. */

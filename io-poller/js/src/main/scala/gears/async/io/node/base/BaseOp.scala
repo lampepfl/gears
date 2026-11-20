@@ -1,10 +1,10 @@
 package gears.async.io.node.base
 
 import gears.async.Async
+import gears.async.GearsCancellationException
 import gears.async.io.shareable
 import gears.async.io.shareable.WorkpoolScheduler
 
-import java.util.concurrent.CancellationException
 import java.util.concurrent.TimeoutException
 import scala.util.Failure
 
@@ -69,7 +69,7 @@ trait CallState extends shareable.AbstractTimerHeapOp, shareable.TimeoutOnWake, 
     * nothing did. Whoever does the work decides what it means for the outcome.
     */
   protected final def interruptedBy: Throwable | Null =
-    if cancelledDuringWork then new CancellationException()
+    if cancelledDuringWork then new GearsCancellationException()
     else {
       val limit = minDeadline
       if hasDeadline && System.nanoTime() - limit >= 0 then new TimeoutException(s"$this timed out") else null

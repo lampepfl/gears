@@ -2,13 +2,13 @@ package gears.async.io
 package node
 
 import gears.async.Async
+import gears.async.GearsCancellationException
 import gears.async.io.node.base.Deadlines
 import gears.async.io.node.base.NodeSource
 import gears.async.io.node.host.NodeErr
 import gears.async.io.node.internal.NodeGlobals
 import gears.async.io.shareable.HandleOwner
 
-import java.util.concurrent.CancellationException
 import scala.scalajs.js
 import scala.scalajs.js.wasm.JSPI.allowOrphanJSAwait
 
@@ -38,7 +38,7 @@ private[node] object NodeLoop {
 
   /** Performs `op` for a run, whose handles are `owner`'s. */
   def perform(op: NodeOp, timeoutMillis: Long, owner: HandleOwner)(using async: Async): Unit = {
-    if async.group.isCancelled then throw new CancellationException()
+    if async.group.isCancelled then throw new GearsCancellationException()
     try
       op.performWith {
         op.setTimeout(timeoutMillis)
