@@ -1,5 +1,7 @@
 package gears.async.io
 
+import language.experimental.captureChecking
+
 import java.nio.ByteBuffer
 
 /** A mutable outcome of an operation, written by the op and taken by the caller with `clear`. Like a buffer, it belongs
