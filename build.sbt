@@ -213,6 +213,23 @@ lazy val ioPoller =
     )
     .dependsOn(root, ioTestkit % Test)
 
+// The io_uring backend (Linux 6.0 or later, Scala Native) on io-poller's pool, through liburing, whose `static inline`
+// helpers, and a synchronous cancel, are in a C shim among its native resources. Every program that links it needs
+// liburing.
+lazy val ioUring =
+  (project in file("io-uring"))
+    .enablePlugins(ScalaNativePlugin)
+    .settings(
+      name := "gears-io-uring",
+      publish / skip := false,
+      versionScheme := Some("early-semver"),
+      scalacOptions += "-release:21",
+      libraryDependencies += munit % Test,
+      testFrameworks += MUnitFramework,
+      nativeConfig ~= { _.withMultithreading(true) }
+    )
+    .dependsOn(ioPoller.native % "compile->compile;test->test", ioTestkit.native % Test)
+
 // The backends' demo applications: the testkit's gears demos over them, as `ioPollerDemosJVM/run <command>` and
 // `ioPollerDemosNative/run <command>`. The Node.js one is linked with `ioPollerDemosJS/fastLinkJS` and run as
 // `node <linked>/main.js <command>`, since Scala.js's `run` passes a program no arguments.

@@ -29,6 +29,7 @@ it. Futures, groups, `sleep` and `withTimeout` work as anywhere in gears, `sleep
 | `ioReferenceDemos` (`io-reference/demos/`) | the demos over the reference backend: `ioReferenceDemos/run <command>` | the reference backend, the testkit |
 | `ioPoller` (`io-poller/`, JVM, Scala Native and Scala.js) | the backends over each platform's event queue, and their suites: `gears.async.io.nio.NioBackend` and `NioPoolBackend` on the JVM, `gears.async.io.eventpolling.EventPollingBackend` on Scala Native (kqueue or epoll by the system), `gears.async.io.node.NodeBackend` on Scala.js; `shared/` has what all three have in common (`gears.async.io.shareable`) and `jvm-native/` what the two with threads have besides | core, the testkit's contracts |
 | `ioPollerDemos` (`io-poller/demos/`) | the demos over those backends: `ioPollerDemosJVM/run <command>`, `ioPollerDemosNative/run <command>`, and for Node.js `ioPollerDemosJS/fastLinkJS`, run by Node | the backends, the testkit |
+| `ioUring` (`io-uring/`, Scala Native, Linux 6.0 or later) | the io_uring backend, `gears.async.io.uring.UringBackend`, on `ioPoller`'s pool, each worker's poller a ring of its own (see `uring.md`), and its suites | `ioPoller`, the testkit's contracts; liburing |
 
 The interface is in `shared/`, so it compiles on every platform gears does, and so does the testkit; the
 JVM, Scala Native and Scala.js each have a backend to run its contracts and demos on. A backend outside this repository is written in a package
