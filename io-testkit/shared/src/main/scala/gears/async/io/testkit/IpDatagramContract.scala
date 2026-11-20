@@ -570,4 +570,5 @@ trait IpDatagramContract extends ContractSuite {
       close(io, bound.clear())
     }
   }
+
 }

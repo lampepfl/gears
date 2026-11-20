@@ -590,8 +590,12 @@ trait IpStreamContract extends IpStreamFixture {
       try {
         val accepting = Future(opening(io)(slot => io.ops.accept(listener, slot)))
         val client = opening(io)(slot => io.ops.connect(IpSocketAddress(IpAddress.IPv4Loopback, port), slot))
+        val server = accepting.await
+        val peer = io.ops.peerAddress(server).asInstanceOf[IpSocketAddress]
+        assertEquals(peer.address, IpAddress.IPv4Loopback, "an IPv4 client, not IPv4-mapped")
+        assertEquals(peer, io.ops.localAddress(client))
         close(io, client)
-        close(io, accepting.await)
+        close(io, server)
       } finally close(io, listener)
 
     }
@@ -675,5 +679,67 @@ trait IpStreamContract extends IpStreamFixture {
         } finally io.perform(io.ops.close(listener))
       }
     assertEquals(echoed, clients)
+  }
+
+  private val anyLoopbackPort = IpSocketAddress(IpAddress.IPv4Loopback, 0)
+
+  test("an opener refuses an occupied slot, opening nothing") {
+    running { io ?=>
+      val held = Slot[io.ops.Listener]()
+      io.perform(io.ops.listen(anyLoopbackPort, held))
+      val refused = attempt(io, io.ops.listen(anyLoopbackPort, held)) // `held` still holds the first listener
+      assert(refused.isInstanceOf[IllegalArgumentException], String.valueOf(refused))
+      val kept = held.clear()
+      intercept[IllegalStateException](held.clear()) // nothing more was opened into it
+      close(io, kept)
+    }
+  }
+
+  test("an op that opens or closes is one-shot: performed again, it throws IllegalStateException") {
+    running { io ?=>
+      val into = Slot[io.ops.Listener]()
+      val listening = io.ops.listen(anyLoopbackPort, into)
+      io.perform(listening)
+      val listener = into.clear()
+      intercept[IllegalStateException](io.perform(listening))
+      val closing = io.ops.close(listener)
+      io.perform(closing)
+      intercept[IllegalStateException](io.perform(closing))
+    }
+  }
+
+  test("a one-shot op performed by two futures at once opens once, the other refused") {
+    running { io ?=>
+      for _ <- 1 to 100 do {
+        val into = Slot[io.ops.Listener]()
+        val listening = io.ops.listen(anyLoopbackPort, into)
+        val start = Future.Promise[Unit]()
+        val both = List.fill(2)(Future {
+          start.await
+          io.perform(listening)
+        })
+        start.complete(scala.util.Success(()))
+        val failures = both.map(failureOf)
+        assertEquals(failures.count(_ == null), 1, failures.mkString(", "))
+        assert(failures.exists(_.isInstanceOf[IllegalStateException]), failures.mkString(", "))
+        close(io, into.clear())
+      }
+    }
+  }
+
+  test("a listener closed with connections no accept took closes them: their clients read the end") {
+    running { io ?=>
+      val listener = tcpListen(io, anyLoopbackPort)
+      val address = io.ops.localAddress(listener).asInstanceOf[IpSocketAddress]
+      val client = tcpConnect(io, address)
+      try {
+        settle(io) // for the listener to have been handed the connection
+        close(io, listener)
+        val buf = allocate(8)
+        val failure = tcpAttemptWithin(io, io.ops.read(client, buf), 5.seconds)
+        assert(failure == null || failure.isInstanceOf[IOException], String.valueOf(failure))
+        assertEquals(buf.position(), 0, "closed, or reset: nothing comes")
+      } finally close(io, client)
+    }
   }
 }

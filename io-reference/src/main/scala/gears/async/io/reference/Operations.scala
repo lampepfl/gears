@@ -185,6 +185,7 @@ private[reference] object Timers {
 // ---- Closing
 
 final class CloseOp(h: RefHandle) extends RefOp {
+  override protected def uses = h
   protected def body(ctx: Ctx)(using Async): Unit = h.close(ctx.waiter)
 }
 
@@ -205,7 +206,7 @@ final class ConnectOp(address: IpSocketAddress | UnixAddress, options: SocketOpt
       val kind = if unix then SocketOption.Kind.UnixConnection else SocketOption.Kind.Connection
       SocketOption.opening(options, kind).foreach((o, v) => Options.set(socket, o, v))
       if !socket.connect(target) then while !socket.finishConnect() do ctx.ready(this, null, socket, OP_CONNECT)
-      into.set(new ConnectionHandle(socket, unix))
+      into.set(ctx.adopt(new ConnectionHandle(socket, unix)))
     } catch {
       case e: Throwable =>
         abandon(socket, ctx.waiter)
@@ -241,7 +242,7 @@ final class ListenOp(address: IpSocketAddress | UnixAddress, options: SocketOpti
         case ip: IpSocketAddress => server.bind(Addresses.jdk(ip), 1024)
         case unix: UnixAddress   => server.bind(Addresses.jdk(unix), 1024)
       }
-      into.set(new ListenerHandle(server, path != null, options, path))
+      into.set(ctx.adopt(new ListenerHandle(server, path != null, options, path)))
     } catch {
       case e: Throwable =>
         server.close()
@@ -262,7 +263,7 @@ private[reference] object Listening {
     }
 
   /** An accepted connection, with the options its listener gives it. */
-  def accepted(listener: ListenerHandle, socket: SocketChannel): ConnectionHandle = {
+  def accepted(ctx: Ctx, listener: ListenerHandle, socket: SocketChannel): ConnectionHandle = {
     try {
       socket.configureBlocking(false)
       val kind = if listener.unix then SocketOption.Kind.UnixListener else SocketOption.Kind.Listener
@@ -272,7 +273,7 @@ private[reference] object Listening {
         socket.close()
         throw e
     }
-    new ConnectionHandle(socket, listener.unix)
+    ctx.adopt(new ConnectionHandle(socket, listener.unix))
   }
 }
 
@@ -287,7 +288,7 @@ final class AcceptOp(l: ListenerHandle, into: Slot[ConnectionHandle]) extends Re
         ctx.ready(this, l, l.server, OP_ACCEPT)
         socket = l.server.accept()
       }
-      into.set(Listening.accepted(l, socket))
+      into.set(Listening.accepted(ctx, l, socket))
     } finally l.accepts.release(ctx.waiter)
   }
 }
@@ -305,9 +306,9 @@ final class AcceptAllOp(l: ListenerHandle, into: Slot[Array[ConnectionHandle]], 
         ctx.ready(this, l, l.server, OP_ACCEPT)
         socket = l.server.accept()
       }
-      val accepted = scala.collection.mutable.ArrayBuffer(Listening.accepted(l, socket))
+      val accepted = scala.collection.mutable.ArrayBuffer(Listening.accepted(ctx, l, socket))
       while accepted.size < max && { socket = l.server.accept(); socket != null } do
-        accepted += Listening.accepted(l, socket)
+        accepted += Listening.accepted(ctx, l, socket)
       into.set(accepted.toArray)
     } finally l.accepts.release(ctx.waiter)
   }
@@ -338,8 +339,8 @@ final class OpenDatagramOp(
       if local != null then datagrams.bind(Addresses.jdk(local))
       if remote != null then {
         datagrams.connect(Addresses.jdk(remote))
-        into.asInstanceOf[Slot[DatagramHandle]].set(new ConnectedDatagramHandle(datagrams))
-      } else into.asInstanceOf[Slot[DatagramHandle]].set(new BoundDatagramHandle(datagrams))
+        into.asInstanceOf[Slot[DatagramHandle]].set(ctx.adopt(new ConnectedDatagramHandle(datagrams)))
+      } else into.asInstanceOf[Slot[DatagramHandle]].set(ctx.adopt(new BoundDatagramHandle(datagrams)))
     } catch {
       case e: Throwable =>
         datagrams.close()
@@ -410,8 +411,8 @@ final class PipeOp(read: Slot[ReadEnd], write: Slot[WriteEnd]) extends RefOp {
     val pipe = Pipe.open()
     pipe.source().configureBlocking(false)
     pipe.sink().configureBlocking(false)
-    read.set(new PipeSourceHandle(pipe.source()))
-    write.set(new PipeSinkHandle(pipe.sink()))
+    read.set(ctx.adopt(new PipeSourceHandle(pipe.source())))
+    write.set(ctx.adopt(new PipeSinkHandle(pipe.sink())))
   }
 }
 
@@ -429,7 +430,7 @@ final class OpenFileOp(path: String, write: Boolean, into: Slot[FileHandle]) ext
         file.close()
         throw e
     }
-    into.set(new FileHandle(file, path))
+    into.set(ctx.adopt(new FileHandle(file, path)))
   }
 }
 

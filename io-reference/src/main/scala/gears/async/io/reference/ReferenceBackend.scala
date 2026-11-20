@@ -28,17 +28,23 @@ object ReferenceBackend extends Backend {
 
   def pool(bufferSize: Int, buffers: Int): BufferPool = new RefPool(bufferSize, buffers)
 
-  /** Runs `program` on gears' virtual threads, each op performed by the future performing it. */
+  /** Runs `program` on gears' virtual threads, each op performed by the future performing it. The handles its ops open
+    * are the run's: closed as it ends if nothing closed them, and refused by another run.
+    */
   private[io] def run[T](program: Io[Interface] ?=> Async.Spawn ?=> T): T = {
     given VThreadSupport.type = VThreadSupport
     given VThreadScheduler.type = VThreadScheduler
+    val run = new RefRun
     val io: Io[Interface] = new Io[Interface] {
       val backend: ReferenceBackend.type = ReferenceBackend
       val ops: ReferenceOps.type = ReferenceOps
-      private[io] def performWithin(op: RefOp, timeoutMillis: Long)(using Async): Unit = op.perform(timeoutMillis)
+      private[io] def performWithin(op: RefOp, timeoutMillis: Long)(using Async): Unit = op.perform(timeoutMillis, run)
     }
     // `Async.blocking` runs its body on the calling thread, which may be a platform thread; a future's is virtual.
-    Async.blocking(Future(program(using io)).await)
+    // The program's futures have ended, cancelled if they had not, when the await returns: what they left open is
+    // then closed.
+    try Async.blocking(Future(program(using io)).await)
+    finally run.end()
   }
 }
 
