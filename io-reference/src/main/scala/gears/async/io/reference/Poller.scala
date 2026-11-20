@@ -1,6 +1,8 @@
 package gears.async.io
 package reference
 
+import language.experimental.captureChecking
+
 import gears.async.Cancellable
 
 import java.nio.channels.CancelledKeyException
@@ -61,7 +63,7 @@ final class Turns {
   private val queue = new java.util.ArrayDeque[Wait]()
 
   /** Waits for `ctx`'s turn, failing as `ctx.stopped` says while it waits, out of the queue. */
-  def take(ctx: Ctx, handle: RefHandle, op: AnyRef)(using gears.async.Async): Unit = {
+  def take(ctx: Ctx, handle: RefHandle, op: AnyRef^)(using gears.async.Async^): Unit = {
     val wait = ctx.waiter
     synchronized(queue.addLast(wait))
     try

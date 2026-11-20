@@ -1,5 +1,7 @@
 package gears.io.demos
 
+import language.experimental.captureChecking
+
 import gears.async.Async
 import gears.async.Future
 import gears.async.UnboundedChannel
@@ -60,7 +62,7 @@ object GearsQuicTimers {
 
   def run(connections: Int, packets: Int, interval: FiniteDuration)(using
       io: Io[IpDatagrams],
-      async: Async.Spawn
+      async: Async.Spawn^
   ): Unit = {
     require(connections > 0 && packets > 0, "connections and packets are positive")
     // Grouped inside the arena's scope, so that the futures still running, the server's, have stopped before the arena
@@ -71,9 +73,9 @@ object GearsQuicTimers {
   }
 
   /** The run, with buffers from `buffer`, which every backend's ops can fill and drain. */
-  private def run(connections: Int, packets: Int, interval: FiniteDuration, buffer: Int => ByteBuffer)(using
+  private def run(connections: Int, packets: Int, interval: FiniteDuration, buffer: Int -> ByteBuffer)(using
       io: Io[IpDatagrams],
-      async: Async.Spawn
+      async: Async.Spawn^
   ): Unit = {
     val socket = SimpleIO.bindDatagram(IpSocketAddress(IpAddress.IPv4Loopback, 0))
     val address = io.ops.localAddress(socket)
@@ -114,8 +116,8 @@ object GearsQuicTimers {
       socket: io.ops.BoundDatagram,
       counts: Counts,
       closed: UnboundedChannel[Long],
-      buffer: Int => ByteBuffer
-  )(using Async.Spawn): Unit = {
+      buffer: Int -> ByteBuffer
+  )(using Async.Spawn^): Unit = {
     val drivers = mutable.HashMap.empty[Long, UnboundedChannel[Event]]
     val packet = buffer(64)
     val from = Slot[IpSocketAddress]()
@@ -153,8 +155,8 @@ object GearsQuicTimers {
       peer: IpSocketAddress,
       inbox: UnboundedChannel[Event],
       counts: Counts,
-      buffer: Int => ByteBuffer
-  )(using Async.Spawn): Unit = {
+      buffer: Int -> ByteBuffer
+  )(using Async.Spawn^): Unit = {
     val Never = Long.MaxValue
     var idleAt = System.nanoTime() + IdleTimeout.toNanos
     var ackAt = Never
@@ -221,9 +223,9 @@ object GearsQuicTimers {
       id: Long,
       packets: Int,
       interval: FiniteDuration,
-      buffer: Int => ByteBuffer
-  )(using Async.Spawn): Unit = {
-    val socket = SimpleIO.connectDatagram(null, server)(using io, summon[Async])
+      buffer: Int -> ByteBuffer
+  )(using Async.Spawn^): Unit = {
+    val socket = SimpleIO.connectDatagram(null, server)(using io, summon[Async^])
     val silence = 1.second.toNanos
     val limit = io.ops.deadlineTimer(System.nanoTime() + silence)
     try {

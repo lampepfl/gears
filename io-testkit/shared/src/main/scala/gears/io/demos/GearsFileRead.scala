@@ -1,5 +1,7 @@
 package gears.io.demos
 
+import language.experimental.captureChecking
+
 import gears.async.Async
 import gears.async.io.Fifos
 import gears.async.io.Io
@@ -15,7 +17,7 @@ import DemoIO.drainTo
   * room.
   */
 object GearsFileRead {
-  def run(fifo: String)(using io: Io[Fifos], async: Async): Unit = {
+  def run(fifo: String)(using io: Io[Fifos], async: Async^): Unit = {
     BufferArena.scoped { arena =>
       val chunk = arena.allocate(1024)
       val contents = new ByteArrayOutputStream()

@@ -1,6 +1,8 @@
 package gears.async.io
 package testkit
 
+import language.experimental.captureChecking
+
 import gears.async.Async
 import gears.async.AsyncOperations.sleep
 import gears.async.Future
@@ -249,7 +251,8 @@ trait OpsContract extends ContractSuite {
       var waiting: Future[Unit] | Null = null
       val started = System.nanoTime()
       Async.group {
-        waiting = Future(io.perform(io.ops.timer(60_000)))
+        // the future outlives its group on purpose, which capture checking would refuse
+        waiting = caps.unsafe.unsafeAssumePure(Future(io.perform(io.ops.timer(60_000))))
       } // ends with the timer pending: the future is cancelled, and with it the op, before the group returns
       val waited = System.nanoTime() - started
       val cancelled = waiting.nn.awaitResult.failed.toOption.exists(_.isInstanceOf[CancellationException])

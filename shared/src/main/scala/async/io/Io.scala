@@ -1,5 +1,8 @@
 package gears.async.io
 
+import language.experimental.captureChecking
+import caps.*
+
 import _root_.gears.async.Async
 import _root_.gears.async.AsyncOperations
 
@@ -30,7 +33,7 @@ trait Io[+I <: Interface] extends AsyncOperations {
     * throws the op is no longer in use anywhere: its buffers and slots are the caller's again, and its handle is as
     * open as it was. An op marked `Repeatable` may be performed again once it has returned; any other op only once.
     */
-  final def perform(op: Op)(using Async): Unit = performWithin(op, Backend.NoTimeout)
+  final def perform(op: Op^)(using Async^): Unit = performWithin(op, Backend.NoTimeout)
 
   /** Performs `op` as the other `perform` does, and throws `java.util.concurrent.TimeoutException` if it is not done
     * `timeout` after it began: never sooner, and to the millisecond. A cancelled or timed-out op has stopped, and an op
@@ -41,7 +44,7 @@ trait Io[+I <: Interface] extends AsyncOperations {
     * name lookup, finishes, its outcome dropped unless it had already written it (see each op). A timer whose own time
     * is longer times out the same way; a zero `timeout` gives the op until the next turn of the caller's worker.
     */
-  final def perform(op: Op, timeout: scala.concurrent.duration.FiniteDuration)(using Async): Unit = {
+  final def perform(op: Op^, timeout: scala.concurrent.duration.FiniteDuration)(using Async^): Unit = {
     require(timeout.length >= 0, s"A time limit is not negative: $timeout")
     val nanos = timeout.toNanos
     val millis = nanos / 1_000_000L + (if nanos % 1_000_000L == 0 then 0 else 1) // rounded up, never sooner
@@ -49,10 +52,10 @@ trait Io[+I <: Interface] extends AsyncOperations {
   }
 
   /** Performs `op` with a time limit of `timeoutMillis`, none if it is negative: what each backend's `Io` does. */
-  private[io] def performWithin(op: Op, timeoutMillis: Long)(using Async): Unit
+  private[io] def performWithin(op: Op^, timeoutMillis: Long)(using Async^): Unit
 
   /** Sleeps on a timer op of the backend's. */
-  override def sleep(millis: Long)(using Async): Unit = {
+  override def sleep(millis: Long)(using Async^): Unit = {
     require(
       millis >= 0 && millis <= Interface.MaxTimerMillis,
       s"A sleep of $millis ms is out of a timer's range"
@@ -68,6 +71,6 @@ object Io {
     * beside its `Async`, where the backend runs it (`Backend.run`). A program's `Io` is not a `Backend`, so starting a
     * run over one is refused when compiling.
     */
-  def run[T](using backend: Backend)(program: Io[backend.Interface] ?=> Async.Spawn ?=> T): T =
+  def run[T](using backend: Backend)(program: Io[backend.Interface] ?->{any.except[Control]} Async.Spawn^ ?->{any.except[Control]} T): T =
     backend.run(program)
 }

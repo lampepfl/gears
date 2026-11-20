@@ -1,5 +1,7 @@
 package gears.async
 
+import language.experimental.captureChecking
+
 /** The `CancellationException` that gears itself throws, and fails a cancelled [[Future]] with: a
   * `java.util.concurrent.CancellationException`, so whatever catches that one catches this.
   *

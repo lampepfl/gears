@@ -1,6 +1,8 @@
 package gears.async.io
 package testkit
 
+import language.experimental.captureChecking
+
 import gears.async.Async
 import gears.async.Future
 
@@ -21,13 +23,13 @@ trait IpDatagramContract extends ContractSuite {
   protected def bindDatagram(
       io: Io[backend.Interface],
       local: IpSocketAddress
-  )(using Async): io.ops.BoundDatagram = {
+  )(using Async^): io.ops.BoundDatagram = {
     opening(io)(slot => io.ops.bindDatagram(local, slot))
   }
 
   /** A datagram socket connected to `remote`, from the `connectDatagram` op, whose failure is thrown. */
   protected def connectDatagram(io: Io[backend.Interface], local: IpSocketAddress | Null, remote: IpSocketAddress)(using
-      Async
+      Async^
   ): io.ops.ConnectedDatagram = {
     opening(io)(slot => io.ops.connectDatagram(local, remote, slot))
   }
@@ -308,7 +310,7 @@ trait IpDatagramContract extends ContractSuite {
   }
 
   /** A bound socket opening with `options` on loopback, port 0. */
-  private def boundWith(io: Io[backend.Interface], options: SocketOptions)(using Async): io.ops.BoundDatagram = {
+  private def boundWith(io: Io[backend.Interface], options: SocketOptions)(using Async^): io.ops.BoundDatagram = {
     opening(io)(slot => io.ops.bindDatagram(IpSocketAddress(IpAddress.IPv4Loopback, 0), options, slot))
   }
 

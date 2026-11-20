@@ -1,10 +1,13 @@
 package gears.async
 
-import gears.async.Async.Source
+import gears.async.Async.{Source, SourceId}
 
 import java.util.concurrent.locks.Lock
 import java.util.concurrent.locks.ReentrantLock
 import scala.annotation.tailrec
+
+import language.experimental.captureChecking
+import caps.*
 
 /** A listener, representing an one-time value receiver of an [[Async.Source]].
   *
@@ -24,21 +27,25 @@ trait Listener[-T]:
     *
     * The listener must automatically release its own lock upon completion.
     */
-  def complete(data: T, source: Async.Source[T]): Unit
+  def complete(data: T, source: Async.SourceId): Unit
+
+  final def complete(data: T, source: Async.Source[T]): Unit = this.complete(data, source.ident)
 
   /** Represents the exposed API for synchronization on listeners at receiving time. If the listener does not have any
     * form of synchronization, [[lock]] should be `null`.
     */
-  val lock: Listener.ListenerLock | Null
+  val lock: (Listener.ListenerLock^) | Null
 
   /** Attempts to acquire locks and then calling [[complete]] with the given item and source. If locking fails,
     * [[releaseLock]] is automatically called.
     */
-  def completeNow(data: T, source: Async.Source[T]): Boolean =
+  def completeNow(data: T, source: Async.SourceId): Boolean =
     if acquireLock() then
       this.complete(data, source)
       true
     else false
+
+  final def completeNow(data: T, source: Async.Source[T]): Boolean = this.completeNow(data, source.ident)
 
   /** Release the listener's lock if it exists. */
   inline final def releaseLock(): Unit = if lock != null then lock.release()
@@ -50,25 +57,25 @@ trait Listener[-T]:
 
 object Listener:
   /** A simple [[Listener]] that always accepts the item and sends it to the consumer. */
-  inline def acceptingListener[T](inline consumer: (T, Source[T]) => Unit) =
+  def acceptingListener[T](consumer: (T, SourceId) => Unit): Listener[T]^{consumer} =
     new Listener[T]:
-      val lock = null
-      def complete(data: T, source: Source[T]) = consumer(data, source)
+      val lock: Null = null
+      def complete(data: T, source: SourceId) = consumer(data, source)
 
   /** Returns a simple [[Listener]] that always accepts the item and sends it to the consumer. */
-  inline def apply[T](consumer: (T, Source[T]) => Unit): Listener[T] = acceptingListener(consumer)
+  inline def apply[T](consumer: (T, SourceId) => Unit): Listener[T]^{consumer} = acceptingListener(consumer)
 
   /** A special class of listener that forwards the inner listener through the given source. For purposes of
     * [[Async.Source.dropListener]] these listeners are compared for equality by the hash of the source and the inner
     * listener.
     */
-  abstract case class ForwardingListener[T](src: Async.Source[?], inner: Listener[?]) extends Listener[T]
+  abstract case class ForwardingListener[T](src: Async.Source[?]^, inner: Listener[?]^) extends Listener[T]
 
   object ForwardingListener:
     /** Create an empty [[ForwardingListener]] for equality comparison. */
-    def empty[T](src: Async.Source[?], inner: Listener[?]) = new ForwardingListener[T](src, inner):
-      val lock = null
-      override def complete(data: T, source: Async.Source[T]) = ???
+    def empty[T](src: Async.Source[?]^, inner: Listener[?]^): ForwardingListener[T]^{src, inner} = new ForwardingListener[T](src, inner):
+      val lock: Null = null
+      override def complete(data: T, source: Async.SourceId) = ???
 
   /** A lock required by a listener to be acquired before accepting values. Should there be multiple listeners that
     * needs to be locked at the same time, they should be locked by larger-number-first.
@@ -92,7 +99,7 @@ object Listener:
   end ListenerLock
 
   /** Maps the lock of a listener, if it exists. */
-  inline def withLock[T](listener: Listener[?])(inline body: ListenerLock => T): T | Null =
+  inline def withLock[T](listener: Listener[?]^)(inline body: ListenerLock => T): T | Null =
     listener.lock match
       case null            => null
       case l: ListenerLock => body(l)

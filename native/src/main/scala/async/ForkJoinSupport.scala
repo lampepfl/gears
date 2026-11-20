@@ -11,18 +11,24 @@ import scala.concurrent.JavaConversions._
 import scala.concurrent.duration._
 import scala.scalanative.runtime.{Continuations => nativeContinuations}
 
+import language.experimental.captureChecking
+import caps.*
+
 class NativeContinuation[-T, +R] private[native] (val cont: T => R) extends Suspension[T, R]:
   def resume(arg: T): R = cont(arg)
 
 trait NativeSuspend extends SuspendSupport:
-  type Label[R] = nativeContinuations.BoundaryLabel[R]
+  this: NativeSuspend^{any.only[capabilities.Suspension]} =>
+  type Label[R, B^] = nativeContinuations.BoundaryLabel[R]
   type Suspension[T, R] = NativeContinuation[T, R]
 
-  override def boundary[R](body: (Label[R]) ?=> R): R =
+  override def boundary[R, B^ <: {any.except[Control]}](body: (Label[R, B]^{any.only[Control]}) ?->{B} R): R =
     nativeContinuations.boundary(body)
 
-  override def suspend[T, R](body: Suspension[T, R] => R)(using Label[R]): T =
-    nativeContinuations.suspend[T, R](f => body(NativeContinuation(f)))
+  override def suspend[T, R, B^](body: Suspension[T, R]^{B} ->{B, any.except[Control]} R)(using
+      label: Label[R, B]^
+  ): T =
+    nativeContinuations.suspend[T, R](f => body(NativeContinuation(f)))(using label)
 end NativeSuspend
 
 /** Spawns a single thread that does all the sleeping. */
@@ -82,7 +88,8 @@ class SuspendExecutorWithSleep(exec: ExecutionContext)
     with AsyncSupport
     with AsyncOperations
     with NativeSuspend {
-  type Scheduler = this.type
+  // the scheduler is the executor part alone, which captures nothing; `this.type` would carry the suspension capability
+  type Scheduler = ExecutorWithSleepThread
 }
 
 class ForkJoinSupport extends SuspendExecutorWithSleep(new ForkJoinPool())

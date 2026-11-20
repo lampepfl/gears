@@ -1,6 +1,8 @@
 package gears.async.io
 package testkit
 
+import language.experimental.captureChecking
+
 import java.nio.ByteBuffer
 
 /** Buffers that every backend's ops can fill and drain, allocated from one arena and freed together when it closes: for

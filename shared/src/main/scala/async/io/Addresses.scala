@@ -1,5 +1,7 @@
 package gears.async.io
 
+import language.experimental.captureChecking
+
 /** An immutable address with an explicit protocol, stored as bytes in network byte order. Construction validates the
   * representation for that protocol. Equality and hashing use the protocol, bytes and IPv6 scope ID, independently of
   * any textual form. The nonnegative scope ID identifies a zone on the local system; zero means unspecified and is

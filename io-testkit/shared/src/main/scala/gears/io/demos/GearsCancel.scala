@@ -1,5 +1,7 @@
 package gears.io.demos
 
+import language.experimental.captureChecking
+
 import gears.async.Async
 import gears.async.Future
 import gears.async.Future.Promise
@@ -23,7 +25,7 @@ import DemoIO.text
 object GearsCancel {
 
   /** A blocking body that sleeps for `millis`, recording whether cancellation interrupted it. */
-  private def sleeper(millis: Long, interrupted: AtomicBoolean): () => Unit = () => {
+  private def sleeper(millis: Long, interrupted: AtomicBoolean): () -> Unit = () => {
     try Thread.sleep(millis)
     catch {
       case e: InterruptedException =>
@@ -34,7 +36,7 @@ object GearsCancel {
 
   /** A blocking body that keeps running for `millis` whatever happens, like a native call that cannot be interrupted.
     */
-  private def stubborn(millis: Long, finished: AtomicBoolean): () => String = () => {
+  private def stubborn(millis: Long, finished: AtomicBoolean): () -> String = () => {
     val deadline = System.nanoTime() + millis * 1_000_000L
     while System.nanoTime() < deadline do ()
     finished.set(true)
@@ -48,7 +50,7 @@ object GearsCancel {
     interrupted.get()
   }
 
-  private def isCancelled(future: Future[?]): Boolean =
+  private def isCancelled(future: Future[?]^): Boolean =
     future.poll().exists {
       case Failure(_: CancellationException) => true
       case _                                 => false
@@ -73,7 +75,7 @@ object GearsCancel {
   /** The program. It returns the future it leaves running, whose fate its run's end decides, for `Leftover.report` once
     * the run has returned.
     */
-  def run()(using io: Io[Blocking & Pipes], async: Async.Spawn): Leftover = {
+  def run()(using io: Io[Blocking & Pipes], async: Async.Spawn^): Leftover = {
     val leftover = new Leftover
     BufferArena.scoped { arena =>
       val buf = arena.allocate(64)

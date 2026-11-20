@@ -1,4 +1,4 @@
-import gears.async.Async.Source
+import gears.async.Async.{Source, SourceId}
 import gears.async.{Async, BufferedChannel, Channel, Listener, SyncChannel, UnboundedChannel}
 
 import scala.collection.mutable.ArrayBuffer
@@ -15,7 +15,7 @@ class ChannelCancellationBehavior extends munit.FunSuite:
         attempts += 1
         active
       def release(): Unit = ()
-    def complete(value: T, source: Source[T]): Unit =
+    def complete(value: T, source: SourceId): Unit =
       assert(active)
       active = false
       received += value

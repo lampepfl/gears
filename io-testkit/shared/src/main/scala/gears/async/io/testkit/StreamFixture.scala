@@ -1,6 +1,8 @@
 package gears.async.io
 package testkit
 
+import language.experimental.captureChecking
+
 import gears.async.Async
 
 /** Supplies independently closable connected stream ends. Writes go from `out` to `in`; closing `out` delivers EOF
@@ -9,19 +11,19 @@ import gears.async.Async
   */
 trait StreamFixture extends ContractSuite {
   val backend: Backend { type Interface <: ByteStreams }
-  protected def stream(io: Io[backend.Interface])(using Async.Spawn): (io.ops.Readable, io.ops.Writable)
+  protected def stream(io: Io[backend.Interface])(using Async.Spawn^): (io.ops.Readable, io.ops.Writable)
 }
 
 /** Supplies the stream fixture using only the Pipes capability. */
 trait PipeFixture extends StreamFixture {
   val backend: Backend { type Interface <: Pipes }
 
-  protected def pipe(io: Io[backend.Interface])(using Async): (io.ops.Readable, io.ops.Writable) = {
+  protected def pipe(io: Io[backend.Interface])(using Async^): (io.ops.Readable, io.ops.Writable) = {
     val read = Slot[io.ops.Readable]()
     val write = Slot[io.ops.Writable]()
     io.perform(io.ops.pipe(read, write))
     (read.clear(), write.clear())
   }
 
-  protected def stream(io: Io[backend.Interface])(using Async.Spawn): (io.ops.Readable, io.ops.Writable) = pipe(io)
+  protected def stream(io: Io[backend.Interface])(using Async.Spawn^): (io.ops.Readable, io.ops.Writable) = pipe(io)
 }

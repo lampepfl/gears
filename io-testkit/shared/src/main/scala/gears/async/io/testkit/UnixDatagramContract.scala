@@ -1,6 +1,8 @@
 package gears.async.io
 package testkit
 
+import language.experimental.captureChecking
+
 import gears.async.Async
 import gears.async.Future
 
@@ -17,13 +19,13 @@ trait UnixDatagramContract extends FileSystemFixture {
   protected def bindUnixDatagram(
       io: Io[backend.Interface],
       local: UnixAddress
-  )(using Async): io.ops.UnixBoundDatagram = {
+  )(using Async^): io.ops.UnixBoundDatagram = {
     opening(io)(slot => io.ops.bindDatagram(local, slot))
   }
 
   /** A Unix datagram socket connected to `remote`, from the `connectDatagram` op, whose failure is thrown. */
   protected def connectUnixDatagram(io: Io[backend.Interface], local: UnixAddress | Null, remote: UnixAddress)(using
-      Async
+      Async^
   ): io.ops.UnixConnectedDatagram = {
     opening(io)(slot => io.ops.connectDatagram(local, remote, slot))
   }

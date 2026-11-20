@@ -1,5 +1,7 @@
 package gears.io.demos
 
+import language.experimental.captureChecking
+
 import java.nio.ByteBuffer
 import java.nio.charset.StandardCharsets
 

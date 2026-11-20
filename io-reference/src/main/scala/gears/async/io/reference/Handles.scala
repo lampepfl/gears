@@ -1,6 +1,8 @@
 package gears.async.io
 package reference
 
+import language.experimental.captureChecking
+
 import java.nio.channels.Channel
 import java.nio.channels.DatagramChannel
 import java.nio.channels.FileChannel

@@ -1,5 +1,7 @@
 package gears.io.demos
 
+import language.experimental.captureChecking
+
 import gears.async.io.Slot
 
 import java.io.ByteArrayOutputStream

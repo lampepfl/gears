@@ -1,5 +1,7 @@
 package gears.async.io
 
+import language.experimental.captureChecking
+
 import java.nio.ByteBuffer
 
 /** Buffers a backend fills for the reads into its own buffers, opened by `Backend.pool`. A pool may be used from any

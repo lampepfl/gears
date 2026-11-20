@@ -1,5 +1,7 @@
 package gears.io.demos
 
+import language.experimental.captureChecking
+
 import gears.async.Async
 import gears.async.io.Fifos
 import gears.async.io.Io
@@ -10,7 +12,7 @@ import java.nio.charset.StandardCharsets
 
 /** Writes the message again after every completed write. */
 object GearsFileWrite {
-  def run(fifo: String, message: String)(using io: Io[Fifos], async: Async): Unit = {
+  def run(fifo: String, message: String)(using io: Io[Fifos], async: Async^): Unit = {
     BufferArena.scoped { arena =>
       val bytes = message.getBytes(StandardCharsets.UTF_8)
       val buf = arena.allocate(math.max(bytes.length, 1))

@@ -2,7 +2,10 @@ import org.scalajs.jsenv.nodejs.*
 import org.scalajs.linker.interface.ESVersion
 import sbtcrossproject.CrossPlugin.autoImport.{CrossType, crossProject}
 
-scalaVersion := "3.9.0"
+scalaVersion := "3.10.0"
+
+// The Scala Native nightly selected in project/plugins.sbt brings its libraries from the snapshot repository.
+ThisBuild / resolvers += Resolver.sonatypeCentralSnapshots
 
 LocalRootProject / publish / skip := true
 

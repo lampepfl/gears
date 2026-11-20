@@ -1,5 +1,7 @@
 package gears.async.io
 
+import language.experimental.captureChecking
+
 /** A timer whose deadline may be moved while it is pending (see `Interface.deadlineTimer`). */
 trait Deadline {
 

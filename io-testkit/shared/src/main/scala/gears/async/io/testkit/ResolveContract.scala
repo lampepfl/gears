@@ -1,6 +1,8 @@
 package gears.async.io
 package testkit
 
+import language.experimental.captureChecking
+
 /** What a backend that resolves host names must do: checked through `perform`, as programs over the backend (see
   * `ContractSuite`).
   */

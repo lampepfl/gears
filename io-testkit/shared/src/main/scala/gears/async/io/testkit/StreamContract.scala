@@ -1,6 +1,8 @@
 package gears.async.io
 package testkit
 
+import language.experimental.captureChecking
+
 import gears.async.Async
 import gears.async.Future
 
@@ -30,7 +32,7 @@ trait StreamContract extends StreamFixture {
       pool: BufferPool,
       text: String
   )(using
-      Async
+      Async^
   ): Received = {
     writeAll(io, out, bytes(text))
     val into = Slot[Received]()

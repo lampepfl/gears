@@ -1,5 +1,8 @@
 package referencedemos
 
+import language.experimental.captureChecking
+import caps.*
+
 import gears.async.Async
 import gears.async.io.Io
 import gears.async.io.reference.{ReferenceBackend, ReferenceOps}
@@ -11,7 +14,7 @@ import gears.io.demos.{DemoBackends, DemoCommands, DemoRunner}
   */
 object ReferenceDemos {
   private object Runner extends DemoRunner[ReferenceOps.type] {
-    def run[T](program: Io[ReferenceOps.type] ?=> Async.Spawn ?=> T): T =
+    def run[T](program: Io[ReferenceOps.type] ?->{any.except[Control]} Async.Spawn^ ?->{any.except[Control]} T): T =
       Io.run(using ReferenceBackend)(program)
   }
 

@@ -1,6 +1,8 @@
 package gears.async.io
 package testkit
 
+import language.experimental.captureChecking
+
 import java.nio.ByteBuffer
 
 /** Scala.js's arenas: direct buffers, which the garbage collector frees once unused, so closing frees nothing. */

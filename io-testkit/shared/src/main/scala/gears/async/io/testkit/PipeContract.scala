@@ -1,6 +1,8 @@
 package gears.async.io
 package testkit
 
+import language.experimental.captureChecking
+
 import gears.async.Future
 
 import java.io.IOException
@@ -72,7 +74,7 @@ trait PipeContract extends StreamContract with PipeFixture {
           io.perform(opening)
         })
         start.complete(scala.util.Success(()))
-        val failures = both.map(failureOf)
+        val failures = both.map(future => failureOf(future))
         assertEquals(failures.count(_ == null), 1, failures.mkString(", "))
         assert(failures.exists(_.isInstanceOf[IllegalStateException]), failures.mkString(", "))
         close(io, read.clear())

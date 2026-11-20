@@ -1,4 +1,4 @@
-import gears.async.Async.Source
+import gears.async.Async.{Source, SourceId}
 import gears.async.{Async, BufferedChannel, Channel, Listener, SyncChannel}
 
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
@@ -71,7 +71,7 @@ class ChannelCleanupConcurrencyBehavior extends munit.FunSuite:
         val selfNumber = number
         def acquire(): Boolean = false
         def release(): Unit = ()
-      def complete(value: Either[Channel.Closed, Unit], source: Source[Either[Channel.Closed, Unit]]): Unit =
+      def complete(value: Either[Channel.Closed, Unit], source: SourceId): Unit =
         fail("cancelled sender must not complete")
     deadSource.onComplete(dead)
     val live = AtomicBoolean(false)

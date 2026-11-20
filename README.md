@@ -44,7 +44,7 @@ With `scala` (since 3.5.0) or `scala-cli`:
 
 ## Setting up on an unpublished version of Gears
 
-The build uses sbt 2 and Scala 3.9.0. You will need JDK >= 21 and [Scala Native](https://scala-native.org) set up, plus Node.js 26+ to run the Scala.js tests.
+The build uses sbt 2 and Scala 3.10.0. You will need JDK >= 21 and [Scala Native](https://scala-native.org) set up, plus Node.js 26+ to run the Scala.js tests.
 ```bash
 sbt publishLocal
 ```

@@ -1,6 +1,8 @@
 package gears.async.io
 package testkit
 
+import language.experimental.captureChecking
+
 import java.lang.foreign.Arena
 import java.nio.ByteBuffer
 

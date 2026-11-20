@@ -1,5 +1,7 @@
 package gears.async.io
 
+import language.experimental.captureChecking
+
 /** A socket option: a key whose values are `V`s, given as a socket opens (`SocketOptions`), and on some backends
   * changed after (`SocketOptionOps.setOption`). Each applies to some kinds of socket, IP or Unix (`appliesTo`). Not
   * every backend has every option, nor every host one backend runs on, so whether one does, for a kind of socket, is

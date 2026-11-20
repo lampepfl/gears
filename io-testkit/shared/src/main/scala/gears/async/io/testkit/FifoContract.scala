@@ -1,6 +1,8 @@
 package gears.async.io
 package testkit
 
+import language.experimental.captureChecking
+
 import gears.async.Async
 import gears.async.Future
 
@@ -12,12 +14,12 @@ trait FifoContract extends FileSystemFixture {
   val backend: Backend { type Interface <: Fifos }
 
   /** A FIFO's read end from the `openFifoForReading` op, whose failure is thrown. */
-  protected def openFifoForReading(io: Io[backend.Interface], path: String)(using Async): io.ops.Readable = {
+  protected def openFifoForReading(io: Io[backend.Interface], path: String)(using Async^): io.ops.Readable = {
     opening(io)(slot => io.ops.openFifoForReading(path, slot))
   }
 
   /** A FIFO's write end from the `openFifoForWriting` op, whose failure is thrown. */
-  protected def openFifoForWriting(io: Io[backend.Interface], path: String)(using Async): io.ops.Writable = {
+  protected def openFifoForWriting(io: Io[backend.Interface], path: String)(using Async^): io.ops.Writable = {
     opening(io)(slot => io.ops.openFifoForWriting(path, slot))
   }
 
