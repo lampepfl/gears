@@ -30,7 +30,7 @@ private[io] object Checks {
   /** Checks a path an op names: a NUL would end it early as a C string, so the op would act on another path. */
   def checkPath(path: String): Unit =
     if path.indexOf('\u0000') >= 0 then
-      throw new IllegalArgumentException(s"The path has a NUL in it: ${path.replace("\u0000", "\\0")}")
+      throw new IllegalArgumentException(s"The path has a NUL in it: ${showingNuls(path)}")
 
   /** Checks a host name to resolve: an empty one names nothing (the JDK would take it for the loopback address), and a
     * NUL would end it early.
@@ -38,7 +38,21 @@ private[io] object Checks {
   def checkHost(host: String): Unit = {
     if host.isEmpty then throw new IllegalArgumentException("An empty host name names no host")
     if host.indexOf('\u0000') >= 0 then
-      throw new IllegalArgumentException(s"The host name has a NUL in it: ${host.replace("\u0000", "\\0")}")
+      throw new IllegalArgumentException(s"The host name has a NUL in it: ${showingNuls(host)}")
+  }
+
+  /** `text` with each NUL written as `\0`, for a message. Not by `String.replace`: Scala Native's (0.5.12) does not
+    * find a NUL to replace that is not the text's first character. On macOS it leaves the text as it is, and on Linux
+    * it fails with an `ArrayIndexOutOfBoundsException`.
+    */
+  private def showingNuls(text: String): String = {
+    val shown = new java.lang.StringBuilder(text.length + 8)
+    var i = 0
+    while i < text.length do
+      val char = text.charAt(i)
+      if char == '\u0000' then shown.append("\\0") else shown.append(char)
+      i += 1
+    shown.toString
   }
 
   /** A Unix socket path checked, as every op taking one is built: an empty path names no file (an unnamed socket is one
