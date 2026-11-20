@@ -5,7 +5,6 @@ import gears.async.Async
 import gears.async.Future
 
 import java.nio.charset.StandardCharsets
-import java.nio.file.Files
 
 /** What a backend with Unix datagram sockets must do, with or without IP sockets: checked through `perform`, as
   * programs over the backend (see `ContractSuite`).
@@ -57,7 +56,7 @@ trait UnixDatagramContract extends FileSystemFixture {
           } finally close(io, client)
         } finally close(io, server)
       }
-      assert(!Files.exists(java.nio.file.Path.of(serverPath)), "closing a bound datagram socket removes its path")
+      assert(!HostFiles.exists(serverPath), "closing a bound datagram socket removes its path")
     }
   }
 

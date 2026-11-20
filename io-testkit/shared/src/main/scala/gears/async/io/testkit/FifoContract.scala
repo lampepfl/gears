@@ -4,9 +4,6 @@ package testkit
 import gears.async.Async
 import gears.async.Future
 
-import java.nio.charset.StandardCharsets
-import java.nio.file.Files
-
 /** FIFO operations, requiring only Fifos and host filesystem setup. */
 trait FifoContract extends FileSystemFixture {
   val backend: Backend { type Interface <: Fifos }
@@ -53,6 +50,29 @@ trait FifoContract extends FileSystemFixture {
           close(io, writer)
           read.await
           assertEquals(buf.position(), 0, "at the end of the stream, nothing read")
+        } finally close(io, reader)
+      }
+    }
+  }
+
+  test("a FIFO is at its end before a writer has opened it, and after each writer, going on to the next one's bytes") {
+    withTempDir { dir =>
+      running { io ?=>
+        val fifo = dir.resolve("fifo")
+        mkfifo(fifo)
+        val reader = openFifoForReading(io, fifo.toString)
+        try {
+          val buf = allocate(16)
+          val read = io.ops.read(reader, buf)
+          io.perform(read)
+          assertEquals(buf.position(), 0, "before any writer")
+          for word <- List("first", "second") do {
+            val writer = openFifoForWriting(io, fifo.toString)
+            writeAll(io, writer, bytes(word))
+            close(io, writer)
+            buf.clear()
+            assertEquals(readToEnd(io, read, buf), word)
+          }
         } finally close(io, reader)
       }
     }

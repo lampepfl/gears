@@ -313,13 +313,7 @@ trait IpDatagramContract extends ContractSuite {
   }
 
   /** The loopback interface's MTU, if the platform tells it. */
-  private def loopbackMtu: Int =
-    scala.jdk.CollectionConverters
-      .EnumerationHasAsScala(java.net.NetworkInterface.getNetworkInterfaces)
-      .asScala
-      .find(_.isLoopback)
-      .map(_.getMTU)
-      .getOrElse(-1)
+  private def loopbackMtu: Int = HostFiles.loopbackMtu
 
   test("DontFragment given as a datagram socket opens is its own, read back, and changed where the backend can") {
     running { io ?=>
@@ -576,4 +570,5 @@ trait IpDatagramContract extends ContractSuite {
       close(io, bound.clear())
     }
   }
+
 }

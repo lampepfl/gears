@@ -67,6 +67,12 @@ object Io {
     * over the backend, as a context parameter, with which it performs its ops and which is its `AsyncOperations`,
     * beside its `Async`, where the backend runs it (`Backend.run`). A program's `Io` is not a `Backend`, so starting a
     * run over one is refused when compiling.
+    *
+    * When the program returns, or fails, the run ends: the ops its futures still have under way are cancelled, at once,
+    * and the handles it opened and did not close are closed. A handle is its run's: an op on it performed by another
+    * run fails with an `IllegalArgumentException`. An op that uses no handle, a timer, is no run's, and may be
+    * performed by one run and then another, though not by two at once: the second fails with an
+    * `IllegalStateException`.
     */
   def run[T](using backend: Backend)(program: Io[backend.Interface] ?=> Async.Spawn ?=> T): T =
     backend.run(program)

@@ -1,0 +1,14 @@
+package gears.async.io
+package bench
+
+import gears.async.io.eventpolling.EventPollingBackend
+
+/** The bench over this branch's kqueue backend, on `--workers` workers, with `CapBench`'s own arguments. */
+object BenchMain {
+  def main(args: Array[String]): Unit = {
+    if args.headOption.contains("suspend") then return SuspendBench.run(args.tail)
+    val rest = args.grouped(2).filter(_(0) != "--backend").flatten.toArray
+    val (workers, _, parsed) = CapBench.parse(rest)
+    EventPollingBackend.runOn(workers, shareable.Starvation.printWarning)(io ?=> CapBench.run(io, parsed))
+  }
+}

@@ -1,0 +1,408 @@
+package gears.async.io.shareable
+
+import gears.async.Async
+import gears.async.AsyncOperations
+import gears.async.AsyncSupport
+import gears.async.Cancellable
+import gears.async.CompletionGroup
+import gears.async.Scheduler
+import gears.async.io.Backend
+import gears.async.io.Interface
+import gears.async.io.Io
+import gears.async.io.shareable.TimerHeap
+import gears.async.io.shareable.TimerHeap.TimerOp
+
+import scala.concurrent.duration.FiniteDuration
+import scala.util.Success
+import scala.util.Try
+
+import WorkpoolScheduler.{AsyncOp, ReentrantOp}
+
+abstract class WorkpoolScheduler[I <: Interface { type Op <: AsyncOp & ReentrantOp }](
+    val backend: Backend { type Interface <: I },
+    val ops: I,
+    workers: Int,
+    onStarvation: Starvation.Handler = Starvation.printWarning
+) extends Scheduler
+    with AsyncSupport
+    with AsyncOperations
+    with Io[I] {
+
+  override private[async] def resumeAsync[T, R](suspension: Suspension[T, R])(arg: T)(using s: Scheduler): Unit =
+    // Not here and now: the caller holds the listener's lock, and may hold a source's, partway through changing it.
+    val worker = workerOf(Thread.currentThread())
+    if worker != null then worker.resumeNext(suspension, arg)
+    // A pool that has shut down refuses it: like a timer still pending, that waiter is never resumed.
+    else nextWorker().submit(() => suspension.resume(arg)): Unit
+
+  /** A worker of this pool: one that performs its interface's ops. */
+  type PoolWorker = Worker { type Op = WorkpoolScheduler.this.Op }
+
+  /** A worker of this pool, whose handles belong to `owner`. */
+  def makeWorker(id: Int, owner: HandleOwner): PoolWorker
+
+  /** What this pool's run's handles belong to: its workers', and what closes the ones left open as it shuts down. */
+  private val handleOwner = new HandleOwner
+
+  private val workerTicker = new java.util.concurrent.atomic.AtomicInteger(0)
+  private val workerGroup: Array[PoolWorker] = Array.tabulate(workers)(makeWorker(_, handleOwner))
+
+  /** The worker of this pool that `thread` runs, or null: a worker's thread carries its worker, so this is no lookup by
+    * thread.
+    */
+  /** The platform thread running the caller, which is the caller's own unless something else carries it, as a JVM
+    * pool's workers may carry virtual threads.
+    */
+  protected def callerThread(): Thread = Thread.currentThread()
+
+  protected final def workerOf(thread: Thread): PoolWorker | Null = thread match
+    case thread: WorkpoolScheduler.WorkerThread =>
+      val worker = thread.worker // null for a thread that has stepped out of its worker, or waits to be given one
+      if worker != null && worker.id < workerGroup.length && (workerGroup(worker.id) eq worker) then
+        worker.asInstanceOf[PoolWorker]
+      else null // another pool's
+    case _ => null
+
+  /** The group the program runs under (see `Backend.run`), which a fatal error in any worker cancels: the workers go
+    * on, as they must for the program to unwind, but nothing should be built on what a fatal error left behind.
+    */
+  val rootGroup: CompletionGroup = CompletionGroup()
+
+  private val firstFatal = new java.util.concurrent.atomic.AtomicReference[Throwable | Null](null)
+
+  /** The first fatal error a worker met, or null. Whoever runs the program rethrows it once the program has ended. */
+  final def fatalFailure: Throwable | Null = firstFatal.get()
+
+  private def failFatally(failure: Throwable): Unit = {
+    firstFatal.compareAndSet(null, failure): Unit
+    rootGroup.cancel()
+  }
+
+  /** The threads that have driven a worker, stepped out of it to block (`Worker.stepOut`), and are kept a while to
+    * drive another: the last to come is the first taken, as the likeliest to be warm. Guarded by its own monitor.
+    */
+  private val spares = new java.util.ArrayDeque[WorkpoolScheduler.WorkerThread]()
+
+  /** Gives `worker` a thread to drive it: a spare one, or a new one. */
+  private def drive(worker: PoolWorker): Unit = {
+    val spare = spares.synchronized(spares.pollLast())
+    val thread = if spare != null then spare else new WorkpoolScheduler.WorkerThread(waitAsSpare)
+    thread.setName(s"WorkpoolSchedulerWorker-${worker.id}")
+    worker.driver = thread
+    thread.worker = worker
+    if spare != null then java.util.concurrent.locks.LockSupport.unpark(spare)
+    else
+      thread.setDaemon(true)
+      thread.start()
+  }
+
+  /** For a thread with no worker: waits to be given one. Whether it was: not if none needed it for
+    * `WorkpoolScheduler.SpareMillis`, or the pool has shut down, and the thread then ends.
+    */
+  private def waitAsSpare(thread: WorkpoolScheduler.WorkerThread): Boolean = {
+    thread.setName("WorkpoolSchedulerSpare")
+    spares.synchronized(spares.addLast(thread))
+    val deadline = System.nanoTime() + WorkpoolScheduler.SpareMillis * 1_000_000L
+    while thread.worker == null do
+      val left = deadline - System.nanoTime()
+      if isShutDown || left <= 0 then
+        // Taken off the list, it can be given no worker; if it was not there, one is being given it now.
+        if spares.synchronized(spares.remove(thread)) then return false
+        java.util.concurrent.locks.LockSupport.parkNanos(this, 1_000_000L)
+      else java.util.concurrent.locks.LockSupport.parkNanos(this, left)
+    true
+  }
+
+  workerGroup.foreach { worker =>
+    worker.onFatal = failFatally
+    worker.steal = () => stealFor(worker)
+    worker.callThief = () => wakeThief(worker)
+    worker.thiefWaits = () => anyParked(worker)
+    worker.handOver = () => drive(worker)
+  }
+  // Only now: a worker's thread started as the worker was made would run it before its subclass had its fields.
+  workerGroup.foreach(drive)
+
+  /** Looks at the workers every half of `Starvation.thresholdNanos`, and finds starved one that has had tasks in its
+    * inbox, or a timer due, for that long without beginning a turn (see `Starvation`). The tasks in its inbox are moved
+    * to a worker that is not kept itself, if there is one, as are those that come after, at each look, for as long as
+    * it stays on that turn: a program that blocks a worker on what that worker was to run then goes on. Its timers and
+    * the events of its handles can't be moved, and wait for it. Whether or not anything was moved, the worker is
+    * reported to `onStarvation`, once for each time it is kept. A thread of its own, as the workers may all be the ones
+    * kept. Null, with no thread, if the reports are turned off.
+    */
+  private val starvationMonitor: Thread | Null =
+    if Starvation.thresholdNanos <= 0 then null
+    else {
+      val thread = new Thread(() => watchForStarvation())
+      thread.setName("WorkpoolSchedulerStarvationMonitor")
+      thread.setDaemon(true)
+      thread
+    }
+
+  private def watchForStarvation(): Unit = {
+    val count = workerGroup.length
+    val seenTurn = Array.fill(count)(-1L)
+    val seenSince = new Array[Long](count)
+    val reported = new Array[Boolean](count)
+    // Whether each worker, at this look, has something waiting and is on the turn it was on at the last.
+    val stuck = new Array[Boolean](count)
+    val threshold = Starvation.thresholdNanos
+    try
+      while !isShutDown do
+        Thread.sleep(Math.max(1L, threshold / 2_000_000L))
+        val now = System.nanoTime()
+        var i = 0
+        while i < count do
+          val worker = workerGroup(i)
+          val turn = worker.turnsBegun
+          val waiting = worker.hasWaiting(now)
+          if turn != seenTurn(i) then
+            seenTurn(i) = turn
+            seenSince(i) = now
+            reported(i) = false
+            stuck(i) = false
+          else
+            // With nothing waiting it keeps nothing, however long its turn: counted from when something next does,
+            // which is the first look to find it so. Not from the look before: all that one knew is that nothing
+            // waited then, and a monitor kept from running for as long as the threshold, as on a busy machine, would
+            // otherwise report a worker whose task came a moment ago.
+            if !reported(i) && (!waiting || !stuck(i)) then seenSince(i) = now
+            stuck(i) = waiting
+          i += 1
+        i = 0
+        while i < count do
+          if stuck(i) && (reported(i) || now - seenSince(i) >= threshold) then
+            val worker = workerGroup(i)
+            val moved = relieve(worker, stuck, reported)
+            if !reported(i) then
+              reported(i) = true // once for each time it is kept
+              // A handler that throws must not end the monitor.
+              try onStarvation(new Starvation.Report(worker.driver.nn, now - seenSince(i), moved))
+              catch case _: Throwable => ()
+          i += 1
+    catch case _: InterruptedException => () // shut down
+  }
+
+  /** Moves the tasks in `starved`'s inbox to the next worker that is neither `stuck` itself nor still on a turn it was
+    * `reported` for, which has nothing waiting only because it was relieved of it: how many, none if there is no such
+    * worker.
+    */
+  private def relieve(starved: PoolWorker, stuck: Array[Boolean], reported: Array[Boolean]): Int = {
+    val count = workerGroup.length
+    var moved = 0
+    var i = 1
+    while i < count do
+      val other = workerGroup((starved.id + i) % count)
+      if !stuck(other.id) && !reported(other.id) then
+        moved = if starved.hasQueued then starved.moveQueuedTo(other) else 0
+        i = count
+      else i += 1
+    moved
+  }
+  if starvationMonitor != null then starvationMonitor.start()
+
+  /** The workers in turn: for what comes from outside them. */
+  protected final def nextWorker(): PoolWorker = {
+    val index = Math.floorMod(workerTicker.getAndIncrement(), workerGroup.length)
+    workerGroup(index)
+  }
+
+  /** The same worker for the same `key`, with the keys spread over the workers: for a caller that is on no worker, and
+    * has something of its own to be told apart by.
+    */
+  protected final def workerFor(key: Long): PoolWorker = workerGroup(
+    Math.floorMod(key, workerGroup.length.toLong).toInt
+  )
+
+  protected final def workerOfCurrentThread(): PoolWorker =
+    val worker = workerOf(callerThread())
+    if worker == null then throw new IllegalStateException("Current thread is not a worker")
+    worker
+
+  /** The worker for an op, whose heap holds its deadline, and which fires it. An op that `tryPerform` completes must
+    * not be firing when it returns, which holds for the performer's own worker: only its thread fires its timers.
+    */
+  protected def selectWorker(): PoolWorker
+
+  type Scheduler = this.type
+
+  /** An op that `tryPerform` completes is complete, whatever its state says: that state is neither read nor waited for.
+    * Any other is parked on, and its own outcome is the performance's, not what the wait made of it: a performer
+    * cancelled while a worker was already doing the op's work waits for that work and returns its outcome, as the work
+    * was done. Its cancel still holds, at its next `await`.
+    */
+  override def performWithin(op: Op, timeoutMillis: Long)(using Async): Unit = {
+    op.performWith {
+      var worker = selectWorker()
+      // An op that is done as it is tried never gives its worker up: a future whose ops are always ready, a read at
+      // the end of a stream for one, would keep it from every other task, its timers and its handles' events.
+      if budgetSpent(worker) then
+        `yield`()
+        worker = selectWorker() // the future may go on elsewhere
+      op.setTimeout(timeoutMillis)
+      try {
+        worker.performOp(op)
+      } finally {
+        op.clearTimeout()
+      }
+    }
+  }
+
+  /** Whether the future performing an op on `worker` now should yield first (see `Worker.opBudgetSpent`): for a pool
+    * whose futures run on its workers, which is what the budget is for.
+    */
+  protected def budgetSpent(worker: PoolWorker): Boolean = worker.opBudgetSpent()
+
+  /** Guards `execute` and `schedule`: work given to a pool that has shut down would never run. */
+  @volatile private var isShutDown = false
+
+  private def checkRunning(): Unit =
+    if isShutDown then throw new IllegalStateException("Scheduler has shut down")
+
+  /** Stops the workers and waits for them to finish what they are running, which may be the end of the program, as a
+    * worker resumes its waiters itself. Timers still pending never fire. Call once the program has finished, from
+    * outside the pool: a worker can't wait for itself.
+    */
+  final def shutdown(): Unit = {
+    if workerOf(Thread.currentThread()) != null then
+      throw new IllegalStateException("Can't shut down a scheduler from one of its workers")
+    // While the workers are still there to drop them.
+    handleOwner.closeAll()
+    isShutDown = true
+    workerGroup.foreach(_.stop())
+    if starvationMonitor != null then starvationMonitor.interrupt()
+    workerGroup.foreach(_.driver.nn.join())
+    // The spare threads leave as they find the pool shut down.
+    spares.synchronized(spares.toArray(new Array[WorkpoolScheduler.WorkerThread](0))).foreach { spare =>
+      java.util.concurrent.locks.LockSupport.unpark(spare)
+    }
+  }
+
+  /** A task from one of this pool's workers stays with that worker, behind what it already has: what a future spawns is
+    * most often to do with what it is doing, its handles among it, and a handle is cheapest used from one thread. It is
+    * not tied there: a worker with nothing to do takes it (`stealFor`). A task from any other thread goes to the
+    * workers in turn.
+    */
+  override def execute(body: Runnable): Unit = runOnWorker(body)
+
+  /** Gives `body` to a worker to run, as `execute` does for a pool whose futures are its workers' tasks. */
+  protected final def runOnWorker(body: Runnable): Unit =
+    checkRunning()
+    val current = workerOf(callerThread())
+    if current != null then current.spawnLocal(body)
+    // The check alone can pass just before the workers leave.
+    else if !nextWorker().submit(body) then throw new IllegalStateException("Scheduler has shut down")
+
+  /** A task for `thief`, which has nothing to do, to run now, with half of what the worker it came from had to spare
+    * moved to the thief's inbox: from the worker with the most to spare, so that a backlog is evened out whichever
+    * worker comes for it, or null.
+    */
+  private def stealFor(thief: PoolWorker): Runnable | Null = {
+    val count = workerGroup.length
+    var task: Runnable | Null = null
+    var looks = count // each look that finds nothing to take was beaten to it by another thief
+    while task == null && looks > 0 do
+      var most = 0
+      var from: PoolWorker | Null = null
+      var i = 1
+      while i < count do
+        val worker = workerGroup((thief.id + i) % count)
+        val spare = worker.spare
+        if spare > most then
+          most = spare
+          from = worker
+        i += 1
+      if from == null then looks = 0
+      else
+        task = from.takeHalfFor(thief)
+        looks -= 1
+    task
+  }
+
+  private def anyParked(busy: PoolWorker): Boolean = {
+    val count = workerGroup.length
+    var i = 1
+    while i < count do
+      if workerGroup((busy.id + i) % count).isParked then return true
+      i += 1
+    false
+  }
+
+  /** Wakes one worker that is waiting with nothing to do, if there is one, for it to take from `busy`. */
+  private def wakeThief(busy: PoolWorker): Unit = {
+    val count = workerGroup.length
+    var i = 1
+    while i < count do
+      val worker = workerGroup((busy.id + i) % count)
+      if worker.wakeIfParked() then i = count
+      else i += 1
+  }
+
+  override def schedule(delay: FiniteDuration, body: Runnable): Cancellable = {
+    checkRunning()
+    nextWorker().runAfter(delay.toNanos, body)
+  }
+
+}
+
+object WorkpoolScheduler {
+
+  trait AsyncOp extends TimerOp {
+    def setTimeout(timeoutMillis: Long): Unit
+
+    /** Suspends until the op is settled, and returns or throws its outcome. Only the op ends the wait: a performer that
+      * is cancelled as it waits settles the op at once as cancelled if no worker has claimed it, and otherwise waits on
+      * for the worker that claimed it, which should test for cancellation as soon as possible or resolve with a
+      * complete outcome. Nothing links the op itself to a group.
+      */
+    def parkUntilSettled()(using Async): Unit
+
+    def clearTimeout(): Unit
+  }
+
+  val SuccessUnit: Try[Unit] = Success(())
+
+  /** How many ops one worker performs between turns before the future performing the next yields. */
+  inline val OpBudget = 64
+
+  /** How long a thread that stepped out of its worker is kept, with no worker to drive, before it ends. */
+  inline val SpareMillis = 60_000L
+
+  /** A thread that drives a worker, and carries it for whoever asks which worker the current thread is: null once it
+    * has stepped out of the worker to block (`Worker.stepOut`), and until it is given another. With no worker it waits
+    * to be given one (`spare`), and ends if that says none will come.
+    */
+  final class WorkerThread(spare: WorkerThread => Boolean) extends Thread {
+    @volatile private[shareable] var worker: Worker | Null = null
+
+    override def run(): Unit = {
+      var alive = true
+      while alive do
+        val driven = worker
+        if driven == null then alive = spare(this)
+        else
+          driven.loop()
+          // Still its worker: the worker has stopped for good, and so does the thread. Otherwise the thread stepped
+          // out of it, and goes on to wait for another.
+          if worker eq driven then alive = false
+    }
+  }
+
+  trait ReentrantOp {
+
+    /** The op is linked to no group, here or as it waits: a cancel reaches it through its performer's wait, in
+      * `parkUntilSettled`.
+      */
+    inline final def performWith(inline fn: Async ?=> Unit)(using Async): Unit =
+      requestEntry()
+      try fn
+      finally requestExit()
+
+    /** Aquires an entry permit. */
+    def requestEntry()(using Async): Unit
+
+    /** Potentially resets the entry permit. */
+    def requestExit()(using Async): Unit
+  }
+}

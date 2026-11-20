@@ -1,0 +1,38 @@
+package gears.async.io.shareable
+
+trait MonitorPoller extends Poller, EventSource {
+  type Handle = ReadinessHandle
+
+  def startListening(handle: ReadinessHandle, read: Boolean): Unit =
+    throw new UnsupportedOperationException("A monitor reports no handles")
+
+  private val notifier = new Object
+
+  private val heapLock = new java.util.concurrent.locks.ReentrantLock()
+  protected def claimHeap(): Unit = heapLock.lock()
+  protected def releaseHeap(): Unit = heapLock.unlock()
+
+  protected def wake(): Unit = notifier.synchronized {
+    signalled = true
+    notifier.notify()
+  }
+
+  protected def isEmpty(): Boolean
+
+  protected def waitForDeadline(deadlineTask: Long): Unit = notifier.synchronized {
+    // Anything that arrived after the reads above has set `signalled`; the inbox may also be over budget.
+    if !signalled && isEmpty() then
+      if deadlineTask >= 0 then
+        val sleepTime = deadlineTask - System.nanoTime()
+        if sleepTime > 0 then notifier.wait(sleepTime / 1000000, (sleepTime % 1000000).toInt)
+      else notifier.wait()
+    signalled = false
+  }
+
+  /** Guarded by `notifier`. Whether there has been anything new since the worker last looked: a `notify` alone is lost
+    * if the worker is not yet waiting.
+    */
+  private var signalled = false
+
+  def close(): Unit = () // nothing to cleanup
+}
