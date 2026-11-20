@@ -291,7 +291,7 @@ object Future:
       Future.withResolver: r =>
         Async
           .either(f1, f2)
-          .onComplete(Listener { (v, _) =>
+          .onComplete(Listener.acceptingListener { (v, _) =>
             v match
               case Left(Success(x1)) =>
                 f2.onComplete(Listener { (x2, _) => r.complete(x2.map((x1, _))) })
@@ -330,7 +330,7 @@ object Future:
     def orImpl(withCancel: Boolean)(f2: Future[T]^): Future[T]^{f1, f2} = Future.withResolver[T, {}]: r =>
       Async
         .raceWithOrigin(f1, f2)
-        .onComplete(Listener { case ((v, which), _) =>
+        .onComplete(Listener.acceptingListener { case ((v, which), _) =>
           v match
             case Success(value) =>
               if withCancel then (if which == f1.ident then f2 else f1).cancel()

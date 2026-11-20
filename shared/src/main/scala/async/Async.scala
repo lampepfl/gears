@@ -233,18 +233,19 @@ object Async extends AsyncImpl:
 
   end Source
 
-  extension [T](src: Source[scala.util.Try[T]])
+  extension [T](src: Source[scala.util.Try[T]]^)
     /** Waits for an item to arrive from the source, then automatically unwraps it. Suspends until an item returns.
       * @see
       *   [[Source!.awaitResult awaitResult]] for non-unwrapping await.
       */
-    inline def await(using Async) = src.awaitResult.get
-  extension [E, T](src: Source[Either[E, T]])
+    def await(using Async^) = src.awaitResult.get
+  extension [E, T](src: Source[Either[E, T]]^)
     /** Waits for an item to arrive from the source, then automatically unwraps it. Suspends until an item returns.
       * @see
       *   [[Source!.awaitResult awaitResult]] for non-unwrapping await.
       */
-    inline def await(using Async) = src.awaitResult.right.get
+    @scala.annotation.targetName("awaitEither")
+    def await(using Async^) = src.awaitResult.right.get
 
   /** An original source has a standard definition of [[Source.onComplete onComplete]] in terms of [[Source.poll poll]]
     * and [[OriginalSource.addListener addListener]].
