@@ -1,6 +1,8 @@
 package gears.async.io
 package testkit
 
+import language.experimental.captureChecking
+
 import java.nio.ByteBuffer
 import scala.scalanative.memory.PointerBuffer
 import scala.scalanative.unsafe.*

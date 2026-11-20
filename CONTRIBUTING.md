@@ -2,10 +2,10 @@
 
 ## Building `gears`
 
-The build uses sbt 2 and Scala 3.9.0 on all platforms. It requires:
+The build uses sbt 2 and Scala 3.10.0 on all platforms. It requires:
 
 - **JDK 21+** to run sbt and use virtual threads on the JVM.
-- **On Scala Native**: Clang/LLVM 16+ and the [Scala Native prerequisites](https://scala-native.org/en/stable/user/setup.html). The build selects Scala Native 0.5.12.
+- **On Scala Native**: Clang/LLVM 16+ and the [Scala Native prerequisites](https://scala-native.org/en/stable/user/setup.html). The build selects a Scala Native 0.5.13 nightly, from the Sonatype Central snapshot repository.
 - **On Scala.js**: Node.js 26+ to run the WebAssembly backend with JSPI. The build selects Scala.js 1.22.0.
 
 All of the needed dependencies can be loaded by the included Nix Flake. If you have `nix` with `flake` enabled, run

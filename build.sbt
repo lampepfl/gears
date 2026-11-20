@@ -4,6 +4,9 @@ import sbtcrossproject.CrossPlugin.autoImport.{CrossType, crossProject}
 
 scalaVersion := "3.10.0"
 
+// The Scala Native nightly selected in project/plugins.sbt brings its libraries from the snapshot repository.
+ThisBuild / resolvers += Resolver.sonatypeCentralSnapshots
+
 LocalRootProject / publish / skip := true
 
 val MUnitFramework = new TestFramework("munit.Framework")
@@ -17,7 +20,7 @@ developers := List(
 )
 
 lazy val root =
-  crossProject(JSPlatform, JVMPlatform /*, NativePlatform */ )
+  crossProject(JSPlatform, JVMPlatform, NativePlatform)
     .crossType(CrossType.Full)
     .in(file("."))
     .settings(
@@ -34,13 +37,13 @@ lazy val root =
         scalacOptions += "-release:21"
       )
     )
-    // .nativeSettings(
-    //   Seq(
-    //     nativeConfig ~= { c =>
-    //       c.withMultithreading(true)
-    //     }
-    //   )
-    // )
+    .nativeSettings(
+      Seq(
+        nativeConfig ~= { c =>
+          c.withMultithreading(true)
+        }
+      )
+    )
     .jsSettings(jsWasmSettings)
 
 // Emit ES modules with the Wasm backend, run on Node.js 26+, which supports Wasm and JSPI, including the nested async
@@ -80,7 +83,7 @@ val mainargs = "com.lihaoyi" %% "mainargs" % "0.7.8"
 // takes the `Io` and `Async` it runs with, and a backend's demo application is what starts their runs. Built for every platform
 // the core is, though only the JVM has a backend to run them on yet.
 lazy val ioTestkit =
-  crossProject(JSPlatform, JVMPlatform /*, NativePlatform */ )
+  crossProject(JSPlatform, JVMPlatform, NativePlatform)
     .crossType(CrossType.Full)
     .in(file("io-testkit"))
     .settings(
@@ -91,7 +94,7 @@ lazy val ioTestkit =
       testFrameworks += MUnitFramework
     )
     .jvmSettings(scalacOptions += "-release:21")
-    // .nativeSettings(nativeConfig ~= { _.withMultithreading(true) })
+    .nativeSettings(nativeConfig ~= { _.withMultithreading(true) })
     .jsSettings(jsWasmSettings)
     .dependsOn(root)
 
