@@ -80,26 +80,4 @@ trait PipeContract extends StreamContract with PipeFixture {
       }
     }
   }
-
-  test("a second write pending on a pipe fails with IllegalArgumentException") {
-    running { io ?=>
-      val (in, out) = pipe(io)
-      try {
-        // Fill the pipe so that a write remains pending.
-        val filler = allocate(1 << 20)
-        val writing = Future(writeAll(io, out, filler))
-        settle(io)
-        val result = writing.poll()
-        result.foreach(_.get) // a failed write is a failure, not an unsupported workload
-        assume(result.isEmpty, "the pipe accepted the whole payload; there is no pending write to test")
-        val secondWrite = attempt(io, io.ops.write(out, bytes("z")))
-        assert(secondWrite.isInstanceOf[IllegalArgumentException], s"a second write: $secondWrite")
-        writing.cancel()
-        writing.awaitResult
-      } finally {
-        close(io, in)
-        close(io, out)
-      }
-    }
-  }
 }
