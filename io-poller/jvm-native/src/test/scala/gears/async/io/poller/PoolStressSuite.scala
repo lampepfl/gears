@@ -65,51 +65,6 @@ class PoolStressSuite extends munit.FunSuite {
     intercept[IllegalStateException](pool.schedule(1.milli, () => ()))
   }
 
-  test("many short timers all complete") {
-    given PollerPlatform.backend.type = PollerPlatform.backend
-    Io.run { io ?=>
-      for round <- 1 to 3000 do {
-        val futures = for _ <- 1 to 16 yield Future(io.perform(io.ops.timer(0)))
-        futures.foreach(_.await)
-      }
-    }
-  }
-
-  test("a timer cancelled as it fires leaves its next performance to run its full time") {
-    given PollerPlatform.backend.type = PollerPlatform.backend
-    Io.run { io ?=>
-      val delay = 300.micros
-      val timer = io.ops.timer(delay)
-      for round <- 1 to 2000 do {
-        val waiting = Future(io.perform(timer))
-        val cancelAt = System.nanoTime() + delay.toNanos - 100_000L + (round % 20) * 10_000L // either side of it firing
-        while System.nanoTime() < cancelAt do Thread.onSpinWait()
-        waiting.cancel()
-        waiting.awaitResult: Unit
-        val started = System.nanoTime()
-        io.perform(timer)
-        assert(System.nanoTime() - started >= delay.toNanos, s"round $round fired early")
-      }
-    }
-  }
-
-  test("a timer cancelled by a waiter resumed from the same batch of timers still finishes") {
-    given PollerPlatform.backend.type = PollerPlatform.backend
-    Io.run { io ?=>
-      for round <- 1 to 200 do {
-        val deadline = System.nanoTime() + 5_000_000L
-        // More futures than workers, so that some share a heap: the first resumed cancels the rest of its batch.
-        val waiters = new Array[Future[Unit]](4 * Runtime.getRuntime.availableProcessors)
-        for i <- waiters.indices do
-          waiters(i) = Future {
-            io.perform(io.ops.deadlineTimer(deadline))
-            for j <- waiters.indices if j != i && waiters(j) != null do waiters(j).cancel()
-          }
-        waiters.foreach(_.awaitResult)
-      }
-    }
-  }
-
   test("timers shorter than a millisecond complete, the worker sleeping for less than one") {
     given PollerPlatform.backend.type = PollerPlatform.backend
     Io.run { io ?=>

@@ -67,3 +67,11 @@ class NioSimpleIOSocketSuite extends SimpleIOChecks with IpStreamFixture {
 class NioSimpleIOIpStreamSuite extends SimpleIOIpStreamChecks {
   val backend: Backend { type Interface <: IpStreams } = NioBackend
 }
+
+class NioRunEndSuite extends RunEndContract {
+  val backend: Backend { type Interface <: IpStreams } = NioBackend
+}
+
+class NioThreadedRunSuite extends ThreadedRunContract {
+  val backend: Backend { type Interface <: Blocking & IpStreams } = NioBackend
+}

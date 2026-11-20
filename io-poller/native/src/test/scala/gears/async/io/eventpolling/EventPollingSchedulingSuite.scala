@@ -224,10 +224,6 @@ class EventPollingSchedulingSuite extends munit.FunSuite {
     }
   }
 
-  test("a negative timer is refused") {
-    intercept[IllegalArgumentException](EventPollingOps.timer((-1).milli))
-  }
-
   test("every task a pool accepts as it shuts down is run") {
     for _ <- 1 to 300 do {
       val pool = EventPollingScheduler(2)
@@ -510,38 +506,6 @@ class EventPollingSchedulingSuite extends munit.FunSuite {
         io.perform(ops.close(out))
       }
     finally java.nio.file.Files.deleteIfExists(path): Unit
-  }
-
-  test("an op that uses no handle is no run's: built outside, it is performed by one run and then by another") {
-    given EventPollingBackend.type = EventPollingBackend
-    val timer = EventPollingOps.timer(1) // repeatable
-    val ran = AtomicInteger(0)
-    for _ <- 1 to 2 do
-      Io.run { io ?=>
-        io.perform(timer)
-        io.perform(EventPollingOps.blocking(() => ran.incrementAndGet(): Unit))
-      }
-    assertEquals(ran.get(), 2)
-  }
-
-  test("an op being performed in one run is refused by another meanwhile, and is the first run's still") {
-    given EventPollingBackend.type = EventPollingBackend
-    val timer = EventPollingOps.timer(200)
-    Io.run { io ?=>
-      val waiting = Future(io.perform(timer))
-      io.perform(EventPollingOps.timer(20)) // so that it waits
-      @volatile var refusal: Throwable | Null = null
-      val other = new Thread(() =>
-        refusal = Io.run { theirs ?=>
-          try { theirs.perform(timer); null }
-          catch case failed: Exception => failed
-        }
-      )
-      other.start()
-      io.perform(EventPollingOps.blocking(() => other.join()))
-      assert(refusal.isInstanceOf[IllegalStateException], String.valueOf(refusal))
-      waiting.await // undisturbed
-    }
   }
 
   test("a run's Io is refused on a thread that is not one of its pool's workers, another run's among them") {

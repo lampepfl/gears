@@ -143,12 +143,20 @@ class PoolOnTwoIpDatagramSuite extends IpDatagramContract with OnWorkers(2) {
   val backend: Backend { type Interface <: IpDatagrams } = PollerPlatform.backend
 }
 
-// What a run leaves when it ends: on the pool and on one worker.
+// What a run leaves when it ends, and what passes between runs: on the pool and on one worker.
 
 class PoolRunEndSuite extends RunEndContract with FailsOnStarvation {
-  val backend: Backend { type Interface <: Blocking & Pipes } = PollerPlatform.backend
+  val backend: Backend { type Interface <: IpStreams } = PollerPlatform.backend
 }
 
 class PoolOnOneRunEndSuite extends RunEndContract with OnWorkers(1) {
-  val backend: Backend { type Interface <: Blocking & Pipes } = PollerPlatform.backend
+  val backend: Backend { type Interface <: IpStreams } = PollerPlatform.backend
+}
+
+class PoolThreadedRunSuite extends ThreadedRunContract with FailsOnStarvation {
+  val backend: Backend { type Interface <: Blocking & IpStreams } = PollerPlatform.backend
+}
+
+class PoolOnOneThreadedRunSuite extends ThreadedRunContract with OnWorkers(1) {
+  val backend: Backend { type Interface <: Blocking & IpStreams } = PollerPlatform.backend
 }
