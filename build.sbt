@@ -228,7 +228,7 @@ lazy val ioUring =
       testFrameworks += MUnitFramework,
       nativeConfig ~= { _.withMultithreading(true) }
     )
-    .dependsOn(ioPoller.native % "compile->compile;test->test", ioTestkit.native % Test)
+    .dependsOn(ioPoller.native, ioTestkit.native % Test)
 
 // The backends' demo applications: the testkit's gears demos over them, as `ioPollerDemosJVM/run <command>` and
 // `ioPollerDemosNative/run <command>`. The Node.js one is linked with `ioPollerDemosJS/fastLinkJS` and run as

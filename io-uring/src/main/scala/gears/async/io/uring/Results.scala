@@ -27,7 +27,3 @@ final class HandleClosedException(handle: AnyRef) extends ClosedChannelException
   override def getMessage: String = s"$handle is closed"
   override def fillInStackTrace(): Throwable = this
 }
-
-private[uring] final class StacklessCancellation extends java.util.concurrent.CancellationException {
-  override def fillInStackTrace(): Throwable = this
-}

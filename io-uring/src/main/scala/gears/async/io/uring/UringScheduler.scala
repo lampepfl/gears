@@ -253,7 +253,7 @@ final class UringWorker private[uring] (id: Int, owner: HandleOwner, ring: Ring,
           Failure(handle.closedFailure)
         } else if res == -errno.ECANCELED && c.wantOut then {
           c.discardSubmission()
-          Failure(new StacklessCancellation)
+          Failure(new gears.async.GearsCancellationException())
         } else
           try
             if c.finishSubmission(res) then {
@@ -264,7 +264,7 @@ final class UringWorker private[uring] (id: Int, owner: HandleOwner, ring: Ring,
               Failure(handle.closedFailure)
             } else if c.wantOut then {
               c.discardSubmission()
-              Failure(new StacklessCancellation)
+              Failure(new gears.async.GearsCancellationException())
             } else
               try {
                 if c.readyToSubmit() then submit(c)
@@ -309,7 +309,7 @@ final class UringWorker private[uring] (id: Int, owner: HandleOwner, ring: Ring,
       if c.wantOut || c.settled || handle.isClosing then
         settle(
           c,
-          Failure(if handle.isClosing then handle.closedFailure else new StacklessCancellation),
+          Failure(if handle.isClosing then handle.closedFailure else new gears.async.GearsCancellationException()),
           done = false
         )
       else
@@ -455,7 +455,7 @@ final class UringWorker private[uring] (id: Int, owner: HandleOwner, ring: Ring,
 
   override def close(): Unit = {
     runRingTasks()
-    if !hasGivenUp then letGoOfAll(Failure(new StacklessCancellation))
+    if !hasGivenUp then letGoOfAll(Failure(new gears.async.GearsCancellationException()))
     else ring.close()
   }
 }

@@ -119,10 +119,18 @@ class UringOnTwoIpStreamSuite extends IpStreamContract with OnWorkers(2) {
   val backend: Backend { type Interface <: IpStreams } = UringBackend
 }
 
-class UringRunEndSuite extends gears.async.io.poller.RunEndContract {
-  val backend: UringBackend.type = UringBackend
+class UringRunEndSuite extends RunEndContract {
+  val backend: Backend { type Interface <: IpStreams } = UringBackend
 }
 
-class UringOnOneRunEndSuite extends gears.async.io.poller.RunEndContract with OnWorkers(1) {
-  val backend: UringBackend.type = UringBackend
+class UringOnOneRunEndSuite extends RunEndContract with OnWorkers(1) {
+  val backend: Backend { type Interface <: IpStreams } = UringBackend
+}
+
+class UringThreadedRunSuite extends ThreadedRunContract {
+  val backend: Backend { type Interface <: Blocking & IpStreams } = UringBackend
+}
+
+class UringOnOneThreadedRunSuite extends ThreadedRunContract with OnWorkers(1) {
+  val backend: Backend { type Interface <: Blocking & IpStreams } = UringBackend
 }
