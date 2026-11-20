@@ -2,7 +2,6 @@ package gears.async.io
 package reference
 
 import java.nio.channels.Channel
-import java.nio.channels.ClosedChannelException
 import java.nio.channels.DatagramChannel
 import java.nio.channels.FileChannel
 import java.nio.channels.GatheringByteChannel
