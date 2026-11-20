@@ -1,6 +1,8 @@
 package gears.async.io
 package reference
 
+import language.experimental.captureChecking
+
 import java.net.StandardProtocolFamily
 import java.net.StandardSocketOptions.*
 import java.nio.channels.DatagramChannel

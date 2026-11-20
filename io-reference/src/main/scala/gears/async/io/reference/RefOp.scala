@@ -1,6 +1,8 @@
 package gears.async.io
 package reference
 
+import language.experimental.captureChecking
+
 import gears.async.Async
 import gears.async.cancellationScope
 
@@ -15,7 +17,7 @@ final class Ctx(val waiter: Wait, val start: Long, val deadline: Long) {
   def expired: Boolean = deadline != Long.MaxValue && System.nanoTime() - deadline >= 0
 
   /** Throws if the op has been cancelled, or its time limit has passed. */
-  def checkStop(op: AnyRef)(using ac: Async): Unit = {
+  def checkStop(op: AnyRef^)(using ac: Async^): Unit = {
     if waiter.cancelled || ac.group.isCancelled then throw new CancellationException()
     if expired then throw new TimeoutException(s"$op timed out")
   }
@@ -26,7 +28,7 @@ final class Ctx(val waiter: Wait, val start: Long, val deadline: Long) {
   /** Waits for `channel` to be ready for `ops`, by the poller, failing if `handle` is closed meanwhile, or the op is
     * cancelled or out of time; else returns, for the op to try again.
     */
-  def ready(op: AnyRef, handle: RefHandle | Null, channel: SelectableChannel, ops: Int)(using Async): Unit = {
+  def ready(op: AnyRef^, handle: RefHandle | Null, channel: SelectableChannel, ops: Int)(using Async^): Unit = {
     waiter.reset()
     Poller.register(channel, ops, waiter)
     park()
@@ -54,9 +56,9 @@ abstract class RefOp {
   /** Checks made as the op is performed, before anything is done: `IllegalArgumentException`s. */
   protected def check(): Unit = ()
 
-  protected def body(ctx: Ctx)(using Async): Unit
+  protected def body(ctx: Ctx)(using Async^): Unit
 
-  final def perform(timeoutMillis: Long)(using ac: Async): Unit = {
+  final def perform(timeoutMillis: Long)(using ac: Async^): Unit = {
     if ac.group.isCancelled then throw new CancellationException()
     if !this.isInstanceOf[Repeatable] && !used.compareAndSet(false, true) then
       throw new IllegalStateException(s"$this is not Repeatable, and has been performed already")

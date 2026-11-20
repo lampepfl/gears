@@ -1,6 +1,7 @@
 package gears.async.io
 
 import language.experimental.captureChecking
+import caps.*
 
 import _root_.gears.async.Async
 
@@ -38,7 +39,7 @@ trait Backend {
   /** Runs `program` over this backend, giving it an `Io` over it, and returns what it returns, rethrowing its failure:
     * what `Io.run` does, each backend its own way, since where its ops are performed is its own.
     */
-  private[io] def run[T](program: Io[Interface] ?=> Async.Spawn^ ?=> T): T
+  private[io] def run[T](program: Io[Interface] ?->{any.except[Control]} Async.Spawn^ ?->{any.except[Control]} T): T
 }
 
 object Backend {

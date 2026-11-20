@@ -1,6 +1,9 @@
 package gears.async.io
 package reference
 
+import language.experimental.captureChecking
+import caps.*
+
 import gears.async.Async
 import gears.async.Future
 import gears.async.VThreadScheduler
@@ -29,13 +32,13 @@ object ReferenceBackend extends Backend {
   def pool(bufferSize: Int, buffers: Int): BufferPool = new RefPool(bufferSize, buffers)
 
   /** Runs `program` on gears' virtual threads, each op performed by the future performing it. */
-  private[io] def run[T](program: Io[Interface] ?=> Async.Spawn ?=> T): T = {
+  private[io] def run[T](program: Io[Interface] ?->{any.except[Control]} Async.Spawn^ ?->{any.except[Control]} T): T = {
     given VThreadSupport.type = VThreadSupport
     given VThreadScheduler.type = VThreadScheduler
     val io: Io[Interface] = new Io[Interface] {
       val backend: ReferenceBackend.type = ReferenceBackend
       val ops: ReferenceOps.type = ReferenceOps
-      private[io] def performWithin(op: RefOp, timeoutMillis: Long)(using Async): Unit = op.perform(timeoutMillis)
+      private[io] def performWithin(op: RefOp^, timeoutMillis: Long)(using Async^): Unit = op.perform(timeoutMillis)
     }
     // `Async.blocking` runs its body on the calling thread, which may be a platform thread; a future's is virtual.
     Async.blocking(Future(program(using io)).await)
@@ -258,7 +261,7 @@ object ReferenceOps
     ResolveOp(host, into)
   }
 
-  def blocking(body: () => Unit): RefOp = BlockingOp[AnyRef](() => { body(); "" }, null)
+  def blocking(body: () => Unit): RefOp^{body} = BlockingOp[AnyRef](() => { body(); "" }, null)
 
-  def blocking[A <: AnyRef](body: () => A, into: Slot[A]): RefOp = BlockingOp(body, into)
+  def blocking[A <: AnyRef](body: () => A, into: Slot[A]): RefOp^{body} = BlockingOp(body, into)
 }

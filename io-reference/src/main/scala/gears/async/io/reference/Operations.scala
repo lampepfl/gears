@@ -1,6 +1,8 @@
 package gears.async.io
 package reference
 
+import language.experimental.captureChecking
+
 import gears.async.Async
 
 import java.io.IOException
@@ -53,7 +55,7 @@ private[reference] object Operations {
   /** After a call on a file, which runs to its end once begun: if the file was closed meanwhile, or the op cancelled or
     * out of time, its outcome is dropped, `restore` putting its buffers back as they were, and the op fails.
     */
-  def settle(handle: RefHandle, ctx: Ctx, op: AnyRef)(restore: => Unit)(using Async): Unit =
+  def settle(handle: RefHandle, ctx: Ctx, op: AnyRef)(restore: => Unit)(using Async^): Unit =
     try {
       handle.checkOpen()
       ctx.checkStop(op)
@@ -71,7 +73,7 @@ import Operations.*
 final class ReadOp(h: ReadEnd, buf: ByteBuffer) extends RefOp with Repeatable {
   override protected def handle = h
   override protected def check(): Unit = if !buf.hasRemaining() then throw full(buf)
-  protected def body(ctx: Ctx)(using Async): Unit = h.exclusively(write = false, this) {
+  protected def body(ctx: Ctx)(using Async^): Unit = h.exclusively(write = false, this) {
     val before = buf.position()
     while asIo(h.in.read(buf)) == 0 do ctx.ready(this, h, h.inReady.nn, OP_READ)
     if h.inReady == null then settle(h, ctx, this)(buf.position(before))
@@ -81,7 +83,7 @@ final class ReadOp(h: ReadEnd, buf: ByteBuffer) extends RefOp with Repeatable {
 final class ScatterOp(h: ReadEnd, bufs: Array[ByteBuffer]) extends RefOp with Repeatable {
   override protected def handle = h
   override protected def check(): Unit = if !bufs.exists(_.hasRemaining()) then throw allFull(bufs)
-  protected def body(ctx: Ctx)(using Async): Unit = h.exclusively(write = false, this) {
+  protected def body(ctx: Ctx)(using Async^): Unit = h.exclusively(write = false, this) {
     val before = bufs.map(_.position())
     while asIo(h.in.read(bufs)) == 0 do ctx.ready(this, h, h.inReady.nn, OP_READ)
     if h.inReady == null then settle(h, ctx, this)(bufs.zip(before).foreach(_.position(_)))
@@ -90,7 +92,7 @@ final class ScatterOp(h: ReadEnd, bufs: Array[ByteBuffer]) extends RefOp with Re
 
 final class WriteOp(h: WriteEnd, buf: ByteBuffer) extends RefOp with Repeatable {
   override protected def handle = h
-  protected def body(ctx: Ctx)(using Async): Unit = h.exclusively(write = true, this) {
+  protected def body(ctx: Ctx)(using Async^): Unit = h.exclusively(write = true, this) {
     if buf.hasRemaining() then {
       val before = buf.position()
       while asIo(h.out.write(buf)) == 0 do ctx.ready(this, h, h.outReady.nn, OP_WRITE)
@@ -101,7 +103,7 @@ final class WriteOp(h: WriteEnd, buf: ByteBuffer) extends RefOp with Repeatable 
 
 final class GatherOp(h: WriteEnd, bufs: Array[ByteBuffer]) extends RefOp with Repeatable {
   override protected def handle = h
-  protected def body(ctx: Ctx)(using Async): Unit = h.exclusively(write = true, this) {
+  protected def body(ctx: Ctx)(using Async^): Unit = h.exclusively(write = true, this) {
     if bufs.exists(_.hasRemaining()) then {
       val before = bufs.map(_.position())
       while asIo(h.out.write(bufs)) == 0 do ctx.ready(this, h, h.outReady.nn, OP_WRITE)
@@ -114,7 +116,7 @@ final class GatherOp(h: WriteEnd, bufs: Array[ByteBuffer]) extends RefOp with Re
 final class PooledReadOp(h: ReadEnd, pool: RefPool, into: Slot[Received]) extends RefOp with Repeatable {
   override protected def handle = h
   override protected def slots = List(into)
-  protected def body(ctx: Ctx)(using Async): Unit = h.exclusively(write = false, this) {
+  protected def body(ctx: Ctx)(using Async^): Unit = h.exclusively(write = false, this) {
     var done = false
     while !done do {
       val buf = pool.take()
@@ -141,7 +143,7 @@ final class PooledReadOp(h: ReadEnd, pool: RefPool, into: Slot[Received]) extend
 // ---- Timers
 
 final class TimerOp(nanos: Long) extends RefOp with Repeatable {
-  protected def body(ctx: Ctx)(using Async): Unit = Timers.waitUntil(ctx, this, () => ctx.start + nanos)
+  protected def body(ctx: Ctx)(using Async^): Unit = Timers.waitUntil(ctx, this, () => ctx.start + nanos)
 }
 
 final class DeadlineOp(initial: Long) extends RefOp with Repeatable with Deadline {
@@ -156,7 +158,7 @@ final class DeadlineOp(initial: Long) extends RefOp with Repeatable with Deadlin
     if wait != null then wait.signal()
   }
 
-  protected def body(ctx: Ctx)(using Async): Unit = {
+  protected def body(ctx: Ctx)(using Async^): Unit = {
     waiting = ctx.waiter
     try Timers.waitUntil(ctx, this, () => at)
     finally waiting = null
@@ -166,7 +168,7 @@ final class DeadlineOp(initial: Long) extends RefOp with Repeatable with Deadlin
 private[reference] object Timers {
 
   /** Waits until `due()`, read again whenever woken, unless the time limit comes first. */
-  def waitUntil(ctx: Ctx, op: AnyRef, due: () => Long)(using Async): Unit = {
+  def waitUntil(ctx: Ctx, op: AnyRef, due: () => Long)(using Async^): Unit = {
     while true do {
       ctx.waiter.reset()
       val at = due()
@@ -185,7 +187,7 @@ private[reference] object Timers {
 // ---- Closing
 
 final class CloseOp(h: RefHandle) extends RefOp {
-  protected def body(ctx: Ctx)(using Async): Unit = h.close(ctx.waiter)
+  protected def body(ctx: Ctx)(using Async^): Unit = h.close(ctx.waiter)
 }
 
 // ---- Stream sockets
@@ -193,7 +195,7 @@ final class CloseOp(h: RefHandle) extends RefOp {
 final class ConnectOp(address: IpSocketAddress | UnixAddress, options: SocketOptions, into: Slot[ConnectionHandle])
     extends RefOp {
   override protected def slots = List(into)
-  protected def body(ctx: Ctx)(using Async): Unit = {
+  protected def body(ctx: Ctx)(using Async^): Unit = {
     val (socket, target, unix) = address match {
       case ip: IpSocketAddress =>
         val protocol = Addresses.protocol(ip.address.protocol)
@@ -217,7 +219,7 @@ final class ConnectOp(address: IpSocketAddress | UnixAddress, options: SocketOpt
 final class ListenOp(address: IpSocketAddress | UnixAddress, options: SocketOptions, into: Slot[ListenerHandle])
     extends RefOp {
   override protected def slots = List(into)
-  protected def body(ctx: Ctx)(using Async): Unit = {
+  protected def body(ctx: Ctx)(using Async^): Unit = {
     val server = address match {
       case ip: IpSocketAddress => ServerSocketChannel.open(Addresses.protocol(ip.address.protocol))
       case _: UnixAddress      => ServerSocketChannel.open(StandardProtocolFamily.UNIX)
@@ -279,7 +281,7 @@ private[reference] object Listening {
 final class AcceptOp(l: ListenerHandle, into: Slot[ConnectionHandle]) extends RefOp with Repeatable {
   override protected def handle = l
   override protected def slots = List(into)
-  protected def body(ctx: Ctx)(using Async): Unit = {
+  protected def body(ctx: Ctx)(using Async^): Unit = {
     l.accepts.take(ctx, l, this)
     try {
       var socket = l.server.accept()
@@ -297,7 +299,7 @@ final class AcceptAllOp(l: ListenerHandle, into: Slot[Array[ConnectionHandle]], 
     with Repeatable {
   override protected def handle = l
   override protected def slots = List(into)
-  protected def body(ctx: Ctx)(using Async): Unit = {
+  protected def body(ctx: Ctx)(using Async^): Unit = {
     l.accepts.take(ctx, l, this)
     try {
       var socket = l.server.accept()
@@ -315,7 +317,7 @@ final class AcceptAllOp(l: ListenerHandle, into: Slot[Array[ConnectionHandle]], 
 
 final class ShutdownOutputOp(c: ConnectionHandle) extends RefOp {
   override protected def handle = c
-  protected def body(ctx: Ctx)(using Async): Unit = c.socket.shutdownOutput(): Unit
+  protected def body(ctx: Ctx)(using Async^): Unit = c.socket.shutdownOutput(): Unit
 }
 
 // ---- Datagram sockets
@@ -327,7 +329,7 @@ final class OpenDatagramOp(
     into: Slot[? <: DatagramHandle]
 ) extends RefOp {
   override protected def slots = List(into)
-  protected def body(ctx: Ctx)(using Async): Unit = {
+  protected def body(ctx: Ctx)(using Async^): Unit = {
     val address = if local != null then local else remote.nn
     val protocol = Addresses.protocol(address.address.protocol)
     val datagrams = DatagramChannel.open(protocol)
@@ -358,7 +360,7 @@ final class ReceiveOp(h: DatagramHandle, buf: ByteBuffer, from: Slot[IpSocketAdd
       throw new IllegalArgumentException(
         s"The buffer has no capacity, so a packet received into it would be dropped: $buf"
       )
-  protected def body(ctx: Ctx)(using Async): Unit = {
+  protected def body(ctx: Ctx)(using Async^): Unit = {
     h.receives.take(ctx, h, this)
     try {
       // Through a heap buffer of the same capacity, as JDK 21's datagram channels refuse a buffer of a shared arena.
@@ -385,7 +387,7 @@ final class SendOp(h: DatagramHandle, bufs: Array[ByteBuffer], to: IpSocketAddre
       throw new IllegalArgumentException(
         s"The buffer is empty, and an empty packet is not sent on a connected socket: ${bufs.mkString(", ")}"
       )
-  protected def body(ctx: Ctx)(using Async): Unit = {
+  protected def body(ctx: Ctx)(using Async^): Unit = {
     h.sends.take(ctx, h, this)
     try {
       // Copied whole into a heap buffer, as JDK 21's datagram channels refuse a buffer of a shared arena.
@@ -406,7 +408,7 @@ final class SendOp(h: DatagramHandle, bufs: Array[ByteBuffer], to: IpSocketAddre
 
 final class PipeOp(read: Slot[ReadEnd], write: Slot[WriteEnd]) extends RefOp {
   override protected def slots = List(read, write)
-  protected def body(ctx: Ctx)(using Async): Unit = {
+  protected def body(ctx: Ctx)(using Async^): Unit = {
     val pipe = Pipe.open()
     pipe.source().configureBlocking(false)
     pipe.sink().configureBlocking(false)
@@ -419,7 +421,7 @@ final class PipeOp(read: Slot[ReadEnd], write: Slot[WriteEnd]) extends RefOp {
 
 final class OpenFileOp(path: String, write: Boolean, into: Slot[FileHandle]) extends RefOp {
   override protected def slots = List(into)
-  protected def body(ctx: Ctx)(using Async): Unit = {
+  protected def body(ctx: Ctx)(using Async^): Unit = {
     val p = Path.of(path)
     if !Files.isRegularFile(p) then throw new IOException(s"$path is not a regular file")
     val file = FileChannel.open(p, if write then StandardOpenOption.WRITE else StandardOpenOption.READ)
@@ -438,7 +440,7 @@ final class FileReadOp(h: FileHandle, buf: ByteBuffer, offset: Long) extends Ref
   private var at = offset
   override protected def handle = h
   override protected def check(): Unit = if !buf.hasRemaining() then throw full(buf)
-  protected def body(ctx: Ctx)(using Async): Unit = {
+  protected def body(ctx: Ctx)(using Async^): Unit = {
     val before = buf.position()
     asIo(h.file.read(buf, at))
     settle(h, ctx, this)(buf.position(before))
@@ -450,7 +452,7 @@ final class FileReadOp(h: FileHandle, buf: ByteBuffer, offset: Long) extends Ref
 final class FileWriteOp(h: FileHandle, buf: ByteBuffer, offset: Long) extends RefOp with Repeatable {
   private var at = offset
   override protected def handle = h
-  protected def body(ctx: Ctx)(using Async): Unit =
+  protected def body(ctx: Ctx)(using Async^): Unit =
     if buf.hasRemaining() then {
       val before = buf.position()
       asIo(h.file.write(buf, at))
@@ -461,7 +463,7 @@ final class FileWriteOp(h: FileHandle, buf: ByteBuffer, offset: Long) extends Re
 
 final class SyncOp(h: FileHandle) extends RefOp with Repeatable {
   override protected def handle = h
-  protected def body(ctx: Ctx)(using Async): Unit = {
+  protected def body(ctx: Ctx)(using Async^): Unit = {
     h.file.force(true)
     settle(h, ctx, this)(())
   }
@@ -473,12 +475,12 @@ final class SyncOp(h: FileHandle) extends RefOp with Repeatable {
   * the time limit before the commit stops the op: `interrupt` says whether the thread is interrupted and waited for, as
   * blocking code is, or left to run on, its outcome dropped, as a name lookup is.
   */
-private[reference] final class OnThread[A](op: AnyRef, work: () => A, commit: A => Unit, interrupt: Boolean) {
+private[reference] final class OnThread[A](op: AnyRef^, work: () => A, commit: A => Unit, interrupt: Boolean) {
   private val state = new AtomicInteger() // 0 running, 1 committed, 2 stopped
   @volatile private var finished = false
   @volatile private var failure: Throwable | Null = null
 
-  def run(ctx: Ctx)(using Async): Unit = {
+  def run(ctx: Ctx)(using Async^): Unit = {
     val thread = Thread.ofVirtual().unstarted { () =>
       try {
         val value = work()
@@ -512,13 +514,13 @@ private[reference] final class OnThread[A](op: AnyRef, work: () => A, commit: A 
 
 final class BlockingOp[A <: AnyRef](work: () => A, into: Slot[A] | Null) extends RefOp {
   override protected def slots = if into == null then Nil else List(into)
-  protected def body(ctx: Ctx)(using Async): Unit =
+  protected def body(ctx: Ctx)(using Async^): Unit =
     OnThread[A](this, work, v => if into != null then into.set(v), interrupt = true).run(ctx)
 }
 
 final class ResolveOp(host: String, into: Slot[List[IpAddress]]) extends RefOp {
   override protected def slots = List(into)
-  protected def body(ctx: Ctx)(using Async): Unit = {
+  protected def body(ctx: Ctx)(using Async^): Unit = {
     val lookup = () => {
       val found = InetAddress.getAllByName(host).toList.map(Addresses.resolved).distinct
       if found.isEmpty then throw new IOException(s"Failed to resolve $host: it has no IPv4 or IPv6 address")

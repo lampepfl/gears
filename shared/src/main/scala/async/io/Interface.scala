@@ -448,14 +448,14 @@ trait Blocking extends Interface {
     * Cancelling it skips `body` if it has not started and interrupts it if it is running; interruption is cooperative,
     * and `perform` returns only once `body` has.
     */
-  def blocking(body: () => Unit): Op
+  def blocking(body: () => Unit): Op^{body}
 
   /** Like the other `blocking`, writing `body`'s value into `into`, which must be empty, before completing. A cancel
     * that arrives before the write discards the value, leaving `into` empty; nothing is written after a cancel. One
     * that arrives after the write is too late: the op completes, with `into` holding the value, as an op that finished
     * before its cancel does, and the same for a time limit.
     */
-  def blocking[A <: AnyRef](body: () => A, into: Slot[A]): Op
+  def blocking[A <: AnyRef](body: () => A, into: Slot[A]): Op^{body}
 }
 
 /** The ops of Unix domain datagram sockets, for a backend that has them, as `IpDatagrams` are for IP ones: bound, or
