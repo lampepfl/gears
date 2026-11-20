@@ -291,3 +291,4 @@ lazy val ioCapBench =
       }
     )
     .dependsOn(ioPoller)
+    .nativeConfigure(_.dependsOn(ioUring))

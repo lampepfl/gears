@@ -8,8 +8,8 @@ another branch's.
 - `shared/` has `CapBench`: the scenarios, written against the interface alone, so the same source runs over any
   backend. Each prints one line, `bench: <name> <ops> ops <seconds> s <microseconds> us/op`.
 - `jvm/`, `native/` and `js/` have each platform's buffers (`BenchPlatform`) and its `BenchMain`, which runs `CapBench`
-  over this branch's backends: `NioBackend` and `NioPoolBackend` on the JVM, `EventPollingBackend` on Scala Native,
-  `NodeBackend` on Scala.js. `jvm-native/` and `js/` have what the bench asks of the system beside the backend
+  over this branch's backends: `NioBackend` and `NioPoolBackend` on the JVM, `EventPollingBackend` and, on Linux,
+  `UringBackend` on Scala Native, `NodeBackend` on Scala.js. `jvm-native/` and `js/` have what the bench asks of the system beside the backend
   (`BenchFiles`).
 - `other/` has the `BenchMain`s and the build definition for the branch compared against, `async-io-backends`, whose
   backends are started differently. They are not built here.
@@ -26,6 +26,7 @@ sbt "ioCapBenchJVM/run --backend pool --workers 4 --scenarios pipe-pingpong,tcp-
 
 SCALA_NATIVE_NIGHTLY=1 sbt --server ioCapBenchNative/nativeLink
 SCALANATIVE_GC_TRAP_BASED_YIELDPOINTS=0 target/out/native0.5/scala-3.9.0/iocapbench/iocapbench --workers 4
+SCALANATIVE_GC_TRAP_BASED_YIELDPOINTS=0 target/out/native0.5/scala-3.9.0/iocapbench/iocapbench --backend uring --workers 4
 
 sbt ioCapBenchJS/fullLinkJS
 node target/out/sjs1/scala-3.9.0/iocapbench/iocapbench-opt/main.js --scenarios tcp-pingpong,udp-pingpong
@@ -50,7 +51,7 @@ scala-cli run io-bench/compare -- --out io-bench/results/<name>.md
 scala-cli run io-bench/compare -- --help
 ```
 
-`Compare` checks the other branch out in a worktree under `target/io-bench-compare`, copies this bench into it with
+`--uring` adds a column for this branch's io_uring backend to the Scala Native table, on Linux. `Compare` checks the other branch out in a worktree under `target/io-bench-compare`, copies this bench into it with
 that branch's `BenchMain`s, builds both sides, runs each configuration and writes a table for each platform. It
 restarts sbt's server with the nightly switch, and shuts it down when it is done. A full run takes about an hour.
 

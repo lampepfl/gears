@@ -27,6 +27,7 @@ object Compare {
       nativeScale: Double = 1.0,
       nativeRounds: Int = 3,
       workers: Seq[Int] = Seq(1, 4),
+      uring: Boolean = false,
       out: String = "io-bench/results/latest.md",
       work: String = "target/io-bench-compare"
   )
@@ -34,7 +35,7 @@ object Compare {
   private val usage =
     """Compare [--other <git ref>] [--platforms jvm,native] [--scenarios a,b] [--workers 1,4]
       |        [--jvm-scale 0.5] [--jvm-repeats 5] [--jvm-warmups 2] [--native-scale 1] [--native-rounds 3]
-      |        [--out io-bench/results/latest.md] [--work target/io-bench-compare]""".stripMargin
+      |        [--uring] [--out io-bench/results/latest.md] [--work target/io-bench-compare]""".stripMargin
 
   private def parse(args: List[String], options: Options): Options = args match
     case Nil                              => options
@@ -47,6 +48,7 @@ object Compare {
     case "--jvm-warmups" :: value :: rest => parse(rest, options.copy(jvmWarmups = value.toInt))
     case "--native-scale" :: value :: rest  => parse(rest, options.copy(nativeScale = value.toDouble))
     case "--native-rounds" :: value :: rest => parse(rest, options.copy(nativeRounds = value.toInt))
+    case "--uring" :: rest                => parse(rest, options.copy(uring = true))
     case "--out" :: value :: rest         => parse(rest, options.copy(out = value))
     case "--work" :: value :: rest        => parse(rest, options.copy(work = value))
     case _ =>
@@ -264,7 +266,8 @@ object Compare {
         sides.foreach(side => sbt(side.dir, "ioCapBenchNative/nativeLink"))
         val binaries = sides.map(side => side -> nativeBinary(side)).toMap
         val configs = options.workers.flatMap { workers =>
-          Seq(Config(here, s"this: kqueue, $workers", "kqueue", workers), Config(other, s"other: kqueue, $workers", "kqueue", workers))
+          Seq(Config(here, s"this: kqueue, $workers", "kqueue", workers), Config(other, s"other: kqueue, $workers", "kqueue", workers)) ++
+            (if options.uring then Seq(Config(here, s"this: uring, $workers", "uring", workers)) else Nil)
         }
         val results = configs.map { config =>
           println(s"native: ${config.label}")
