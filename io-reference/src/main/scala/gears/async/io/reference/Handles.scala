@@ -77,7 +77,17 @@ sealed abstract class RefHandle(kind: String) {
       case other                         => other.close()
     }
     closed()
+    val run = owner
+    if run != null then run.forget(this)
   }
+
+  /** The run that opened this handle (see `RefRun`), set as it is opened. */
+  @volatile private[reference] var owner: RefRun | Null = null
+
+  /** Closes this handle if nothing has: for its run, as it ends. */
+  private[reference] def closeLeftOpen(): Unit =
+    try close(new Wait)
+    catch case _: java.io.IOException => () // closed already, or failing to close: nothing is left to do for it
 
   /** What else closing does once the I/O object is closed. */
   protected def closed(): Unit = ()

@@ -5,7 +5,8 @@ import java.nio.ByteBuffer
 /** A mutable outcome of an operation, written by the op and taken by the caller with `clear`. Like a buffer, it belongs
   * to the backend while the op is being performed: the caller clears it once `perform` has returned, which is what
   * makes the op's write visible. An op performed with a slot not yet cleared fails with an `IllegalArgumentException`,
-  * doing nothing, since what it opened or took would have nowhere to go.
+  * doing nothing, since what it opened or took would have nowhere to go. The op has the slot until `perform` returns:
+  * what a backend does if the slot is filled meanwhile, by the caller or by another op, is not defined.
   */
 final class Slot[A <: AnyRef] {
   private var value: A | Null = null

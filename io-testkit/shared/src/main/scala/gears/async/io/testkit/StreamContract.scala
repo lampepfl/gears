@@ -630,4 +630,63 @@ trait StreamContract extends StreamFixture {
       }
     }
   }
+
+  test("a second write pending on a stream fails with IllegalArgumentException") {
+    running { io ?=>
+      val (in, out) = stream(io)
+      try {
+        // More than the stream holds with nobody reading, so that a write remains pending.
+        val writing = Future(writeAll(io, out, allocate(8 << 20)))
+        settle(io)
+        val result = writing.poll()
+        result.foreach(_.get) // a failed write is a failure, not an unsupported workload
+        assume(result.isEmpty, "the stream took the whole payload; there is no pending write to test")
+        val second = attempt(io, io.ops.write(out, bytes("z")))
+        assert(second.isInstanceOf[IllegalArgumentException], s"a second write: $second")
+        writing.cancel()
+        writing.awaitResult
+      } finally {
+        close(io, in)
+        close(io, out)
+      }
+    }
+  }
+
+  test("a read that takes exactly the bytes left, the writer's end already in, is followed by a read at the end") {
+    running { io ?=>
+      val (in, out) = stream(io)
+      try {
+        writeAll(io, out, bytes("abcd"))
+        close(io, out)
+        io.perform(io.ops.timer(50)) // for the bytes and the end to have arrived
+        val buf = allocate(4)
+        readExactly(io, io.ops.read(in, buf), buf, 4)
+        assertEquals(text(buf), "abcd")
+        val after = allocate(4)
+        io.perform(io.ops.read(in, after), 5.seconds)
+        assertEquals(after.position(), 0, "the end of the stream")
+      } finally close(io, in)
+    }
+  }
+
+  test("ops refused at once, performed without end, let a sibling future run") {
+    running { io ?=>
+      val (in, out) = stream(io)
+      close(io, in)
+      close(io, out)
+      val ran = new java.util.concurrent.atomic.AtomicBoolean(false)
+      val sibling = Future(ran.set(true))
+      val read = io.ops.read(in, allocate(8))
+      var refused = 0
+      while !ran.get() && refused < 1_000_000 do {
+        // Not performed inside `assert`: munit evaluates the condition holding a monitor, which before JDK 24 pins a
+        // virtual thread to its carrier, and a pinned thread can't give its worker up.
+        val refusal = attempt(io, read)
+        assert(refusal.isInstanceOf[ClosedChannelException], s"a read of a closed stream: $refusal")
+        refused += 1
+      }
+      assert(ran.get(), s"$refused reads were refused, and the future beside them never ran")
+      sibling.await
+    }
+  }
 }
