@@ -27,8 +27,7 @@ lazy val root =
         publish / skip := false,
         versionScheme := Some("early-semver"),
         libraryDependencies += "org.scalameta" %% "munit" % "1.3.6" % Test,
-        testFrameworks += MUnitFramework,
-        scalacOptions += "-experimental"
+        testFrameworks += MUnitFramework
       )
     )
     .jvmSettings(
@@ -90,7 +89,6 @@ lazy val ioTestkit =
       publish / skip := false,
       versionScheme := Some("early-semver"),
       libraryDependencies ++= Seq(munit, mainargs),
-      scalacOptions += "-experimental",
       testFrameworks += MUnitFramework
     )
     .jvmSettings(scalacOptions += "-release:21")
@@ -104,7 +102,7 @@ lazy val ioReference =
   (project in file("io-reference"))
     .settings(
       publish / skip := true,
-      scalacOptions ++= Seq("-release:21", "-experimental"),
+      scalacOptions += "-release:21",
       libraryDependencies += munit % Test,
       testFrameworks += MUnitFramework,
       Test / fork := true
@@ -116,7 +114,7 @@ lazy val ioReferenceDemos =
   (project in file("io-reference/demos"))
     .settings(
       publish / skip := true,
-      scalacOptions ++= Seq("-release:21", "-experimental"),
+      scalacOptions += "-release:21",
       Compile / mainClass := Some("referencedemos.ReferenceDemos"),
       run / fork := true
     )
