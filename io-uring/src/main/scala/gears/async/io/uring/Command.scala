@@ -4,6 +4,8 @@ package uring
 import gears.async.Async
 import gears.async.CompletionGroup
 import gears.async.Listener
+import gears.async.io.posix.NativeBuffer
+import gears.async.io.posix.NonBlocking
 import gears.async.io.posix.Unblocked
 import gears.async.io.shareable.BackendOp
 import gears.async.io.shareable.Checks
@@ -295,7 +297,7 @@ private[uring] final class MessageHeader(buffers: Int, named: Boolean) {
   def vectors: Ptr[uio.iovec] = vectorStorage.asInstanceOf[ByteArray].at(0).asInstanceOf[Ptr[uio.iovec]]
   def capacity: Int = name.length
 
-  def fill(bufs: Array[ByteBuffer], room: Boolean): Int = NonBlocking.fill(vectors, bufs, room)
+  def fill(bufs: Array[ByteBuffer]): Int = NonBlocking.fill(vectors, bufs)
 
   def set(count: Int, nameLength: Int): Unit = {
     val m = msg
@@ -347,7 +349,7 @@ private[uring] final class ReadIntoBuffer(val handle: UringHandle, buf: ByteBuff
     io_uring_prep_read(sqe, fd, NativeBuffer.atPosition(b), b.remaining().toUInt, Results.currentPosition)
   }
 
-  override def tryAtOnce(): Boolean = NonBlocking.read(fd, buf) != 0
+  override def tryAtOnce(): Boolean = !NonBlocking.read(fd, buf).isBlocked
 }
 
 private[uring] final class ReadIntoBuffers(val handle: UringHandle, bufs: Array[ByteBuffer])
@@ -361,11 +363,11 @@ private[uring] final class ReadIntoBuffers(val handle: UringHandle, bufs: Array[
   private val header = new MessageHeader(math.min(bufs.length, NonBlocking.MaxBuffers), named = false)
 
   protected def prepare(sqe: Ptr[io_uring_sqe]): Unit = {
-    val count = header.fill(staging.begin(), room = true)
+    val count = header.fill(staging.begin())
     io_uring_prep_readv(sqe, fd, header.vectors.asInstanceOf[Ptr[iovec]], count.toUInt, Results.currentPosition)
   }
 
-  override def tryAtOnce(): Boolean = NonBlocking.readv(fd, bufs) != 0
+  override def tryAtOnce(): Boolean = !NonBlocking.readv(fd, bufs).isBlocked
 }
 
 private[uring] final class WriteFromBuffer(val handle: UringHandle, buf: ByteBuffer)
@@ -380,7 +382,7 @@ private[uring] final class WriteFromBuffer(val handle: UringHandle, buf: ByteBuf
     io_uring_prep_write(sqe, fd, NativeBuffer.atPosition(b), b.remaining().toUInt, Results.currentPosition)
   }
 
-  override def tryAtOnce(): Boolean = NonBlocking.write(fd, buf) >= 0
+  override def tryAtOnce(): Boolean = !NonBlocking.write(fd, buf).isBlocked
 }
 
 private[uring] final class WriteFromBuffers(val handle: UringHandle, bufs: Array[ByteBuffer])
@@ -393,11 +395,11 @@ private[uring] final class WriteFromBuffers(val handle: UringHandle, bufs: Array
   private val header = new MessageHeader(math.min(bufs.length, NonBlocking.MaxBuffers), named = false)
 
   protected def prepare(sqe: Ptr[io_uring_sqe]): Unit = {
-    val count = header.fill(staging.begin(), room = false)
+    val count = header.fill(staging.begin())
     io_uring_prep_writev(sqe, fd, header.vectors.asInstanceOf[Ptr[iovec]], count.toUInt, Results.currentPosition)
   }
 
-  override def tryAtOnce(): Boolean = NonBlocking.writev(fd, bufs) >= 0
+  override def tryAtOnce(): Boolean = !NonBlocking.writev(fd, bufs).isBlocked
 }
 
 // - a read waiting on a socket holds no buffer: it waits for readiness, and takes one as it reads, while the pool has
@@ -481,7 +483,7 @@ private[uring] final class PooledRead(val handle: UringHandle, pool: NativePool,
           slot.release()
           throw failure
       }
-    if read == 0 then {
+    if read.isBlocked then {
       slot.release()
       false
     } else {
@@ -633,7 +635,7 @@ private[uring] final class ReceiveFrom(
 
   private def setUp(): Unit = {
     buf.clear()
-    header.set(header.fill(staging.begin(), room = true), header.capacity)
+    header.set(header.fill(staging.begin()), header.capacity)
   }
 
   protected def prepare(sqe: Ptr[io_uring_sqe]): Unit = {
@@ -690,7 +692,7 @@ private[uring] final class SendTo(
   private def setUp(): Unit = {
     size = Checks.remaining(bufs)
     val nameLength = if to == null then 0 else Addresses.write(to.nn, handle.ipv6, header.name)
-    header.set(header.fill(staging.begin(), room = false), nameLength)
+    header.set(header.fill(staging.begin()), nameLength)
   }
 
   protected def prepare(sqe: Ptr[io_uring_sqe]): Unit = {
