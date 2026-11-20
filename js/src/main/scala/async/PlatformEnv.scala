@@ -1,5 +1,7 @@
 package gears.async
 
+import language.experimental.captureChecking
+
 import scala.scalajs.js
 
 /** The environment the program was started in. */
