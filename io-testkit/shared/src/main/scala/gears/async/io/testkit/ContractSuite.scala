@@ -1,6 +1,9 @@
 package gears.async.io
 package testkit
 
+import language.experimental.captureChecking
+import caps.*
+
 import gears.async.Async
 import gears.async.Future
 
@@ -17,7 +20,7 @@ import munit.FunSuite
   * extends the contracts of the capabilities its backend has (`OpsContract`, `IpStreamContract` and the rest), with the
   * backend; each contract asks for the capabilities it checks, by its `backend`'s type.
   */
-trait ContractSuite extends FunSuite {
+trait ContractSuite extends FunSuite { this: ContractSuite =>
 
   /** The backend under test. */
   val backend: Backend
@@ -25,7 +28,7 @@ trait ContractSuite extends FunSuite {
   /** Runs `body` as a program over `backend`, given the backend's `Io`, and returns its result: `Io.run`, unless a
     * backend's suite runs its programs another way.
     */
-  protected def running[T](body: Io[backend.Interface] ?=> Async.Spawn ?=> T): T =
+  protected def running[T](body: Io[backend.Interface] ?->{any.except[Control]} Async.Spawn^ ?->{any.except[Control]} T): T =
     Io.run(using backend)(body)
 
   /** Checks this backend is known to fail, by name: they are expected to fail, so one that starts passing is reported,
@@ -34,7 +37,9 @@ trait ContractSuite extends FunSuite {
   def knownFailures: Set[String] = Set.empty
 
   override def test(options: munit.TestOptions)(body: => Any)(using loc: munit.Location): Unit =
-    super.test(if knownFailures(options.name) then options.fail else options)(body)
+    // munit is not capture checked, and takes its test bodies as pure
+    val check: () -> Any = caps.unsafe.unsafeAssumePure(() => body)
+    super.test(if knownFailures(options.name) then options.fail else options)(check())
 
   // The buffers of every check, which its futures share across threads.
   private var openedArena: BufferArena | Null = null
@@ -53,32 +58,32 @@ trait ContractSuite extends FunSuite {
   }
 
   /** Performs `op` and returns its failure, or null if it completed. */
-  protected def attempt(io: Io[backend.Interface], op: io.Op)(using Async): Throwable | Null =
+  protected def attempt(io: Io[backend.Interface], op: io.Op)(using Async^): Throwable | Null =
     try {
       io.perform(op)
       null
     } catch case e: Exception => e
 
   /** Allocates the output slot, builds and performs its opening op, and returns the opened handle. */
-  protected def opening[K <: AnyRef](io: Io[backend.Interface])(build: Slot[K] => io.Op)(using Async): K = {
+  protected def opening[K <: AnyRef](io: Io[backend.Interface])(build: Slot[K] => io.Op)(using Async^): K = {
     val into = Slot[K]()
     io.perform(build(into))
     into.clear()
   }
 
   /** Closes `handle`, as the interface has it. */
-  protected def close(io: Io[Handles], handle: io.ops.Handle)(using Async): Unit =
+  protected def close(io: Io[Handles], handle: io.ops.Handle)(using Async^): Unit =
     io.perform(io.ops.close(handle))
 
   /** Gives a future just started the time to perform its op and wait in it. */
-  protected def settle(io: Io[backend.Interface])(using Async): Unit = io.perform(io.ops.timer(30))
+  protected def settle(io: Io[backend.Interface])(using Async^): Unit = io.perform(io.ops.timer(30))
 
   /** The failure `future` ended with, or null if it completed. */
-  protected def failureOf(future: Future[?])(using Async): Throwable | Null =
+  protected def failureOf(future: Future[?]^)(using Async^): Throwable | Null =
     future.awaitResult.failed.toOption.orNull
 
   /** Drains every buffer, allowing each performance to make only partial progress. */
-  protected def writeAll(io: Io[ByteStreams], out: io.ops.Writable, buf: ByteBuffer)(using Async): Unit = {
+  protected def writeAll(io: Io[ByteStreams], out: io.ops.Writable, buf: ByteBuffer)(using Async^): Unit = {
     val write = io.ops.write(out, buf)
     while buf.hasRemaining() do {
       val before = buf.position()
@@ -91,7 +96,7 @@ trait ContractSuite extends FunSuite {
       io: Io[ByteStreams],
       out: io.ops.Writable,
       bufs: Array[ByteBuffer]
-  )(using Async): Unit = {
+  )(using Async^): Unit = {
     val write = io.ops.write(out, bufs)
     while bufs.exists(_.hasRemaining()) do {
       val before = bufs.map(_.remaining().toLong).sum
@@ -101,7 +106,7 @@ trait ContractSuite extends FunSuite {
   }
 
   /** Reads up to an absolute position without consuming bytes beyond it. EOF before that position is a failure. */
-  protected def readExactly(io: Io[backend.Interface], read: io.Op, buf: ByteBuffer, until: Int)(using Async): Unit = {
+  protected def readExactly(io: Io[backend.Interface], read: io.Op, buf: ByteBuffer, until: Int)(using Async^): Unit = {
     require(until >= buf.position() && until <= buf.limit())
     val limit = buf.limit()
     buf.limit(until)
@@ -116,7 +121,7 @@ trait ContractSuite extends FunSuite {
 
   /** Reads a known byte count across pooled chunks, including a result already waiting in `into`. */
   protected def readPooledExactly(io: Io[backend.Interface], read: io.Op, into: Slot[Received], size: Int)(using
-      Async
+      Async^
   ): String = {
     val bytes = new ByteArrayOutputStream()
     while bytes.size() < size do {
@@ -138,7 +143,7 @@ trait ContractSuite extends FunSuite {
   protected def textOf(received: Received): String = StandardCharsets.UTF_8.decode(received.buffer.duplicate()).toString
 
   /** Performs `read` until it completes without adding bytes, returning what `buf` then holds. */
-  protected def readToEnd(io: Io[backend.Interface], read: io.Op, buf: ByteBuffer)(using Async): String = {
+  protected def readToEnd(io: Io[backend.Interface], read: io.Op, buf: ByteBuffer)(using Async^): String = {
     var atEnd = false
     while !atEnd do {
       val before = buf.position()

@@ -1,6 +1,8 @@
 package gears.async.io
 package testkit
 
+import language.experimental.captureChecking
+
 import java.nio.file.Files
 import java.nio.file.Path
 

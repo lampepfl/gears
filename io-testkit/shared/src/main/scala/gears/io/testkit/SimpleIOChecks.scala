@@ -1,5 +1,7 @@
 package gears.io.testkit
 
+import language.experimental.captureChecking
+
 import gears.async.Future
 import gears.async.io.Backend
 import gears.async.io.IpAddress

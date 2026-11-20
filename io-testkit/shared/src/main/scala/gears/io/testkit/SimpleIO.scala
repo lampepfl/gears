@@ -1,5 +1,7 @@
 package gears.io.testkit
 
+import language.experimental.captureChecking
+
 import gears.async.Async
 import gears.async.BufferedChannel
 import gears.async.Channel
@@ -39,52 +41,52 @@ object SimpleIO {
   val Linger: scala.concurrent.duration.FiniteDuration = scala.concurrent.duration.FiniteDuration(2, "s")
 
   /** Performs the op `open` builds, which opens a handle into the slot it is given, and returns the handle. */
-  private def opened[K <: AnyRef](using io: Io[Interface], async: Async)(open: Slot[K] => io.Op): K = {
+  private def opened[K <: AnyRef](using io: Io[Interface], async: Async^)(open: Slot[K] => io.Op): K = {
     val into = Slot[K]()
     io.perform(open(into))
     into.clear()
   }
 
   /** Connects a stream socket to `address` and returns it. */
-  def connect(address: IpSocketAddress)(using io: Io[IpStreams], async: Async): io.ops.Connection =
+  def connect(address: IpSocketAddress)(using io: Io[IpStreams], async: Async^): io.ops.Connection =
     opened[io.ops.Connection](io.ops.connect(address, _))
 
   /** Connects a stream socket to a Unix socket path and returns it. */
-  def connect(address: UnixAddress)(using io: Io[UnixStreams], async: Async): io.ops.Connection =
+  def connect(address: UnixAddress)(using io: Io[UnixStreams], async: Async^): io.ops.Connection =
     opened[io.ops.Connection](io.ops.connect(address, _))
 
   /** Listens on `address` and returns the listener. */
-  def listen(address: IpSocketAddress)(using io: Io[IpStreams], async: Async): io.ops.Listener =
+  def listen(address: IpSocketAddress)(using io: Io[IpStreams], async: Async^): io.ops.Listener =
     opened[io.ops.Listener](io.ops.listen(address, _))
 
   /** Listens on a Unix socket path and returns the listener. */
-  def listen(address: UnixAddress)(using io: Io[UnixStreams], async: Async): io.ops.Listener =
+  def listen(address: UnixAddress)(using io: Io[UnixStreams], async: Async^): io.ops.Listener =
     opened[io.ops.Listener](io.ops.listen(address, _))
 
   /** Opens a datagram socket bound to `local` and returns it. */
-  def bindDatagram(local: IpSocketAddress)(using io: Io[IpDatagrams], async: Async): io.ops.BoundDatagram =
+  def bindDatagram(local: IpSocketAddress)(using io: Io[IpDatagrams], async: Async^): io.ops.BoundDatagram =
     opened[io.ops.BoundDatagram](io.ops.bindDatagram(local, _))
 
   /** Opens a datagram socket connected to `remote`, bound to `local` if given, and returns it. */
   def connectDatagram(local: IpSocketAddress | Null, remote: IpSocketAddress)(using
       io: Io[IpDatagrams],
-      async: Async
+      async: Async^
   ): io.ops.ConnectedDatagram =
     opened[io.ops.ConnectedDatagram](io.ops.connectDatagram(local, remote, _))
 
   /** Opens a Unix datagram socket bound to `local` and returns it. */
-  def bindDatagram(local: UnixAddress)(using io: Io[UnixDatagrams], async: Async): io.ops.UnixBoundDatagram =
+  def bindDatagram(local: UnixAddress)(using io: Io[UnixDatagrams], async: Async^): io.ops.UnixBoundDatagram =
     opened[io.ops.UnixBoundDatagram](io.ops.bindDatagram(local, _))
 
   /** Opens a Unix datagram socket connected to `remote`, bound to `local` if given, and returns it. */
   def connectDatagram(local: UnixAddress | Null, remote: UnixAddress)(using
       io: Io[UnixDatagrams],
-      async: Async
+      async: Async^
   ): io.ops.UnixConnectedDatagram =
     opened[io.ops.UnixConnectedDatagram](io.ops.connectDatagram(local, remote, _))
 
   /** Opens a pipe and returns its read end and its write end. */
-  def pipe()(using io: Io[Pipes], async: Async): (io.ops.Readable, io.ops.Writable) = {
+  def pipe()(using io: Io[Pipes], async: Async^): (io.ops.Readable, io.ops.Writable) = {
     val read = Slot[io.ops.Readable]()
     val write = Slot[io.ops.Writable]()
     io.perform(io.ops.pipe(read, write))
@@ -92,22 +94,22 @@ object SimpleIO {
   }
 
   /** Opens the FIFO at `path` for reading and returns it. */
-  def openFifoForReading(path: String)(using io: Io[Fifos], async: Async): io.ops.Readable =
+  def openFifoForReading(path: String)(using io: Io[Fifos], async: Async^): io.ops.Readable =
     opened[io.ops.Readable](io.ops.openFifoForReading(path, _))
 
   /** Opens the FIFO at `path` for writing and returns it. */
-  def openFifoForWriting(path: String)(using io: Io[Fifos], async: Async): io.ops.Writable =
+  def openFifoForWriting(path: String)(using io: Io[Fifos], async: Async^): io.ops.Writable =
     opened[io.ops.Writable](io.ops.openFifoForWriting(path, _))
 
   /** Reads into `buf` once and returns how many bytes arrived, 0 at the end of the stream. */
-  def read(using io: Io[ByteStreams])(handle: io.ops.Readable, buf: ByteBuffer)(using Async): Int = {
+  def read(using io: Io[ByteStreams])(handle: io.ops.Readable, buf: ByteBuffer)(using Async^): Int = {
     val before = buf.position()
     io.perform(io.ops.read(handle, buf))
     buf.position() - before
   }
 
   /** Writes all of `buf`, however many writes it takes. */
-  def writeAll(using io: Io[ByteStreams])(handle: io.ops.Writable, buf: ByteBuffer)(using Async): Unit = {
+  def writeAll(using io: Io[ByteStreams])(handle: io.ops.Writable, buf: ByteBuffer)(using Async^): Unit = {
     val write = io.ops.write(handle, buf)
     while buf.hasRemaining do io.perform(write)
   }
@@ -115,7 +117,7 @@ object SimpleIO {
   /** Shuts a connected stream down for writing: the peer reads what was written, then the end of the stream, and this
     * side may still read (see `StreamSockets.shutdownOutput`).
     */
-  def shutdownOutput(using io: Io[StreamSockets])(handle: io.ops.Connection)(using Async): Unit =
+  def shutdownOutput(using io: Io[StreamSockets])(handle: io.ops.Connection)(using Async^): Unit =
     io.perform(io.ops.shutdownOutput(handle))
 
   /** Closes a connected stream without resetting it: shuts it down for writing, so that the peer reads all that was
@@ -126,7 +128,7 @@ object SimpleIO {
   def closeGracefully(using
       io: Io[StreamSockets]
   )(handle: io.ops.Connection, scratch: ByteBuffer, timeout: scala.concurrent.duration.FiniteDuration = Linger)(using
-      Async
+      Async^
   ): Unit =
     try {
       shutdownOutput(handle)
@@ -149,14 +151,14 @@ object SimpleIO {
   /** Accepts one connection and returns it. */
   def accept(using
       io: Io[StreamSockets]
-  )(listener: io.ops.Listener)(using Async): io.ops.Connection = {
+  )(listener: io.ops.Listener)(using Async^): io.ops.Connection = {
     val into = Slot[io.ops.Connection]()
     io.perform(io.ops.accept(listener, into))
     into.clear()
   }
 
   /** Resolves `host` and returns its addresses. */
-  def resolve(host: String)(using io: Io[Resolving], async: Async): List[IpAddress] = {
+  def resolve(host: String)(using io: Io[Resolving], async: Async^): List[IpAddress] = {
     val into = Slot[List[IpAddress]]()
     io.perform(io.ops.resolve(host, into))
     into.clear()
@@ -167,9 +169,9 @@ object SimpleIO {
     * read ahead and not yet taken, so the pool may be closed afterwards. The channel is never closed, since a closed
     * gears channel drops what it still holds: the end of the stream is a `None` sent after the last chunk.
     */
-  final class Chunks private[SimpleIO] (channel: Channel[Option[Received]], reader: Future[Unit]) {
+  final class Chunks private[SimpleIO] (channel: Channel[Option[Received]], reader: Future[Unit]^) {
 
-    def read()(using Async): Option[Received] = channel.read() match {
+    def read()(using Async^): Option[Received] = channel.read() match {
       case Right(Some(chunk)) => Some(chunk)
       case Right(None)        =>
         reader.await // rethrows the failure that ended the stream, if one did
@@ -177,7 +179,7 @@ object SimpleIO {
       case Left(Channel.Closed) => None // never closed; for the compiler
     }
 
-    def close()(using Async): Unit = {
+    def close()(using Async^): Unit = {
       reader.cancel()
       reader.awaitResult // once it has stopped, what it sent is all the channel will ever hold
       var draining = true
@@ -198,7 +200,7 @@ object SimpleIO {
     */
   def chunks(using
       io: Io[ByteStreams]
-  )(handle: io.ops.Readable, pool: BufferPool, backlog: Int)(using Async.Spawn): Chunks = {
+  )(handle: io.ops.Readable, pool: BufferPool, backlog: Int)(using spawn: Async.Spawn^): Chunks^{spawn} = {
     require(pool.buffers >= backlog + 2, s"a backlog of $backlog needs a pool of ${backlog + 2} buffers")
     val channel = BufferedChannel[Option[Received]](backlog)
     val reader = Future {
@@ -231,7 +233,7 @@ object SimpleIO {
   }
 
   /** Reads every chunk of `stream` until it ends, releasing each, and returns how many bytes they held. */
-  def drain(stream: Chunks)(using Async): Long = {
+  def drain(stream: Chunks^)(using Async^): Long = {
     var total = 0L
     var open = true
     while open do

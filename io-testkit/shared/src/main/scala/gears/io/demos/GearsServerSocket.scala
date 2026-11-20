@@ -1,5 +1,7 @@
 package gears.io.demos
 
+import language.experimental.captureChecking
+
 import gears.async.Async
 import gears.async.Future
 import gears.async.io.Io
@@ -24,7 +26,7 @@ object GearsServerSocket {
   /** Reads a length-framed request through one 8 KiB buffer, replies with a framed response, and closes the connection
     * gracefully, so that the client reads the whole reply however the request ended.
     */
-  private def serve(io: Io[StreamSockets], client: io.ops.Connection)(using Async): Unit = {
+  private def serve(io: Io[StreamSockets], client: io.ops.Connection)(using Async^): Unit = {
     val arena = BufferArena.open()
     try {
       val buf = arena.allocate(8192)
@@ -54,9 +56,9 @@ object GearsServerSocket {
       finally arena.close()
   }
 
-  def run(sock: String)(using io: Io[UnixStreams & IpStreams], async: Async.Spawn): Unit = run(UnixAddress(sock))
+  def run(sock: String)(using io: Io[UnixStreams & IpStreams], async: Async.Spawn^): Unit = run(UnixAddress(sock))
 
-  def run(address: StreamAddress)(using io: Io[UnixStreams & IpStreams], async: Async.Spawn): Unit = {
+  def run(address: StreamAddress)(using io: Io[UnixStreams & IpStreams], async: Async.Spawn^): Unit = {
     val server = Sockets.listen(address)
     try {
       println("Socket is now listening for connections.")

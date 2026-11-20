@@ -1,5 +1,7 @@
 package gears.io.demos
 
+import language.experimental.captureChecking
+
 import gears.async.Async
 import gears.async.io.Io
 import gears.async.io.IpSocketAddress
@@ -16,7 +18,7 @@ import DemoIO.text
   * better than an op and a slot: `resolve` returns the addresses, `read` the bytes received.
   */
 object GearsWhois {
-  def run(host: String, port: Int, query: String)(using io: Io[IpStreams & Resolving], async: Async): Unit = {
+  def run(host: String, port: Int, query: String)(using io: Io[IpStreams & Resolving], async: Async^): Unit = {
     BufferArena.scoped { arena =>
       val buf = arena.allocate(8192)
       val resolvedAll = SimpleIO.resolve(host) // a failed lookup throws
@@ -48,7 +50,7 @@ object GearsWhois {
   }
 
   /** Resolves a host and prints every address. */
-  def resolve(host: String)(using io: Io[Resolving], async: Async): Unit = {
+  def resolve(host: String)(using io: Io[Resolving], async: Async^): Unit = {
     val resolvedAll = SimpleIO.resolve(host) // a failed lookup throws
     resolvedAll.foreach { a =>
       println(s"${a.protocol} $a")

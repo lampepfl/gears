@@ -1,6 +1,8 @@
 package gears.async.io
 package testkit
 
+import language.experimental.captureChecking
+
 import gears.async.Async
 import gears.async.Future
 import gears.async.Future.awaitAll
@@ -17,25 +19,25 @@ trait IpStreamContract extends IpStreamFixture {
   val backend: Backend { type Interface <: IpStreams }
 
   /** A listener on `address`, listening, from the `listen` op, whose failure is thrown. */
-  private def tcpListen(io: Io[backend.Interface], address: IpSocketAddress)(using Async): io.ops.Listener = {
+  private def tcpListen(io: Io[backend.Interface], address: IpSocketAddress)(using Async^): io.ops.Listener = {
     opening(io)(slot => io.ops.listen(address, slot))
   }
 
   /** A connection to `address`, from the `connect` op, whose failure is thrown. */
-  private def tcpConnect(io: Io[backend.Interface], address: IpSocketAddress)(using Async): io.ops.Connection = {
+  private def tcpConnect(io: Io[backend.Interface], address: IpSocketAddress)(using Async^): io.ops.Connection = {
     opening(io)(slot => io.ops.connect(address, slot))
   }
 
   /** A connection to the listener on the loopback at `port`: its client's end and the one `listener` accepted. */
   private def tcpPair(io: Io[backend.Interface], listener: io.ops.Listener, port: Int)(using
-      Async.Spawn
+      Async.Spawn^
   ): (io.ops.Connection, io.ops.Connection) = {
     pair(io, listener)(tcpConnect(io, IpSocketAddress(IpAddress.IPv4Loopback, port)))
   }
 
   /** Performs `op` with a time limit, and returns its failure, or null if it completed. */
   private def tcpAttemptWithin(io: Io[backend.Interface], op: io.Op, limit: FiniteDuration)(using
-      Async
+      Async^
   ): Throwable | Null =
     try {
       io.perform(op, limit)
@@ -125,7 +127,7 @@ trait IpStreamContract extends IpStreamFixture {
   /** Runs `body` with `count` connections over loopback, each as its client and server ends, closed afterwards. */
   private def withConnections(io: Io[backend.Interface], count: Int)(
       body: Seq[(io.ops.Connection, io.ops.Connection)] => Unit
-  )(using Async.Spawn): Unit = {
+  )(using Async.Spawn^): Unit = {
     val listener = tcpListen(io, IpSocketAddress(IpAddress.IPv4Loopback, 0))
     val port = io.ops.localAddress(listener).asInstanceOf[IpSocketAddress].port
     val pairs = scala.collection.mutable.ArrayBuffer.empty[(io.ops.Connection, io.ops.Connection)]
@@ -143,7 +145,7 @@ trait IpStreamContract extends IpStreamFixture {
 
   /** A pooled read of `handle` performed to its end: what it received, which the caller releases, or its failure. */
   private def readPooled(io: Io[backend.Interface], handle: io.ops.Readable, pool: BufferPool)(using
-      Async
+      Async^
   ): Received | Throwable = {
     val into = Slot[Received]()
     val failure = attempt(io, io.ops.read(handle, pool, into))
@@ -409,7 +411,7 @@ trait IpStreamContract extends IpStreamFixture {
     */
   private def connected(io: Io[backend.Interface], listening: SocketOptions, connecting: SocketOptions)(
       body: (io.ops.Connection, io.ops.Connection) => Unit
-  )(using Async.Spawn): Unit = {
+  )(using Async.Spawn^): Unit = {
     val listener =
       opening(io)(slot => io.ops.listen(IpSocketAddress(IpAddress.IPv4Loopback, 0), listening, slot))
     try {

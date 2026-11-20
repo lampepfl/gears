@@ -1,5 +1,7 @@
 package gears.io.demos
 
+import language.experimental.captureChecking
+
 import gears.async.Async
 import gears.async.io.Io
 import gears.async.io.IpStreams
@@ -18,9 +20,9 @@ import DemoIO.{FrameReader, StreamProtocol}
   * request is out, so that the server sees where it ends.
   */
 object GearsSocket {
-  def run(sock: String)(using io: Io[UnixStreams & IpStreams], async: Async.Spawn): Unit = run(UnixAddress(sock))
+  def run(sock: String)(using io: Io[UnixStreams & IpStreams], async: Async.Spawn^): Unit = run(UnixAddress(sock))
 
-  def run(address: StreamAddress)(using io: Io[UnixStreams & IpStreams], async: Async.Spawn): Unit = {
+  def run(address: StreamAddress)(using io: Io[UnixStreams & IpStreams], async: Async.Spawn^): Unit = {
     BufferArena.scoped { arena =>
       val buf = arena.allocate(8192)
       println(s"connection in progress to: $address")

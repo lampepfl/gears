@@ -1,6 +1,8 @@
 package gears.async.io
 package testkit
 
+import language.experimental.captureChecking
+
 import gears.async.Async
 import gears.async.Future
 
@@ -21,7 +23,7 @@ trait FileContract extends FileSystemFixture {
   val backend: Backend { type Interface <: RegularFiles }
 
   /** Opens the file at `path` with the `open` op, throwing its failure. */
-  protected def openFile(io: Io[backend.Interface], path: Path, write: Boolean)(using Async): io.ops.File = {
+  protected def openFile(io: Io[backend.Interface], path: Path, write: Boolean)(using Async^): io.ops.File = {
     opening(io)(slot => io.ops.open(path.toString, write, slot))
   }
 

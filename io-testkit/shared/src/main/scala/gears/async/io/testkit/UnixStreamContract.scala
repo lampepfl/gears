@@ -1,6 +1,8 @@
 package gears.async.io
 package testkit
 
+import language.experimental.captureChecking
+
 import gears.async.Async
 import gears.async.Future
 
@@ -13,18 +15,18 @@ trait UnixStreamContract extends FileSystemFixture {
   val backend: Backend { type Interface <: UnixStreams }
 
   /** A listener on a Unix socket path, listening, from the `listen` op, whose failure is thrown. */
-  private def unixListen(io: Io[backend.Interface], address: UnixAddress)(using Async): io.ops.Listener = {
+  private def unixListen(io: Io[backend.Interface], address: UnixAddress)(using Async^): io.ops.Listener = {
     opening(io)(slot => io.ops.listen(address, slot))
   }
 
   /** A connection to a Unix socket path, from the `connect` op, whose failure is thrown. */
-  private def unixConnect(io: Io[backend.Interface], address: UnixAddress)(using Async): io.ops.Connection = {
+  private def unixConnect(io: Io[backend.Interface], address: UnixAddress)(using Async^): io.ops.Connection = {
     opening(io)(slot => io.ops.connect(address, slot))
   }
 
   /** A connection to `listener`, at `address`: its client's end and the one `listener` accepted. */
   private def unixPair(io: Io[backend.Interface], listener: io.ops.Listener, address: UnixAddress)(using
-      Async.Spawn
+      Async.Spawn^
   ): (io.ops.Connection, io.ops.Connection) = {
     val accepting = Future(opening(io)(slot => io.ops.accept(listener, slot)))
     val client = unixConnect(io, address)

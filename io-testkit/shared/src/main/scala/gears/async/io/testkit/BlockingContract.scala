@@ -1,6 +1,8 @@
 package gears.async.io
 package testkit
 
+import language.experimental.captureChecking
+
 import gears.async.AsyncOperations.sleep
 import gears.async.Future
 

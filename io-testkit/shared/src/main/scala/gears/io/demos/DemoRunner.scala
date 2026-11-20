@@ -1,5 +1,7 @@
 package gears.io.demos
 
+import language.experimental.captureChecking
+
 import gears.async.Async
 import gears.async.io.Interface
 import gears.async.io.Io
@@ -13,7 +15,7 @@ trait DemoRunner[+I <: Interface] {
   /** Runs `program` over the backend, as `Io.run` does: its `Io` has the backend's ops, whose capabilities the commands
     * check before running a demo that needs them.
     */
-  def run[T](program: Io[I] ?=> Async.Spawn ?=> T): T
+  def run[T](program: Io[I] ?=> Async.Spawn^ ?=> T): T
 }
 
 /** The backends a main application offers its demos, each by the name `--backend` chooses it with, and the one chosen

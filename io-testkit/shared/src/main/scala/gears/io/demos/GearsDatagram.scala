@@ -1,5 +1,7 @@
 package gears.io.demos
 
+import language.experimental.captureChecking
+
 import gears.async.Async
 import gears.async.Future
 import gears.async.io.Interface
@@ -25,7 +27,7 @@ object GearsDatagram {
   // Client
 
   /** Exchanges a packet with a Unix datagram server; a Unix datagram client needs its own bound path for the reply. */
-  def run(sock: String, localSock: String, message: String)(using io: Io[UnixDatagrams], async: Async): Unit = {
+  def run(sock: String, localSock: String, message: String)(using io: Io[UnixDatagrams], async: Async^): Unit = {
     require(sock != localSock, "The client and server socket paths must be different")
     BufferArena.scoped { arena =>
       val request = arena.of(message.getBytes(StandardCharsets.UTF_8))
@@ -39,7 +41,7 @@ object GearsDatagram {
   }
 
   /** Exchanges a packet with an IP datagram server; connecting the socket also assigns it an ephemeral local port. */
-  def run(address: IpSocketAddress, message: String)(using io: Io[IpDatagrams], async: Async): Unit = {
+  def run(address: IpSocketAddress, message: String)(using io: Io[IpDatagrams], async: Async^): Unit = {
     BufferArena.scoped { arena =>
       val request = arena.of(message.getBytes(StandardCharsets.UTF_8))
       val response = arena.allocate(65536)
@@ -60,7 +62,7 @@ object GearsDatagram {
       receive: io.Op,
       request: ByteBuffer,
       response: ByteBuffer
-  )(using Async): Unit = {
+  )(using Async^): Unit = {
     println(s"Connected datagram socket to $remote")
     // Scoped, so the exchange is cancelled and settled before the socket is closed.
     Async.group {
@@ -82,7 +84,7 @@ object GearsDatagram {
   // Server
 
   /** Echoes each packet on a Unix datagram socket to its sender. */
-  def serve(address: UnixAddress)(using io: Io[UnixDatagrams], async: Async): Unit =
+  def serve(address: UnixAddress)(using io: Io[UnixDatagrams], async: Async^): Unit =
     BufferArena.scoped { arena =>
       val packet = arena.allocate(65536)
       val socket = SimpleIO.bindDatagram(address)
@@ -93,7 +95,7 @@ object GearsDatagram {
     }
 
   /** Echoes each packet on an IP datagram socket to its sender. */
-  def serve(address: IpSocketAddress)(using io: Io[IpDatagrams], async: Async): Unit =
+  def serve(address: IpSocketAddress)(using io: Io[IpDatagrams], async: Async^): Unit =
     BufferArena.scoped { arena =>
       val packet = arena.allocate(65536)
       val socket = SimpleIO.bindDatagram(address)
@@ -106,7 +108,7 @@ object GearsDatagram {
   /** Receives packets with `receive`, one repeatable op, and echoes each, keeping it until the whole echo has gone,
     * with a new op per sender from `reply`.
     */
-  private def echo(io: Io[Interface], receive: io.Op, packet: ByteBuffer, reply: () => io.Op)(using Async): Unit = {
+  private def echo(io: Io[Interface], receive: io.Op, packet: ByteBuffer, reply: () => io.Op)(using Async^): Unit = {
     println("Datagram socket is now waiting for messages.")
     while true do {
       io.perform(receive)

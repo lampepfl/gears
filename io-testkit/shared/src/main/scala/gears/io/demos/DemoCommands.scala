@@ -1,5 +1,7 @@
 package gears.io.demos
 
+import language.experimental.captureChecking
+
 import gears.async.Async
 import gears.async.io.Backend
 import gears.async.io.Blocking
@@ -203,7 +205,7 @@ class DemoCommands(backends: DemoBackends) {
   /** Converts command-line host text at the boundary; socket operations take address values. */
   private def ipAddress(host: String, port: Int, protocol: Protocol)(using
       io: Io[Resolving],
-      async: Async
+      async: Async^
   ): IpSocketAddress = {
     val address = SimpleIO.resolve(host).find(_.protocol == protocol).getOrElse {
       throw new java.io.IOException(s"No $protocol address for $host")
