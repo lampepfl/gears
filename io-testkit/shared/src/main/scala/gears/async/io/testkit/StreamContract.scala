@@ -679,7 +679,10 @@ trait StreamContract extends StreamFixture {
       val read = io.ops.read(in, allocate(8))
       var refused = 0
       while !ran.get() && refused < 1_000_000 do {
-        assert(attempt(io, read).isInstanceOf[ClosedChannelException])
+        // Not performed inside `assert`: munit evaluates the condition holding a monitor, which before JDK 24 pins a
+        // virtual thread to its carrier, and a pinned thread can't give its worker up.
+        val refusal = attempt(io, read)
+        assert(refusal.isInstanceOf[ClosedChannelException], s"a read of a closed stream: $refusal")
         refused += 1
       }
       assert(ran.get(), s"$refused reads were refused, and the future beside them never ran")
