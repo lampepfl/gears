@@ -1,6 +1,8 @@
 package gears.async.io
 package reference
 
+import language.experimental.captureChecking
+
 import gears.async.io.testkit.*
 import gears.io.testkit.SimpleIOChecks
 import gears.io.testkit.SimpleIOIpStreamChecks

@@ -1,5 +1,7 @@
 package gears.async.io.reference
 
+import language.experimental.captureChecking
+
 import gears.async.Async
 import gears.async.io.Received
 import gears.async.io.Repeatable
@@ -16,7 +18,7 @@ class ContractHelperSuite extends ContractSuite {
 
   private def shortRead(buf: ByteBuffer, input: Array[Byte]): RefOp = new RefOp with Repeatable {
     private var offset = 0
-    protected def body(ctx: Ctx)(using Async): Unit =
+    protected def body(ctx: Ctx)(using Async^): Unit =
       if offset < input.length then {
         buf.put(input(offset))
         offset += 1
@@ -54,7 +56,7 @@ class ContractHelperSuite extends ContractSuite {
       var released = 0
       val read = new RefOp with Repeatable {
         override protected def slots = List(into)
-        protected def body(ctx: Ctx)(using Async): Unit = {
+        protected def body(ctx: Ctx)(using Async^): Unit = {
           val next = ByteBuffer.wrap(Array(input(offset)))
           offset += 1
           into.set(new Received {
