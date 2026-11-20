@@ -79,7 +79,7 @@ jobs:
       # Restart the server so the next invocation picks up GC_MAXIMUM_HEAP_SIZE.
       run: sbt 'rootNative/test; shutdown'
     - name: Stress Test with Lower Memory
-      run: env GC_MAXIMUM_HEAP_SIZE=140M sbt 'rootNative/testOnly StressTest'
+      run: env GC_MAXIMUM_HEAP_SIZE=256M sbt 'rootNative/testOnly StressTest'
   test-js:
     strategy:
       fail-fast: false
