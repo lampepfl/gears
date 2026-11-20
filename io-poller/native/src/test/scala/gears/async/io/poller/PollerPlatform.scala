@@ -18,7 +18,9 @@ object PollerPlatform {
   val backend: EventPollingBackend.type = EventPollingBackend
 
   /** Every backend of this platform's, for a check made of each. */
-  val all: List[(String, Backend { type Interface = EventPollingOps.type })] = List(s"over $name" -> EventPollingBackend)
+  val all: List[(String, Backend { type Interface = EventPollingOps.type })] = List(
+    s"over $name" -> EventPollingBackend
+  )
 
   def runOn[T](workers: Int, onStarvation: Starvation.Handler)(
       program: Io[EventPollingOps.type] ?=> Async.Spawn ?=> T

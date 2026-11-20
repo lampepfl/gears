@@ -3,10 +3,10 @@ package gears.async.io.nio
 import gears.async.Async
 import gears.async.Cancellable
 import gears.async.io.Backend
-import gears.async.io.shareable.HandleOwner
-import gears.async.io.shareable.Starvation
 import gears.async.io.shareable.BackendOp
+import gears.async.io.shareable.HandleOwner
 import gears.async.io.shareable.PoolOpWorker
+import gears.async.io.shareable.Starvation
 import gears.async.io.shareable.WorkpoolScheduler
 
 import java.util.concurrent.ThreadFactory

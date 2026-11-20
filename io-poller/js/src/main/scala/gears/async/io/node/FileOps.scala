@@ -11,7 +11,6 @@ import gears.async.io.node.host.NodeErr
 import gears.async.io.node.host.NodeStream
 import gears.async.io.node.internal.Fs
 import gears.async.io.node.internal.Net
-
 import gears.async.io.shareable.HandleOwner
 
 import java.io.IOException

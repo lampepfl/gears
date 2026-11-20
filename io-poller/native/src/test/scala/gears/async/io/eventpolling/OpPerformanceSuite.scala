@@ -1,12 +1,12 @@
 package gears.async.io
 package eventpolling
 
-import gears.async.io.poller.*
 import gears.async.Async
 import gears.async.AsyncSupport
 import gears.async.CompletionGroup
 import gears.async.Future
 import gears.async.Future.Promise
+import gears.async.io.poller.*
 import gears.async.io.shareable.AbstractMakeTimerOp
 import gears.async.io.shareable.HandleOwner
 import gears.async.io.shareable.MonitorPoller

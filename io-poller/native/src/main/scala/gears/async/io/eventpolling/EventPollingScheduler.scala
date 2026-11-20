@@ -1,10 +1,10 @@
 package gears.async.io.eventpolling
 
 import gears.async.Async
-import gears.async.io.shareable.HandleOwner
-import gears.async.io.shareable.Starvation
 import gears.async.io.shareable.BackendOp
+import gears.async.io.shareable.HandleOwner
 import gears.async.io.shareable.PoolOpWorker
+import gears.async.io.shareable.Starvation
 import gears.async.io.shareable.WorkpoolScheduler
 import gears.async.native.NativeSuspend
 
@@ -24,8 +24,10 @@ abstract class EventPollingScheduler(workers: Int, onStarvation: Starvation.Hand
         EventPoller {
     type Op = EventPollingOp
 
-    /** On the worker's own thread, with the worker handed over, if it has nothing else to run (see `performInPlace`). */
-    protected[io] def performBlocking(work: BackendOp.OffThread[EventPoller])(using Async): Unit = work.performInPlace(this)
+    /** On the worker's own thread, with the worker handed over, if it has nothing else to run (see `performInPlace`).
+      */
+    protected[io] def performBlocking(work: BackendOp.OffThread[EventPoller])(using Async): Unit =
+      work.performInPlace(this)
   }
 }
 

@@ -9,8 +9,9 @@ import gears.async.io.eventpolling.EventPollingBackend
 import scala.scalanative.runtime.Continuations
 
 /** What a suspension costs on Scala Native, layer by layer, on one thread: the runtime's own continuations at several
-  * depths of stack, then a future's `await` on a source another future completes, then an op that waits (a timer of
-  * no time), and ops that are done as they are tried (`enter`). Run by `BenchMain` given `suspend` as its first argument; `--rounds` is how many of each.
+  * depths of stack, then a future's `await` on a source another future completes, then an op that waits (a timer of no
+  * time), and ops that are done as they are tried (`enter`). Run by `BenchMain` given `suspend` as its first argument;
+  * `--rounds` is how many of each.
   */
 object SuspendBench {
 

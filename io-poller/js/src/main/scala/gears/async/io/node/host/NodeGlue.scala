@@ -5,8 +5,8 @@ import scala.scalajs.js.annotation.JSImport
 import scala.scalajs.js.typedarray.ArrayBuffer
 import scala.scalajs.js.typedarray.Uint8Array
 
-/** The source of `NodeGlue`, as the module's address, a `data:` URL: there is no file to keep beside whatever links
-  * the backend. An address ends at a `?` or a `#`, and a `%` escapes: the source has none of them.
+/** The source of `NodeGlue`, as the module's address, a `data:` URL: there is no file to keep beside whatever links the
+  * backend. An address ends at a `?` or a `#`, and a `%` escapes: the source has none of them.
   */
 private[node] object NodeGlueModule {
   final val Address =
@@ -82,8 +82,10 @@ private[node] object NodeGlue extends js.Object {
   /** Copies `count` bytes of `memory`, from `offset`, into `chunk` at `at`. */
   def copyOut(memory: ArrayBuffer, offset: Int, count: Int, chunk: Uint8Array, at: Int): Unit = js.native
 
-  /** Writes the first `count` bytes, at most 32, of the eight words into `chunk` at `at`: a word's lowest byte first. */
-  def pour(chunk: Uint8Array, at: Int, count: Int, a: Int, b: Int, c: Int, d: Int, e: Int, f: Int, g: Int, h: Int): Unit =
+  /** Writes the first `count` bytes, at most 32, of the eight words into `chunk` at `at`: a word's lowest byte first.
+    */
+  def pour(chunk: Uint8Array, at: Int, count: Int, a: Int, b: Int, c: Int, d: Int, e: Int, f: Int, g: Int, h: Int)
+      : Unit =
     js.native
 
   /** Hands `count` bytes of `chunk`, from `from`, to `into`, 32 at a call as eight words, a word's lowest byte first;

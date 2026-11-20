@@ -28,10 +28,7 @@ object Deadlines {
   * heap empties, and at no other time: a time limit that comes and goes with its op, as most do, costs the loop
   * nothing.
   */
-object NodeSource
-    extends shareable.BinaryTimerHeap,
-      shareable.EventSource,
-      shareable.OpPerformer[NodeSource.type] {
+object NodeSource extends shareable.BinaryTimerHeap, shareable.EventSource, shareable.OpPerformer[NodeSource.type] {
   type Timer = TimerOp
   type Handle = WaitableHandle
 
@@ -55,7 +52,7 @@ object NodeSource
     timed match {
       case timer: shareable.AbstractMakeTimerOp if timer.isDue                                      => ()
       case deadline: shareable.AbstractMakeDeadlineOp if deadline.deadline - System.nanoTime() <= 0 => ()
-      case _                                                                                        => super.performTimed(timed)
+      case _ => super.performTimed(timed)
     }
 
   /** Set by the event loop as it starts. */

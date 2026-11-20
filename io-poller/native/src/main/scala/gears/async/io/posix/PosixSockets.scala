@@ -269,14 +269,14 @@ object PosixSockets {
     } else throw new IOException(s"Unsupported address family $family")
   }
 
-  /** Receive one packet, and its sender if `sender` is given, with `senderLength` set to its capacity before each
-    * call; both are null for a caller that does not want it. Returns -1 if a non-blocking socket has no packet ready;
-    * zero is a valid empty datagram, not EOF. A packet larger than capacity fills it, the rest being dropped, as the
-    * JDK and Network.framework drop it, and the count returned is the bytes that fitted: the packet is consumed either
-    * way, so failing would only lose what fitted.
+  /** Receive one packet, and its sender if `sender` is given, with `senderLength` set to its capacity before each call;
+    * both are null for a caller that does not want it. Returns -1 if a non-blocking socket has no packet ready; zero is
+    * a valid empty datagram, not EOF. A packet larger than capacity fills it, the rest being dropped, as the JDK and
+    * Network.framework drop it, and the count returned is the bytes that fitted: the packet is consumed either way, so
+    * failing would only lose what fitted.
     *
-    * With `recvfrom`, whose arguments are the call's own: a `recvmsg` needs a message header and a vector built for
-    * it, each try, which is most of what a try that finds nothing costs here.
+    * With `recvfrom`, whose arguments are the call's own: a `recvmsg` needs a message header and a vector built for it,
+    * each try, which is most of what a try that finds nothing costs here.
     */
   def receiveDatagram(
       fd: Int,

@@ -9,11 +9,11 @@ import java.io.IOException
   * kqueue on macOS and FreeBSD (`KqueuePoller`) and epoll on Linux (`EpollPoller`). It is what this backend's handles
   * are listened for by and what its ops wait on, whichever of the two the program was linked for.
   *
-  * What the two have in common is here: which handle each descriptor is, and which of reading and writing it is
-  * watched for; how the worker waits, looking before it sleeps; what a wake-up does; and what becomes of a queue that
-  * fails. A poller says how its queue is told to watch a descriptor (`watch`), looked at and waited on (`lookNow`,
-  * `lookBeforeWaiting`, `waitFor`), what each event it gave says (`report`), and how it is woken and closed
-  * (`trigger`, `closeQueue`).
+  * What the two have in common is here: which handle each descriptor is, and which of reading and writing it is watched
+  * for; how the worker waits, looking before it sleeps; what a wake-up does; and what becomes of a queue that fails. A
+  * poller says how its queue is told to watch a descriptor (`watch`), looked at and waited on (`lookNow`,
+  * `lookBeforeWaiting`, `waitFor`), what each event it gave says (`report`), and how it is woken and closed (`trigger`,
+  * `closeQueue`).
   */
 trait EventPoller extends PoolSource {
 

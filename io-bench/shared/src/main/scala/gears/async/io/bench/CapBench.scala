@@ -351,8 +351,8 @@ object CapBench {
     private val Nothing = Resp.bytes("$-1\r\n")
     private val Unknown = Resp.bytes("-ERR unknown command\r\n")
 
-    /** Answers the command that begins at `from` in `request`, an array of bulk strings, into `response` at `at`:
-      * where the answer ends.
+    /** Answers the command that begins at `from` in `request`, an array of bulk strings, into `response` at `at`: where
+      * the answer ends.
       */
     def handle(request: Array[Byte], from: Int, response: Array[Byte], at: Int): Int = {
       // *<n>\r\n $<l>\r\n <name>\r\n $<l>\r\n <key>\r\n [ $<l>\r\n <value>\r\n ]
@@ -410,7 +410,11 @@ object CapBench {
       while item < 8 do {
         if item > 0 then text.append(',')
         text.append("{\"sku\":\"SKU-").append(100000 + (id * 131 + i * 17 + item * 7919) % 900000)
-        text.append("\",\"qty\":").append(1 + (i + item) % 5).append(",\"price\":").append(199 + (i * 37 + item * 101) % 9800)
+        text
+          .append("\",\"qty\":")
+          .append(1 + (i + item) % 5)
+          .append(",\"price\":")
+          .append(199 + (i * 37 + item * 101) % 9800)
         text.append('}')
         item += 1
       }
@@ -542,8 +546,8 @@ object CapBench {
     sockets.cleanup()
   }
 
-  /** The cache as `tcp-realistic-gather` keeps it: a value is a buffer of its own, and an answer is buffers, a line
-    * for its length, the value's own buffer, and a line's end, for a gathering write to send with no copy of the value.
+  /** The cache as `tcp-realistic-gather` keeps it: a value is a buffer of its own, and an answer is buffers, a line for
+    * its length, the value's own buffer, and a line's end, for a gathering write to send with no copy of the value.
     */
   private final class GatheringCache {
     private val values = new java.util.HashMap[String, ByteBuffer]()
@@ -634,8 +638,8 @@ object CapBench {
 
   private val NoBytes: ByteBuffer = ByteBuffer.allocate(0)
 
-  /** Serves a connection of `tcp-realistic-gather`: every request a read brought is answered in one gathering write,
-    * of buffers that are the cache's own.
+  /** Serves a connection of `tcp-realistic-gather`: every request a read brought is answered in one gathering write, of
+    * buffers that are the cache's own.
     */
   private def serveGathering(io: Io[ByteStreams], rounds: Int)(in: io.ops.Readable, out: io.ops.Writable)(using
       Async
@@ -1146,11 +1150,11 @@ object CapBench {
           println(s"options $name: nodelay ${io.ops.option(c, SocketOption.NoDelay)} snd ${io.ops
               .option(c, SocketOption.SendBuffer)} rcv ${io.ops.option(c, SocketOption.ReceiveBuffer)}")
         closeAll(io, Seq(client, server, listener))
-      case "tcp-pingpong"    => socketEcho(tcp(io), 1, count(100_000), "tcp-pingpong")
-      case "tcp-concurrent"  => socketEcho(tcp(io), many, count(5_000), "tcp-concurrent")
-      case "tcp-stream"      => socketStream(tcp(io), count(20_000), "tcp-stream")
-      case "tcp-connect"     => socketConnect(tcp(io), count(1_000), "tcp-connect")
-      case "tcp-realistic"   => realistic(tcp(io), many, count(2_000), "tcp-realistic")
+      case "tcp-pingpong"       => socketEcho(tcp(io), 1, count(100_000), "tcp-pingpong")
+      case "tcp-concurrent"     => socketEcho(tcp(io), many, count(5_000), "tcp-concurrent")
+      case "tcp-stream"         => socketStream(tcp(io), count(20_000), "tcp-stream")
+      case "tcp-connect"        => socketConnect(tcp(io), count(1_000), "tcp-connect")
+      case "tcp-realistic"      => realistic(tcp(io), many, count(2_000), "tcp-realistic")
       case "tcp-realistic-bulk" =>
         realisticBulk(tcp(io), many, count(2_000), "tcp-realistic-bulk", gathering = false)
       case "tcp-realistic-gather" =>

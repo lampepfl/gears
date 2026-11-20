@@ -234,8 +234,8 @@ abstract class BinaryTimerHeap extends TimerHeap {
   }
 }
 
-/** The heap of a worker, which is woken where it waits on its poller for a new earliest deadline: otherwise it wakes
-  * in time as it is.
+/** The heap of a worker, which is woken where it waits on its poller for a new earliest deadline: otherwise it wakes in
+  * time as it is.
   */
 abstract class TimerHeapImpl extends BinaryTimerHeap with Poller {
   protected final def earliestChanged(): Unit = wake()

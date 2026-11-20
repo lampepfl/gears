@@ -1,6 +1,5 @@
 import java.nio.file.{Files, Path}
 import java.util.regex.Pattern
-
 import scala.collection.mutable.ArrayBuffer
 import scala.scalanative.sbtplugin.ScalaNativePlugin
 
@@ -38,8 +37,10 @@ object NirAuxiliaryClassFiles extends AuxiliaryClassFiles {
           while (iterator.hasNext) {
             val path = iterator.next()
             val other = path.getFileName.toString
-            if (other.startsWith(name) &&
-                GeneratedSuffixPattern.matcher(other.substring(name.length)).matches())
+            if (
+              other.startsWith(name) &&
+              GeneratedSuffixPattern.matcher(other.substring(name.length)).matches()
+            )
               associated += path
           }
           associated.toArray

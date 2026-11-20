@@ -7,10 +7,9 @@ import scala.scalanative.meta.LinktimeInfo
 
 /** The native backend, over the system's own event queue: kqueue on macOS and FreeBSD, epoll on Linux.
   *
-  * A program runs on a pool of workers (`EventPollingScheduler`), each with its own inbox, heap of timers and event poller
-  * (`EventPoller`), the one for the system the program is linked for (see `scheduler`). An op
-  * is performed on the worker of the thread performing it, whose heap holds its time limit. What it then does is its
-  * kind's:
+  * A program runs on a pool of workers (`EventPollingScheduler`), each with its own inbox, heap of timers and event
+  * poller (`EventPoller`), the one for the system the program is linked for (see `scheduler`). An op is performed on
+  * the worker of the thread performing it, whose heap holds its time limit. What it then does is its kind's:
   *
   *   - a read, a write, an accept, a connect or a datagram's send or receive is tried at once, and if its handle is not
   *     ready waits for the poller of the worker that listens for that handle, which does the op's work and resumes the

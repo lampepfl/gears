@@ -14,10 +14,11 @@ import scala.scalajs.js.typedarray.Uint8Array
   * to a program that does not read is held back as the system would hold it; the read that takes the last of what is
   * kept has Node resume. What is kept is the chunks Node had handed over by the time it paused: one, as a rule.
   *
-  * It is written one chunk at a time, of at most `ChunkSize` bytes, the next not taken until Node has handed the last to
-  * the system (its `writableLength` says what it holds): Node itself takes whatever it is given, without bound, and a
-  * write it has taken cannot be taken back, so a write here would block before Node has anything of it, and one that
-  * waited and was then cancelled has written nothing. What Node holds, then, is one chunk at most, as a socket's send buffer a little larger.
+  * It is written one chunk at a time, of at most `ChunkSize` bytes, the next not taken until Node has handed the last
+  * to the system (its `writableLength` says what it holds): Node itself takes whatever it is given, without bound, and
+  * a write it has taken cannot be taken back, so a write here would block before Node has anything of it, and one that
+  * waited and was then cancelled has written nothing. What Node holds, then, is one chunk at most, as a socket's send
+  * buffer a little larger.
   *
   * Its listeners are Node's for the life of the stream, its functions made once: an op that waits adds none.
   */

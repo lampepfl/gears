@@ -9,9 +9,9 @@ import scala.scalanative.meta.LinktimeInfo
 
 /** The gears demos over the native backend: the testkit's demo command line (`DemoCommands`), run as
   * `sbt "ioPollerDemosNative/run <command>"`. The backend is over the event queue of the system the program is linked
-  * for. `eventpolling`, the default, is whichever that is; it is also offered by the queue's own name, `epoll` on
-  * Linux and `kqueue` on macOS and FreeBSD, and the other's name is not a backend of the program. It has every
-  * capability the demos ask for.
+  * for. `eventpolling`, the default, is whichever that is; it is also offered by the queue's own name, `epoll` on Linux
+  * and `kqueue` on macOS and FreeBSD, and the other's name is not a backend of the program. It has every capability the
+  * demos ask for.
   */
 object EventPollingDemos {
   private object Runner extends DemoRunner[EventPollingBackend.Interface] {

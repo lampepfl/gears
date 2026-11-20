@@ -10,6 +10,8 @@ class EventPollerTypingSuite extends munit.FunSuite {
         "def listen(poller: gears.async.io.eventpolling.EventPoller, file: gears.async.io.eventpolling.EventPollingFile): Unit = poller.startListening(file, true)"
       ).nonEmpty
     )
-    assert(compileErrors("def waits(file: gears.async.io.eventpolling.EventPollingFile) = file.readiness(true)").nonEmpty)
+    assert(
+      compileErrors("def waits(file: gears.async.io.eventpolling.EventPollingFile) = file.readiness(true)").nonEmpty
+    )
   }
 }

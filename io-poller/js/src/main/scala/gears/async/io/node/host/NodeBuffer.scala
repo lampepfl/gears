@@ -198,7 +198,8 @@ private[node] object NodeBuffer {
       val buf = bufs(i)
       val count = math.min(buf.remaining(), n - at)
       if count > 0 then {
-        if buf.hasArrayBuffer() then NodeGlue.copyOut(buf.arrayBuffer(), buf.arrayBufferOffset() + buf.position(), count, chunk, at)
+        if buf.hasArrayBuffer() then
+          NodeGlue.copyOut(buf.arrayBuffer(), buf.arrayBufferOffset() + buf.position(), count, chunk, at)
         else get(buf.duplicate(), chunk, at, count)
         at += count
       }

@@ -12,7 +12,8 @@ import java.nio.ByteBuffer
 class NodeBufferSuite extends munit.FunSuite {
   private val lengths = (0 to 70).toList ++ List(95, 96, 97, 127, 128, 129, 1000, 4096, 65536, 65537)
 
-  private def pattern(length: Int, seed: Int): Array[Byte] = Array.tabulate(length)(i => (i * 131 + seed * 17 + 5).toByte)
+  private def pattern(length: Int, seed: Int): Array[Byte] =
+    Array.tabulate(length)(i => (i * 131 + seed * 17 + 5).toByte)
 
   private def kinds(bytes: Array[Byte]): List[(String, ByteBuffer)] = {
     val direct = ByteBuffer.allocateDirect(bytes.length)

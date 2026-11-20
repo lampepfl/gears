@@ -6,7 +6,6 @@ import gears.io.testkit.SimpleIOChecks
 import gears.io.testkit.SimpleIOIpStreamChecks
 import gears.io.testkit.SimpleIOResolveChecks
 
-
 // The contracts over the backend on the JDK's own virtual threads. Over the pool, whose workers carry them, they are
 // checked from the shared tests (`gears.async.io.poller.PoolSuites`).
 

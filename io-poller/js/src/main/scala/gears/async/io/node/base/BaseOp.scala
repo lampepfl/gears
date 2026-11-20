@@ -19,9 +19,9 @@ trait BaseOp extends shareable.BackendOp[NodeSource.type] {
   def suspendedPerformer: Boolean
 }
 
-/** What is Node's own among ops: one whose work is a call of the event loop's that calls back, where on a platform
-  * with threads it would be done on another thread (`WorkOffThread`). The op is settled from the callback, with the
-  * shared layer's claim for work done elsewhere.
+/** What is Node's own among ops: one whose work is a call of the event loop's that calls back, where on a platform with
+  * threads it would be done on another thread (`WorkOffThread`). The op is settled from the callback, with the shared
+  * layer's claim for work done elsewhere.
   *
   * Until the callback, the op either only waits, and a cancel or its time limit settles it at once, or it has been
   * claimed for the call (`claimForCall`), which Node cannot take back: what comes for it meanwhile is kept, for the

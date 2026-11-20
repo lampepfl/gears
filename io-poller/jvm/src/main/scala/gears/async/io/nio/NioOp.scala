@@ -32,10 +32,10 @@ import gears.async.io.shareable.AbstractResolveOp
 import gears.async.io.shareable.AbstractScatterReadOp
 import gears.async.io.shareable.AbstractSendOp
 import gears.async.io.shareable.AbstractWriteOp
+import gears.async.io.shareable.BackendOp
 import gears.async.io.shareable.HandleOwner
 import gears.async.io.shareable.LendingPool
 import gears.async.io.shareable.Moved
-import gears.async.io.shareable.BackendOp
 import gears.async.io.shareable.Worker
 
 import java.nio.ByteBuffer

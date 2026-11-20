@@ -106,14 +106,15 @@ sealed trait EventPollingSocketOptions extends SocketOptionOps { self: EventPoll
   }
 
   /** Runs `body` on `handle`, an open socket that `option` applies to; else an `IllegalArgumentException`. */
-  private def onSocket[A](handle: EventPollingHandle, option: SocketOption[?])(body: EventPollingSocket => A): A = handle match
-    case socket: EventPollingSocket =>
-      socket.claimWork()
-      try
-        if !SocketOption.onSocket(option, socket.kind) then throw Checks.notFor(option, socket.kind)
-        body(socket)
-      finally socket.releaseWork()
-    case _ => throw new IllegalArgumentException(s"$option applies to sockets, not $handle")
+  private def onSocket[A](handle: EventPollingHandle, option: SocketOption[?])(body: EventPollingSocket => A): A =
+    handle match
+      case socket: EventPollingSocket =>
+        socket.claimWork()
+        try
+          if !SocketOption.onSocket(option, socket.kind) then throw Checks.notFor(option, socket.kind)
+          body(socket)
+        finally socket.releaseWork()
+      case _ => throw new IllegalArgumentException(s"$option applies to sockets, not $handle")
 }
 
 sealed trait EventPollingStreamSockets extends StreamSockets {
@@ -121,7 +122,8 @@ sealed trait EventPollingStreamSockets extends StreamSockets {
   override type Connection = EventPollingConnection
   override type Listener = EventPollingListener
 
-  override def accept(handle: EventPollingListener, into: Slot[EventPollingConnection]): EventPollingAcceptOp & Repeatable =
+  override def accept(handle: EventPollingListener, into: Slot[EventPollingConnection]): EventPollingAcceptOp &
+    Repeatable =
     EventPollingAccept(handle, into)
 
   override def acceptAll(
@@ -140,34 +142,53 @@ sealed trait EventPollingStreamSockets extends StreamSockets {
 }
 
 sealed trait EventPollingIpStreams extends IpStreams {
-  self: EventPollingInterface & EventPollingHandles & EventPollingByteStreams & EventPollingStreamSockets & EventPollingSocketOptions =>
+  self: EventPollingInterface & EventPollingHandles & EventPollingByteStreams & EventPollingStreamSockets &
+    EventPollingSocketOptions =>
 
-  override def connect(address: IpSocketAddress, options: SocketOptions, into: Slot[EventPollingConnection]): EventPollingOp = {
+  override def connect(
+      address: IpSocketAddress,
+      options: SocketOptions,
+      into: Slot[EventPollingConnection]
+  ): EventPollingOp = {
     Checks.checkOptions(options, supports, SocketOption.Kind.Connection)
     EventPollingConnect(address, options, into)
   }
 
-  override def listen(address: IpSocketAddress, options: SocketOptions, into: Slot[EventPollingListener]): EventPollingOp = {
+  override def listen(
+      address: IpSocketAddress,
+      options: SocketOptions,
+      into: Slot[EventPollingListener]
+  ): EventPollingOp = {
     Checks.checkOptions(options, supports, SocketOption.Kind.Listener)
     EventPollingListen(address, options, into)
   }
 }
 
 sealed trait EventPollingUnixStreams extends UnixStreams {
-  self: EventPollingInterface & EventPollingHandles & EventPollingByteStreams & EventPollingStreamSockets & EventPollingSocketOptions =>
+  self: EventPollingInterface & EventPollingHandles & EventPollingByteStreams & EventPollingStreamSockets &
+    EventPollingSocketOptions =>
 
-  override def connect(address: UnixAddress, options: SocketOptions, into: Slot[EventPollingConnection]): EventPollingOp = {
+  override def connect(
+      address: UnixAddress,
+      options: SocketOptions,
+      into: Slot[EventPollingConnection]
+  ): EventPollingOp = {
     Checks.checkOptions(options, supports, SocketOption.Kind.UnixConnection)
     EventPollingConnect(Checks.unix(address), options, into)
   }
 
-  override def listen(address: UnixAddress, options: SocketOptions, into: Slot[EventPollingListener]): EventPollingOp = {
+  override def listen(
+      address: UnixAddress,
+      options: SocketOptions,
+      into: Slot[EventPollingListener]
+  ): EventPollingOp = {
     Checks.checkOptions(options, supports, SocketOption.Kind.UnixListener)
     EventPollingListen(Checks.unix(address), options, into)
   }
 }
 
-sealed trait EventPollingIpDatagrams extends IpDatagrams { self: EventPollingInterface & EventPollingHandles & EventPollingSocketOptions =>
+sealed trait EventPollingIpDatagrams extends IpDatagrams {
+  self: EventPollingInterface & EventPollingHandles & EventPollingSocketOptions =>
   override type BoundDatagram = EventPollingBoundDatagram
   override type ConnectedDatagram = EventPollingConnectedDatagram
 
@@ -206,7 +227,8 @@ sealed trait EventPollingIpDatagrams extends IpDatagrams { self: EventPollingInt
   override def receive(handle: EventPollingConnectedDatagram, buf: ByteBuffer): EventPollingDatagramOp & Repeatable =
     EventPollingReceive[IpSocketAddress](handle, buf, null)
 
-  override def send(handle: EventPollingBoundDatagram, buf: ByteBuffer, to: IpSocketAddress): EventPollingDatagramOp & Repeatable =
+  override def send(handle: EventPollingBoundDatagram, buf: ByteBuffer, to: IpSocketAddress): EventPollingDatagramOp &
+    Repeatable =
     EventPollingSend(handle, Array(buf), to)
 
   override def send(handle: EventPollingConnectedDatagram, buf: ByteBuffer): EventPollingDatagramOp & Repeatable =
@@ -218,7 +240,8 @@ sealed trait EventPollingIpDatagrams extends IpDatagrams { self: EventPollingInt
       to: IpSocketAddress
   ): EventPollingDatagramOp & Repeatable = EventPollingSend(handle, bufs, to)
 
-  override def send(handle: EventPollingConnectedDatagram, bufs: Array[ByteBuffer]): EventPollingDatagramOp & Repeatable =
+  override def send(handle: EventPollingConnectedDatagram, bufs: Array[ByteBuffer]): EventPollingDatagramOp &
+    Repeatable =
     EventPollingSend(handle, bufs, null)
 
   @annotation.targetName("datagramLocalAddress")
@@ -269,10 +292,12 @@ sealed trait EventPollingUnixDatagrams extends UnixDatagrams {
   ): EventPollingDatagramOp & Repeatable = EventPollingReceive(handle, buf, from)
 
   @annotation.targetName("receiveUnixConnected")
-  override def receive(handle: EventPollingUnixConnectedDatagram, buf: ByteBuffer): EventPollingDatagramOp & Repeatable =
+  override def receive(handle: EventPollingUnixConnectedDatagram, buf: ByteBuffer): EventPollingDatagramOp &
+    Repeatable =
     EventPollingReceive[UnixAddress](handle, buf, null)
 
-  override def send(handle: EventPollingUnixBoundDatagram, buf: ByteBuffer, to: UnixAddress): EventPollingDatagramOp & Repeatable =
+  override def send(handle: EventPollingUnixBoundDatagram, buf: ByteBuffer, to: UnixAddress): EventPollingDatagramOp &
+    Repeatable =
     EventPollingSend(handle, Array(buf), Checks.unix(to))
 
   @annotation.targetName("sendUnixConnected")
@@ -286,7 +311,8 @@ sealed trait EventPollingUnixDatagrams extends UnixDatagrams {
   ): EventPollingDatagramOp & Repeatable = EventPollingSend(handle, bufs, Checks.unix(to))
 
   @annotation.targetName("sendUnixConnectedMany")
-  override def send(handle: EventPollingUnixConnectedDatagram, bufs: Array[ByteBuffer]): EventPollingDatagramOp & Repeatable =
+  override def send(handle: EventPollingUnixConnectedDatagram, bufs: Array[ByteBuffer]): EventPollingDatagramOp &
+    Repeatable =
     EventPollingSend(handle, bufs, null)
 
   @annotation.targetName("unixDatagramLocalAddress")
@@ -300,14 +326,16 @@ sealed trait EventPollingUnixDatagrams extends UnixDatagrams {
 
 sealed trait EventPollingBlockingOps extends Blocking { self: EventPollingInterface =>
   override def blocking(body: () => Unit): EventPollingOp = EventPollingBlocking(body)
-  override def blocking[A <: AnyRef](body: () => A, into: Slot[A]): EventPollingOp = EventPollingBlockingValue(body, into)
+  override def blocking[A <: AnyRef](body: () => A, into: Slot[A]): EventPollingOp =
+    EventPollingBlockingValue(body, into)
 }
 
 sealed trait EventPollingRegularFiles extends RegularFiles {
   self: EventPollingInterface & EventPollingHandles & EventPollingByteStreams =>
   override type File = EventPollingFile
 
-  override def open(path: String, write: Boolean, into: Slot[EventPollingFile]): EventPollingOp = EventPollingOpenFile(path, write, into)
+  override def open(path: String, write: Boolean, into: Slot[EventPollingFile]): EventPollingOp =
+    EventPollingOpenFile(path, write, into)
 
   override def read(handle: EventPollingFile, buf: ByteBuffer, offset: Long): EventPollingOp & Repeatable = {
     Checks.checkOffset(offset)
@@ -326,7 +354,8 @@ sealed trait EventPollingResolving extends Resolving { self: EventPollingInterfa
   override def resolve(host: String, into: Slot[List[IpAddress]]): EventPollingOp = EventPollingResolve(host, into)
 }
 
-sealed trait EventPollingFifos extends Fifos { self: EventPollingInterface & EventPollingHandles & EventPollingByteStreams =>
+sealed trait EventPollingFifos extends Fifos {
+  self: EventPollingInterface & EventPollingHandles & EventPollingByteStreams =>
   override def openFifoForReading(path: String, into: Slot[EventPollingReadable]): EventPollingOp =
     EventPollingOpenFifo[EventPollingReadable](path, write = false, into)(new FifoRead(_, _))
 

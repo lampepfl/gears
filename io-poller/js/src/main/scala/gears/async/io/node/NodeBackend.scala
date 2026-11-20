@@ -9,11 +9,12 @@ import scala.scalajs.js
 /** The Node.js backend: the interface on Node's own I/O, for a Scala.js program linked to WebAssembly and run by
   * Node.js, which suspends with JSPI.
   *
-  * A program runs on Node's one thread, its event loop, as gears' futures do on Scala.js (`NodeLoop`), each run with handles of its own (`NodeRun`). An op is
-  * performed by the future performing it: its work is tried at once, which most often does it, and if Node has not what
-  * completes it the op waits, as its handle's waiter, on the heap of timers, or for a call of Node's to call back,
-  * while the future is suspended. Nothing blocks, so that every future, timer and socket goes on while one waits; and
-  * since there is one thread, what a program does between two suspensions no other future sees half done.
+  * A program runs on Node's one thread, its event loop, as gears' futures do on Scala.js (`NodeLoop`), each run with
+  * handles of its own (`NodeRun`). An op is performed by the future performing it: its work is tried at once, which
+  * most often does it, and if Node has not what completes it the op waits, as its handle's waiter, on the heap of
+  * timers, or for a call of Node's to call back, while the future is suspended. Nothing blocks, so that every future,
+  * timer and socket goes on while one waits; and since there is one thread, what a program does between two suspensions
+  * no other future sees half done.
   *
   * A run suspends its caller, so `Io.run` over this backend must be called where JSPI can suspend: within Scala.js's
   * `js.async`, as a gears program is on Scala.js. `start` does both, for a program started from JavaScript's side, a

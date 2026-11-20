@@ -7,9 +7,9 @@ import java.io.IOException
 /** The event source of a worker of a pool backend, whichever the backend: a selector on the JVM, the system's event
   * queue on Scala Native. A backend's own source type is what its handles are listened for by and its ops wait on.
   *
-  * It has what such a source does once its queue has failed for good
-  * (`giveUp`): it waits without it, parked until its deadline or a wake-up, so that the worker still fires its timers
-  * and runs what it is given, and the program can unwind. No handle is reported ready from then on.
+  * It has what such a source does once its queue has failed for good (`giveUp`): it waits without it, parked until its
+  * deadline or a wake-up, so that the worker still fires its timers and runs what it is given, and the program can
+  * unwind. No handle is reported ready from then on.
   */
 trait PoolSource extends Poller, EventSource {
 

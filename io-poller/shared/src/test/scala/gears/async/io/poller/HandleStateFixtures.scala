@@ -16,8 +16,8 @@ import gears.async.io.shareable.TimerHeap.TimerOp
 
 import java.util.concurrent.atomic.AtomicInteger
 
-/** What the suites of a handle's state are run over: a handle whose cleanup is counted, an event source that counts what
-  * it is asked, and an op that records what is done with it.
+/** What the suites of a handle's state are run over: a handle whose cleanup is counted, an event source that counts
+  * what it is asked, and an op that records what is done with it.
   */
 trait HandleStateFixtures { self: munit.FunSuite =>
 

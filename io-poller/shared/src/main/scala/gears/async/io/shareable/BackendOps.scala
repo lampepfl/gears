@@ -32,8 +32,8 @@ object BackendOp {
     final def performOn(performer: OpPerformer[S] & S)(using Async): Unit = perform(performer.handleOwner)
   }
 
-  /** An op whose work blocks (see `WorkOffThread`): done on the blocking pool's thread, on the performer's own, or on
-    * a worker's with the worker handed over, as its backend chooses (`OpPerformer.performBlocking`).
+  /** An op whose work blocks (see `WorkOffThread`): done on the blocking pool's thread, on the performer's own, or on a
+    * worker's with the worker handed over, as its backend chooses (`OpPerformer.performBlocking`).
     */
   trait OffThread[S <: EventSource] extends BackendOp[S] {
     def performOffThread(worker: Worker & S)(using Async): Unit

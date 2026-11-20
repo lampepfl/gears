@@ -35,8 +35,8 @@ trait KqueuePoller(maxEvents: Int) extends EventPoller {
   private val markerTrigger = KqueueLoop.allocateQueue(1)(using zone)
   KqueueLoop.triggerUser(markerTrigger(0), PollMarker)
 
-  /** A filter for the direction that came, edge-triggered, or the one that went taken off: the other is left as it
-    * is. A filter already gone because its descriptor closed is no failure of taking it off.
+  /** A filter for the direction that came, edge-triggered, or the one that went taken off: the other is left as it is.
+    * A filter already gone because its descriptor closed is no failure of taking it off.
     */
   protected final def watch(fd: Int, before: Int, after: Int, certain: Boolean): Unit = {
     val came = after & ~before
@@ -85,8 +85,8 @@ trait KqueuePoller(maxEvents: Int) extends EventPoller {
   protected def pollBriefly(): Int = KqueueLoop.pollEventsBriefly(kq, events, maxEvents)
 
   /** One poll of the kqueue into `events`: without waiting if `timeout` is 0, for at most `timeout` nanoseconds if it
-    * is positive, and until there is something if it is negative. The number of events, the marker among them where
-    * it did not wait.
+    * is positive, and until there is something if it is negative. The number of events, the marker among them where it
+    * did not wait.
     */
   protected def pollKqueue(timeout: Long): Int =
     if timeout == 0 then KqueueLoop.pollEventsNow(kq, markerTrigger, events, maxEvents)

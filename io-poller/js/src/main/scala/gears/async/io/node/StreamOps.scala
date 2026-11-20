@@ -41,8 +41,8 @@ private[node] sealed trait ReadInto {
   /** Takes what was read, at most `room` bytes; null at the end, when nothing was. */
   def take(chunk: Uint8Array | Null): Unit
 
-  /** The one buffer the read is into, if it is into one whose memory JavaScript has: a source then copies into it as
-    * it takes the bytes. Null otherwise.
+  /** The one buffer the read is into, if it is into one whose memory JavaScript has: a source then copies into it as it
+    * takes the bytes. Null otherwise.
     */
   def single: ByteBuffer | Null = null
 }

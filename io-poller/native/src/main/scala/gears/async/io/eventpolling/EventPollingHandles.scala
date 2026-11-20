@@ -31,8 +31,14 @@ sealed trait EventPollingWritable extends EventPollingHandle, BaseWritableHandle
 private[eventpolling] type EventPollingWaitingReadable = EventPollingReadable & EventPollingWaitable
 private[eventpolling] type EventPollingWaitingWritable = EventPollingWritable & EventPollingWaitable
 
-final class PipeRead(fd: Int, owner: HandleOwner) extends PosixKernelHandle(fd, owner), EventPollingReadable, EventPollingWaitable
-final class PipeWrite(fd: Int, owner: HandleOwner) extends PosixKernelHandle(fd, owner), EventPollingWritable, EventPollingWaitable
+final class PipeRead(fd: Int, owner: HandleOwner)
+    extends PosixKernelHandle(fd, owner),
+      EventPollingReadable,
+      EventPollingWaitable
+final class PipeWrite(fd: Int, owner: HandleOwner)
+    extends PosixKernelHandle(fd, owner),
+      EventPollingWritable,
+      EventPollingWaitable
 
 /** A regular file: read and written at offsets, and as a stream at the position it carries. Its ops are done off the
   * workers, never waited for here: the system reports a file ready whatever it would do.
@@ -124,7 +130,10 @@ object EventPollingSockets extends PosixSocketOpener:
   * and two turns of the watcher's thread, which a read answered in less never needed, as the bytes are the kqueue's to
   * report. The end of a FIFO is so seen at most that much later than it came.
   */
-final class FifoRead(fd: Int, owner: HandleOwner) extends PosixKernelHandle(fd, owner), EventPollingReadable, EventPollingWaitable:
+final class FifoRead(fd: Int, owner: HandleOwner)
+    extends PosixKernelHandle(fd, owner),
+      EventPollingReadable,
+      EventPollingWaitable:
 
   /** Whether the listener has been asked to look, in a while, at whether a read still waits. */
   private val lookPending = new java.util.concurrent.atomic.AtomicBoolean(false)
@@ -162,7 +171,10 @@ object FifoRead:
   inline val WatchAfterNanos = 1_000_000L
 
 /** A FIFO's write end, written as a pipe's is. */
-final class FifoWrite(fd: Int, owner: HandleOwner) extends PosixKernelHandle(fd, owner), EventPollingWritable, EventPollingWaitable
+final class FifoWrite(fd: Int, owner: HandleOwner)
+    extends PosixKernelHandle(fd, owner),
+      EventPollingWritable,
+      EventPollingWaitable
 
 trait EventPollingPipeOpener extends PosixPipeOpener[EventPollingReadable, EventPollingWritable]:
   final def makeReadableHandle(fd: Int, owner: HandleOwner): PipeRead = new PipeRead(fd, owner)
