@@ -16,4 +16,4 @@ object JvmAsyncOperations extends AsyncOperations:
     val th = Thread.currentThread()
     cancellationScope(() => th.interrupt()):
       try fn
-      catch case _: InterruptedException => throw new CancellationException()
+      catch case _: InterruptedException => throw new GearsCancellationException()

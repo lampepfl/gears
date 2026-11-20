@@ -1,5 +1,6 @@
 package PosixLikeIO
 
+import gears.async.GearsCancellationException
 import gears.async.Scheduler
 import gears.async.default.given
 import gears.async.{Async, Future}
@@ -9,7 +10,6 @@ import java.nio.ByteBuffer
 import java.nio.channels.{AsynchronousFileChannel, CompletionHandler, SocketChannel}
 import java.nio.charset.{Charset, StandardCharsets}
 import java.nio.file.{Path, StandardOpenOption}
-import java.util.concurrent.CancellationException
 import scala.Tuple.Union
 import scala.concurrent.ExecutionContext
 import scala.util.{Failure, Success, Try}
@@ -144,7 +144,7 @@ object SocketUDP:
     private[SocketUDP] def spawn(body: -> T)(using s: Scheduler) =
       s.execute(() =>
         resolver.complete(Try(body).recover { case _: InterruptedException =>
-          throw CancellationException()
+          throw new GearsCancellationException()
         })
       )
 

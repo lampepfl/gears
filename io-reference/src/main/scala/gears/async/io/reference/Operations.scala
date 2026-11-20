@@ -4,6 +4,7 @@ package reference
 import language.experimental.captureChecking
 
 import gears.async.Async
+import gears.async.GearsCancellationException
 
 import java.io.IOException
 import java.net.InetAddress
@@ -26,7 +27,6 @@ import java.nio.file.Files
 import java.nio.file.LinkOption
 import java.nio.file.Path
 import java.nio.file.StandardOpenOption
-import java.util.concurrent.CancellationException
 import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -179,7 +179,7 @@ private[reference] object Timers {
         return
       }
       ctx.waiter.park(next)
-      if ctx.waiter.cancelled then throw new CancellationException()
+      if ctx.waiter.cancelled then throw new GearsCancellationException()
     }
   }
 }
@@ -509,7 +509,7 @@ private[reference] final class OnThread[A](op: AnyRef^, work: () => A, commit: A
   }
 
   private def stopped(ctx: Ctx): Throwable =
-    if ctx.waiter.cancelled then new CancellationException() else new TimeoutException(s"$op timed out")
+    if ctx.waiter.cancelled then new GearsCancellationException() else new TimeoutException(s"$op timed out")
 }
 
 final class BlockingOp[A <: AnyRef](work: () => A, into: Slot[A] | Null) extends RefOp {

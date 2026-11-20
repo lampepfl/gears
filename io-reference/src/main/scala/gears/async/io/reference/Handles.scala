@@ -4,7 +4,6 @@ package reference
 import language.experimental.captureChecking
 
 import java.nio.channels.Channel
-import java.nio.channels.ClosedChannelException
 import java.nio.channels.DatagramChannel
 import java.nio.channels.FileChannel
 import java.nio.channels.GatheringByteChannel

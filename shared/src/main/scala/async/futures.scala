@@ -136,7 +136,7 @@ object Future:
     private var innerGroup: CompletionGroup = CompletionGroup()
 
     private def checkCancellation(): Unit =
-      if cancelRequest.get() then throw new CancellationException()
+      if cancelRequest.get() then throw new GearsCancellationException()
 
     private class FutureAsync(group_ : CompletionGroup^{any.only[capabilities.Scoping]})
       (using support: AsyncSupport^{any.only[capabilities.Suspension]}, scheduler: support.Scheduler)
@@ -227,7 +227,7 @@ object Future:
       /** Await a source first by polling it, and, if that fails, by suspending in a onComplete call.
         */
       override def await[U](src: Async.Source[U]^): U =
-        if group.isCancelled then throw new CancellationException()
+        if group.isCancelled then throw new GearsCancellationException()
 
         src
           .poll()
@@ -235,7 +235,7 @@ object Future:
             val listener: AwaitListener[U]^{src.except[Control], support, group} = AwaitListener(src.asListenerInterface)
             val res = support.suspend(s => listener(s)) // linking and src.onComplete happen in listener
             listener.unlink()
-            if listener.cancelled then throw CancellationException()
+            if listener.cancelled then throw new GearsCancellationException()
             else
               res.asInstanceOf[U] // not cancelled -> result from Source -> type U (not U | Null, still could be null)
 
@@ -250,7 +250,7 @@ object Future:
         checkCancellation()
         r
       }).recoverWith({
-        case _: InterruptedException | _: CancellationException => Failure(new CancellationException())
+        case _: InterruptedException | _: CancellationException => Failure(new GearsCancellationException())
       } : PartialFunction[Throwable, Try[T]]))(using FutureAsync(CompletionGroup.Unlinked)(using sup, scheduler))
       complete:
         unsafe.unsafeAssumePure: // SAFETY: label is already part of the captured future
@@ -359,7 +359,7 @@ object Future:
     def apply[T](): Promise[T] =
       new CoreFuture[T] with Promise[T]:
         override def cancel(): Unit =
-          if setCancelled() then complete(Failure(new CancellationException()))
+          if setCancelled() then complete(Failure(new GearsCancellationException()))
 
         /** Define the result value of `future`. However, if `future` was cancelled in the meantime complete with a
           * `CancellationException` failure instead.
@@ -378,7 +378,7 @@ object Future:
     def reject(exc: Throwable): Unit = complete(Failure(exc))
 
     /** Complete the future with a [[CancellationException]] */
-    def rejectAsCancelled(): Unit = complete(Failure(new CancellationException()))
+    def rejectAsCancelled(): Unit = complete(Failure(new GearsCancellationException()))
 
     /** Complete the future with the result, be it Success or Failure */
     def complete(result: Try[T]): Unit
@@ -623,7 +623,7 @@ def uninterruptible[T](body: Async^ ?->{any.except[Control]} T)(using ac: Async^
       Async.withNewCompletionGroup(group)(body)
     finally tracker.unlink()
 
-  if tracker.isCancelled then throw new CancellationException()
+  if tracker.isCancelled then throw new GearsCancellationException()
   r
 
 /** Link `cancellable` to the completion group of the current [[Async]] context during `fn`.

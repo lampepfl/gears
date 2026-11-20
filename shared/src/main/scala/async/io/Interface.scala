@@ -93,15 +93,15 @@ trait Handles extends Interface {
   type Handle <: AnyRef
 
   /** Closes `handle`, completing once it is closed. The ops under way on it, from whichever future, have failed with an
-    * `IOException`, a closed channel's (`java.nio.channels.ClosedChannelException` on the JVM and Scala Native, naming
-    * the handle), before this completes, as the JDK fails a thread blocked on a channel that is closed: none of them
-    * can succeed once the close has begun, and a `perform` waiting on one in another future throws once that future
-    * runs again, perhaps after the close's `perform` returns. Its number is then free for reuse, and a listener's port
-    * for listening on again. A Unix socket path that a listener or datagram socket bound is removed with it, if the
-    * file there is still its own, not one a later listener bound in its place: checked, then removed, as no system call
-    * removes a file only if it is a given one, so a listener binding the path between the two, a few microseconds,
-    * loses its file. Fails if `handle` is not open, with the failure an op submitted on a closed handle has: a closed
-    * channel's, as above.
+    * `IOException`, a closed channel's (`ClosedChannelException`, the JDK's `java.nio.channels.ClosedChannelException`
+    * on the JVM and Scala Native, naming the handle), before this completes, as the JDK fails a thread blocked on a
+    * channel that is closed: none of them can succeed once the close has begun, and a `perform` waiting on one in
+    * another future throws once that future runs again, perhaps after the close's `perform` returns. Its number is then
+    * free for reuse, and a listener's port for listening on again. A Unix socket path that a listener or datagram
+    * socket bound is removed with it, if the file there is still its own, not one a later listener bound in its place:
+    * checked, then removed, as no system call removes a file only if it is a given one, so a listener binding the path
+    * between the two, a few microseconds, loses its file. Fails if `handle` is not open, with the failure an op
+    * submitted on a closed handle has: a closed channel's, as above.
     */
   def close(handle: Handle): Op
 }
