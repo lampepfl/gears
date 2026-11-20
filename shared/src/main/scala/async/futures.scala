@@ -117,7 +117,7 @@ object Future:
     private var innerGroup: CompletionGroup = CompletionGroup()
 
     private def checkCancellation(): Unit =
-      if cancelRequest.get() then throw new CancellationException()
+      if cancelRequest.get() then throw new GearsCancellationException()
 
     private class FutureAsync(val group: CompletionGroup)(using label: ac.support.Label[Unit])
         extends Async(using ac.support, ac.scheduler):
@@ -203,7 +203,7 @@ object Future:
       /** Await a source first by polling it, and, if that fails, by suspending in a onComplete call.
         */
       override def await[U](src: Async.Source[U]): U =
-        if group.isCancelled then throw new CancellationException()
+        if group.isCancelled then throw new GearsCancellationException()
 
         src
           .poll()
@@ -211,7 +211,7 @@ object Future:
             val listener = AwaitListener[U](src)
             val res = ac.support.suspend(listener) // linking and src.onComplete happen in listener
             listener.unlink()
-            if listener.cancelled then throw CancellationException()
+            if listener.cancelled then throw new GearsCancellationException()
             else
               res.asInstanceOf[U] // not cancelled -> result from Source -> type U (not U | Null, still could be null)
 
@@ -226,7 +226,7 @@ object Future:
         checkCancellation()
         r
       }).recoverWith { case _: InterruptedException | _: CancellationException =>
-        Failure(new CancellationException())
+        Failure(new GearsCancellationException())
       })(using FutureAsync(CompletionGroup.Unlinked))
       complete(result)
 
@@ -328,7 +328,7 @@ object Future:
     def apply[T](): Promise[T] =
       new CoreFuture[T] with Promise[T]:
         override def cancel(): Unit =
-          if setCancelled() then complete(Failure(new CancellationException()))
+          if setCancelled() then complete(Failure(new GearsCancellationException()))
 
         /** Define the result value of `future`. However, if `future` was cancelled in the meantime complete with a
           * `CancellationException` failure instead.
@@ -347,7 +347,7 @@ object Future:
     def reject(exc: Throwable): Unit = complete(Failure(exc))
 
     /** Complete the future with a [[CancellationException]] */
-    def rejectAsCancelled(): Unit = complete(Failure(new CancellationException()))
+    def rejectAsCancelled(): Unit = complete(Failure(new GearsCancellationException()))
 
     /** Complete the future with the result, be it Success or Failure */
     def complete(result: Try[T]): Unit
@@ -595,7 +595,7 @@ def uninterruptible[T](body: Async ?=> T)(using ac: Async): T =
       Async.withNewCompletionGroup(group)(body)
     finally tracker.unlink()
 
-  if tracker.isCancelled then throw new CancellationException()
+  if tracker.isCancelled then throw new GearsCancellationException()
   r
 
 /** Link `cancellable` to the completion group of the current [[Async]] context during `fn`.
