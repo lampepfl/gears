@@ -271,6 +271,20 @@ class FutureBehavior extends munit.FunSuite {
       assertEquals(exceptionSet.size, 1)
   }
 
+  test("a cancelled future fails with gears' own CancellationException, which has no stack trace unless asked for") {
+    Async.fromSync:
+      val running = Future { sleep(10_000); 1 }
+      val promised = Future.Promise[Int]()
+      running.cancel()
+      promised.asFuture.cancel()
+      for future <- List(running, promised.asFuture) do
+        future.awaitResult match
+          case Failure(e: GearsCancellationException) =>
+            assert(e.isInstanceOf[CancellationException])
+            assertEquals(e.getStackTrace.nonEmpty, GearsCancellationException.debugTraces)
+          case other => fail(s"not cancelled by gears: $other")
+  }
+
   test("noninterruptible future immediate return") {
     Async.fromSync:
       for (i <- -5 to 5)

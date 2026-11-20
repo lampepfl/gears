@@ -2,10 +2,10 @@ package gears.async.io
 package reference
 
 import gears.async.Async
+import gears.async.GearsCancellationException
 import gears.async.cancellationScope
 
 import java.nio.channels.SelectableChannel
-import java.util.concurrent.CancellationException
 import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -16,7 +16,7 @@ final class Ctx(val waiter: Wait, val start: Long, val deadline: Long) {
 
   /** Throws if the op has been cancelled, or its time limit has passed. */
   def checkStop(op: AnyRef)(using ac: Async): Unit = {
-    if waiter.cancelled || ac.group.isCancelled then throw new CancellationException()
+    if waiter.cancelled || ac.group.isCancelled then throw new GearsCancellationException()
     if expired then throw new TimeoutException(s"$op timed out")
   }
 
@@ -57,7 +57,7 @@ abstract class RefOp {
   protected def body(ctx: Ctx)(using Async): Unit
 
   final def perform(timeoutMillis: Long)(using ac: Async): Unit = {
-    if ac.group.isCancelled then throw new CancellationException()
+    if ac.group.isCancelled then throw new GearsCancellationException()
     if !this.isInstanceOf[Repeatable] && !used.compareAndSet(false, true) then
       throw new IllegalStateException(s"$this is not Repeatable, and has been performed already")
     if !busy.compareAndSet(false, true) then throw new IllegalArgumentException(s"$this is already being performed")
