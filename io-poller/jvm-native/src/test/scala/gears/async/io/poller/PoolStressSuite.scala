@@ -47,7 +47,10 @@ class PoolStressSuite extends munit.FunSuite {
       waiters
     }
     val elapsed = System.nanoTime() - started
-    assert(elapsed < 5_000_000_000L, s"it took ${elapsed / 1_000_000}ms, as if it waited for the timers")
+    // Half the timers' minute, not a few seconds: each future cancelled makes several exceptions, and on Scala Native
+    // one costs its stack trace, 50 to 160 us on a quiet machine and some 8 ms a future on a CI machine running the
+    // other suites, where the thousand took 7.8 s.
+    assert(elapsed < 30_000_000_000L, s"it took ${elapsed / 1_000_000}ms, as if it waited for the timers")
     assert(waiters.forall(_.poll().exists(_.failed.toOption.exists(_.isInstanceOf[CancellationException]))))
     assert(workers.size > 0)
     workers.forEach(worker => assert(!worker.isAlive, "a worker outlived its run"))
