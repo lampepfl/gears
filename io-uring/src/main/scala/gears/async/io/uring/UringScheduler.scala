@@ -123,6 +123,128 @@ final class UringWorker private[uring] (id: Int, owner: HandleOwner, ring: Ring,
     }
   }
 
+  // ---- multishot receives, of the connections whose reads this worker performs
+
+  private var buffers: BufferRing | Null = null
+  private var receivesOff = !Receive.enabled
+  private var nextReceive = Ring.ReceiveBase
+  private val armed = scala.collection.mutable.LongMap.empty[Receiver]
+  private val receivers = scala.collection.mutable.HashSet.empty[Receiver]
+  private[uring] val readsOnReceives = new java.util.concurrent.atomic.AtomicInteger()
+
+  private[uring] def freeBuffers: Int = {
+    val b = buffers
+    if b == null then Receive.Entries else b.free
+  }
+
+  private[uring] def receiverFor(h: UringHandle): Receiver | Null =
+    if receivesOff || hasGivenUp || ring.isClosed then null
+    else {
+      if buffers == null then
+        try buffers = new BufferRing(ring, Receive.Entries)
+        catch case _: (IOException | OutOfMemoryError) => receivesOff = true
+      if buffers == null then null
+      else {
+        val r = new Receiver(this, h, buffers.nn)
+        h.receiver = r
+        receivers += r
+        r
+      }
+    }
+
+  // - an armed receive is work claimed on its handle, as a command in the kernel is: the descriptor closes once it ends
+  private[uring] def arm(r: Receiver): Boolean =
+    r.armed || r.idle && !r.handle.isClosing && !ring.isClosed && buffers.nn.free > 0 && claimed(r.handle) && {
+      val id = nextReceive
+      ring.armReceive(r.handle.fd, Receive.Group, id) && {
+        nextReceive += 1
+        r.armed = true
+        r.id = id
+        armed(id) = r
+        true
+      } || {
+        r.handle.releaseWork()
+        false
+      }
+    }
+
+  private def claimed(h: UringHandle): Boolean =
+    try {
+      h.claimWork()
+      true
+    } catch case _: IOException => false
+
+  private def disarmed(r: Receiver): Unit = {
+    armed -= r.id
+    r.armed = false
+    r.stopping = false
+    r.handle.releaseWork()
+  }
+
+  // - a cancel that finds the receive running is refused: it is asked again at the next of its completions
+  private[uring] def stopReceive(r: Receiver): Unit =
+    if r.armed && !r.stopping && !ring.isClosed then {
+      val res = ring.cancelNow(r.id, wait = false)
+      r.stopping = res == 0 || res == -errno.ENOENT
+    }
+
+  private[uring] def collectNow(): Unit = ring.collectNow(dispatch): Unit
+
+  private[uring] def endReceive(r: Receiver): Unit =
+    runOnRing { () =>
+      stopReceive(r)
+      r.drop()
+      if !r.armed then receivers -= r
+    }
+
+  ring.onReceive = (id, res, flags) => {
+    val r = armed.getOrNull(id)
+    if r != null then {
+      val h = r.handle
+      if (flags & Receive.FBuffer) != 0 then {
+        val b = buffers.nn
+        b.taken()
+        val bid = flags >>> Receive.BufferShift
+        if h.isClosing || res <= 0 then b.recycle(bid) else r.add(bid, res)
+      }
+      if (flags & Receive.FMore) == 0 then disarmed(r)
+      if res == 0 then r.ended = true
+      else if res < 0 && res != -errno.ENOBUFS && res != -errno.ECANCELED then r.failure = res
+      if h.isClosing then {
+        r.drop()
+        if !r.armed then receivers -= r
+      } else if r.queued >= Receive.MostQueued && h.parked == null then stopReceive(r)
+      val waiting = h.parked
+      if waiting != null && (r.hasQueued || !r.armed || h.isClosing) && waiting.leaveParking() then startTurn(waiting)
+    }
+  }
+
+  private def loseReceives(outcome: Try[Unit]): Unit = {
+    val lost = new IOException("The io_uring worker's ring is gone")
+    for r <- receivers do {
+      if r.armed then {
+        ring.cancelNow(r.id, wait = true): Unit
+        try disarmed(r)
+        catch case e: Throwable => e.printStackTrace()
+      }
+      r.lost = lost
+      r.drop()
+    }
+    val all = receivers.toList
+    receivers.clear()
+    armed.clear()
+    val b = buffers
+    buffers = null
+    receivesOff = true
+    if b != null then b.close()
+    for r <- all do {
+      val waiting = r.handle.parked
+      if waiting != null && (waiting.owner eq this) && waiting.leaveParking() then
+        try settle(waiting, outcome, done = false)
+        catch case e: Throwable => e.printStackTrace()
+    }
+  }
+
   private val inFlight = scala.collection.mutable.LongMap.empty[Command]
   private val prepared = scala.collection.mutable.ArrayBuffer.empty[Command]
   private val submitted = scala.collection.mutable.ArrayBuffer.empty[Command]
@@ -130,41 +252,43 @@ final class UringWorker private[uring] (id: Int, owner: HandleOwner, ring: Ring,
   private val backlog = scala.collection.mutable.ArrayBuffer.empty[Command]
   private var nextId = Ring.InternalId + 1
 
-  ring.onSubmit = () => {
-    var closed: scala.collection.mutable.ArrayBuffer[Command] | Null = null
-    prepared.foreach { c =>
-      if c.state == Command.Stage.Prepared then {
-        if c.handle.isClosing then {
-          ring.nop(c.sqe)
-          inFlight.remove(c.id)
-          c.outOfRing()
-          if closed == null then closed = scala.collection.mutable.ArrayBuffer.empty[Command]
-          closed.nn += c
-        } else {
-          c.submitted()
-          submitted += c
+  ring.onSubmit = () =>
+    if prepared.nonEmpty then {
+      var closed: scala.collection.mutable.ArrayBuffer[Command] | Null = null
+      prepared.foreach { c =>
+        if c.state == Command.Stage.Prepared then {
+          if c.handle.isClosing then {
+            ring.nop(c.sqe)
+            inFlight.remove(c.id)
+            c.outOfRing()
+            if closed == null then closed = scala.collection.mutable.ArrayBuffer.empty[Command]
+            closed.nn += c
+          } else {
+            c.submitted()
+            submitted += c
+          }
         }
       }
+      prepared.clear()
+      if closed != null then
+        closed.nn.foreach { c =>
+          c.discardSubmission()
+          settle(c, Failure(c.handle.closedFailure), done = false)
+        }
     }
-    prepared.clear()
-    if closed != null then
-      closed.nn.foreach { c =>
-        c.discardSubmission()
-        settle(c, Failure(c.handle.closedFailure), done = false)
-      }
-  }
 
-  ring.afterSubmit = () => {
-    submitted.foreach(c =>
-      if c.state == Command.Stage.Submitted && c.handle.isClosing then
-        if ring.pending(c.sqe, c.id) then {
-          ring.nop(c.sqe)
-          withdrawn(c)
-          c.deliver(Failure(c.handle.closedFailure), done = false)
-        } else ring.cancelNow(c.id, wait = false): Unit
-    )
-    submitted.clear()
-  }
+  ring.afterSubmit = () =>
+    if submitted.nonEmpty then {
+      submitted.foreach(c =>
+        if c.state == Command.Stage.Submitted && c.handle.isClosing then
+          if ring.pending(c.sqe, c.id) then {
+            ring.nop(c.sqe)
+            withdrawn(c)
+            c.deliver(Failure(c.handle.closedFailure), done = false)
+          } else ring.cancelNow(c.id, wait = false): Unit
+      )
+      submitted.clear()
+    }
 
   // ---- performing a command, on the performer's thread, which is this worker's
 
@@ -179,9 +303,16 @@ final class UringWorker private[uring] (id: Int, owner: HandleOwner, ring: Ring,
         handle.releaseWork()
         throw Command.alreadyPending(c)
       }
-      c.owner = this
+      // - a connection's reads are performed on the worker its receive is on: that worker alone touches what it got
+      val performer = c.performerOf(this)
+      c.owner = performer
       val turns = c.turns
-      if turns != null && !turns.enter(c) then {
+      if performer ne this then {
+        c.exposeNow()
+        if c.hasDeadline then c.holdTimerOn(this)
+        performer.startTurn(c)
+        c.awaitOutcome(performer)
+      } else if turns != null && !turns.enter(c) then {
         c.exposeNow()
         if c.hasDeadline then c.holdTimerOn(this)
         c.awaitOutcome(this)
@@ -379,7 +510,9 @@ final class UringWorker private[uring] (id: Int, owner: HandleOwner, ring: Ring,
       if hasGivenUp then wakeWaiting()
       else ring.wake()
 
-  private val hasWork: () => Boolean = () => !isEmpty() || !ringTasks.isEmpty() || backlog.nonEmpty
+  private val hasWork: Ring.Check = new Ring.Check {
+    def check(): Boolean = !isEmpty() || !ringTasks.isEmpty() || backlog.nonEmpty
+  }
 
   private var failedWaits = 0
 
@@ -387,13 +520,13 @@ final class UringWorker private[uring] (id: Int, owner: HandleOwner, ring: Ring,
     runRingTasks()
     if hasGivenUp then {
       val timeout =
-        if hasWork() then 0L
+        if hasWork.check() then 0L
         else if deadlineTask < 0 then -1L
         else math.max(deadlineTask - System.nanoTime(), 0L)
       waitWithoutQueue(timeout)
     } else
       try {
-        ring.await(deadlineTask, hasWork, spin = inFlight.nonEmpty)(dispatch)
+        ring.await(deadlineTask, hasWork, spin = inFlight.nonEmpty || readsOnReceives.get() > 0)(dispatch)
         failedWaits = 0
       } catch {
         case failure: IOException =>
@@ -434,6 +567,7 @@ final class UringWorker private[uring] (id: Int, owner: HandleOwner, ring: Ring,
         res == 0 || res == -errno.ENOENT
       }
     )
+    loseReceives(outcome)
     ring.close()
     inFlight.clear()
     prepared.clear()

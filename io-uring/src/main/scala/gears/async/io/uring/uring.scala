@@ -38,6 +38,26 @@ private[uring] object uring {
   type io_uring_sqe =
     CStruct10[__u8, __u8, __u16, __s32, __u64, __u64, __u32, __u32, __u64, CArray[__u64, Nat._3]]
 
+  @name("gears_buf_ring_setup")
+  def buf_ring_setup(
+      ring: Ptr[io_uring],
+      entries: CUnsignedInt,
+      bgid: CInt,
+      base: Ptr[Byte],
+      size: CUnsignedInt,
+      err: Ptr[CInt]
+  ): Ptr[Byte] = extern
+
+  @name("gears_buf_ring_free")
+  def buf_ring_free(ring: Ptr[io_uring], br: Ptr[Byte], entries: CUnsignedInt, bgid: CInt): CInt = extern
+
+  @name("gears_buf_ring_recycle")
+  def buf_ring_recycle(br: Ptr[Byte], entries: CUnsignedInt, base: Ptr[Byte], size: CUnsignedInt, bid: CInt): Unit =
+    extern
+
+  @name("gears_prep_recv_multishot")
+  def prep_recv_multishot(sqe: Ptr[io_uring_sqe], fd: CInt, bgid: CInt, user_data: __u64): Unit = extern
+
   @name("gears_io_uring_init")
   def io_uring_init(entries: CUnsignedInt, ring: Ptr[io_uring], completions: CUnsignedInt): CInt = extern
 

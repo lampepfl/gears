@@ -90,4 +90,29 @@ int gears_io_uring_cancel_fd(struct io_uring *ring, int fd) {
   reg.flags = IORING_ASYNC_CANCEL_FD | IORING_ASYNC_CANCEL_ALL;
   return cancel(ring, &reg, 0);
 }
+struct io_uring_buf_ring *gears_buf_ring_setup(struct io_uring *ring, unsigned entries, int bgid, char *base,
+                                               unsigned size, int *err) {
+  struct io_uring_buf_ring *br = io_uring_setup_buf_ring(ring, entries, bgid, 0, err);
+  if (!br) return NULL;
+  int mask = io_uring_buf_ring_mask(entries);
+  for (unsigned i = 0; i < entries; i++) io_uring_buf_ring_add(br, base + (size_t)i * size, size, i, mask, i);
+  io_uring_buf_ring_advance(br, entries);
+  return br;
+}
+
+int gears_buf_ring_free(struct io_uring *ring, struct io_uring_buf_ring *br, unsigned entries, int bgid) {
+  return io_uring_free_buf_ring(ring, br, entries, bgid);
+}
+
+void gears_buf_ring_recycle(struct io_uring_buf_ring *br, unsigned entries, char *base, unsigned size, int bid) {
+  io_uring_buf_ring_add(br, base + (size_t)bid * size, size, bid, io_uring_buf_ring_mask(entries), 0);
+  io_uring_buf_ring_advance(br, 1);
+}
+
+void gears_prep_recv_multishot(struct io_uring_sqe *sqe, int fd, int bgid, unsigned long long user_data) {
+  io_uring_prep_recv_multishot(sqe, fd, NULL, 0, 0);
+  sqe->flags |= IOSQE_BUFFER_SELECT;
+  sqe->buf_group = bgid;
+  sqe->user_data = user_data;
+}
 #endif

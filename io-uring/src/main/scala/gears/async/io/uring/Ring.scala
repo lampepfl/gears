@@ -62,11 +62,11 @@ private[uring] final class Ring(entries: Int, completions: Int) {
   }
 
   // - `hasWork` is asked after `onSubmit`, which may resume futures: asked before, the worker could sleep with work
-  def await(deadline: Long, hasWork: () => Boolean, spin: Boolean)(dispatch: (Long, Int) => Unit): Unit = {
+  def await(deadline: Long, hasWork: Ring.Check, spin: Boolean)(dispatch: (Long, Int) => Unit): Unit = {
     armWake()
     onSubmit()
     var res = 0
-    if signalled.get() || hasWork() then res = submitPrepared()
+    if signalled.get() || hasWork.check() then res = submitPrepared()
     else {
       val arrived = spin && {
         checkSubmitted(submitPrepared())
@@ -117,6 +117,35 @@ private[uring] final class Ring(entries: Int, completions: Int) {
 
   var afterSubmit: () => Unit = () => ()
 
+  var onReceive: (Long, Int, Int) => Unit = (_, _, _) => ()
+
+  // - never inside a reap: its batch is the reap's
+  def collectNow(dispatch: (Long, Int) => Unit): Boolean =
+    !closed && !reaping && {
+      val state = io_uring_spin_check(ring)
+      if state == 2 then io_uring_get_events(ring): Unit
+      if state != 0 then reap(dispatch)
+      true
+    }
+
+  def setupBufRing(entries: Int, bgid: Int, base: Ptr[Byte], size: Int): Ptr[Byte] = {
+    val err = stackalloc[CInt]()
+    val br = buf_ring_setup(ring, entries.toUInt, bgid, base, size.toUInt, err)
+    if br == null then throw Ring.failure("Failed to set up io_uring's provided buffers", !err)
+    br
+  }
+
+  def freeBufRing(br: Ptr[Byte], entries: Int, bgid: Int): Unit =
+    if !closed then buf_ring_free(ring, br, entries.toUInt, bgid): Unit
+
+  def armReceive(fd: Int, bgid: Int, id: Long): Boolean = {
+    val sqe = nextSqe()
+    sqe != null && {
+      prep_recv_multishot(sqe.nn, fd, bgid, id.toULong)
+      true
+    }
+  }
+
   def isClosed: Boolean = closed
 
   /** The next free entry, submitting what is prepared to make room if there is none: null if there is still none, the
@@ -157,7 +186,16 @@ private[uring] final class Ring(entries: Int, completions: Int) {
   private def batch: Ptr[Ptr[io_uring_cqe]] =
     batchStorage.asInstanceOf[ByteArray].at(0).asInstanceOf[Ptr[Ptr[io_uring_cqe]]]
 
+  private var reaping = false
+
   private def reap(dispatch: (Long, Int) => Unit): Unit = {
+    reaping = true
+    try reapAll(dispatch)
+    finally reaping = false
+    armWake()
+  }
+
+  private def reapAll(dispatch: (Long, Int) => Unit): Unit = {
     var more = true
     while more do {
       val count = io_uring_peek_batch_cqe(ring, batch, MaxBatch.toUInt).toInt
@@ -168,6 +206,7 @@ private[uring] final class Ring(entries: Int, completions: Int) {
         val res = cqe.res
         io_uring_cq_advance(ring, 1.toUInt)
         if id == Ring.WakeId then wakeArmed = false
+        else if id >= Ring.ReceiveBase then onReceive(id, res, cqe.flags.toInt)
         else if id != Ring.InternalId then dispatch(id, res)
         i += 1
       }
@@ -179,7 +218,6 @@ private[uring] final class Ring(entries: Int, completions: Int) {
             throw Ring.failure("Failed to take completions from io_uring", res)
         }
     }
-    armWake()
   }
 
   private def armWake(): Unit =
@@ -208,6 +246,9 @@ private[uring] object Ring {
 
   inline val WakeId = 0L
   inline val InternalId = 1L
+  inline val ReceiveBase = 1L << 62
+
+  abstract class Check { def check(): Boolean }
 
   def failure(what: String, res: Int): IOException = Results.failure(what, res)
 

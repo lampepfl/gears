@@ -52,6 +52,29 @@ A pooled read of a socket waits for readiness holding no buffer, and takes one a
 than half free: idle connections hold at most half the pool between them. A read that finds no buffer free waits for
 one (`NativePool.park`), and every release starts the waiting reads again on their workers.
 
+## Receiving on a connection
+
+A connection's first read of at most 16 KiB that has to wait arms a multishot receive (`Receiver`) on its worker's ring,
+which fills the worker's provided buffers (`BufferRing`, 512 of 4 KiB, a buffer ring) as bytes arrive, whether or not a
+read is waiting. A read then copies from them rather than going to the kernel: a socket's read no longer arms a poll of
+its own every time, which is most of what a ping-pong costs over a one-shot read. The receive stays armed until the
+stream ends or fails, the connection closes, or no buffer is free; then the next read that waits arms it again.
+
+What a receive got is its worker's alone, so every read of the connection is performed on that worker: one performed
+elsewhere is handed to it as a ring task, as a command whose turn has come is, and taken back there if its performer is
+cancelled. Every read takes what was received first, a vectored or pooled one too, and goes to the kernel itself only
+while the receive is idle, nothing taken and nothing more to come; a larger read, or one of these, stops an armed
+receive, takes what came before the stop, and then reads from the kernel, which saves a copy of every byte of a bulk
+transfer. A cancelled or timed-out read loses nothing: what arrives after is the next read's.
+
+An armed receive is work claimed on its handle, so a close cancels it and the descriptor closes once it has ended; the
+buffers it held are given back. A connection holding 16 buffers with no read waiting stops receiving, and the kernel's
+flow control then holds its sender back; the kernel receives what is already there in one burst before the stop lands,
+which may take every free buffer for a while, and a worker with none free reads from the kernel itself. A worker spins
+on its completion queue while a read waits on a receive, as it does while a command is in the kernel.
+
+Multishot receives are turned off with `gears.io.uring.multishot=false`, or `GEARS_IO_URING_MULTISHOT=false`.
+
 ## A ring that fails
 
 A ring that fails for good cancels each entry still in the kernel, waiting, before it is torn down, since tearing it
@@ -65,4 +88,8 @@ The testkit's contracts run on the default pool, on one worker and, for IP strea
 completes with it or takes nothing; a cancel of a read whose queue slot a newer entry has takes back the right one; a
 close between a read's preparation and its submission, and closes reaching entries on other workers' rings; a failing
 ring, a kernel worker's read in it; pooled reads holding at most half the pool, waiting while it is empty, and ended by
-a cancel, a time limit or a close; and that every handle is close-on-exec.
+a cancel, a time limit or a close; and that every handle is close-on-exec. `ReceiveSuite` checks receives: reads in
+order however they cut what came, bytes that came with no read waiting, a large, vectored or pooled read after a
+receive, a cancel or time limit losing nothing, a close giving every buffer back, the end of the stream, a stopped
+receive holding its sender back, a worker with no buffer free, reads performed from other workers, and a failing ring.
+The whole suite also runs with receives turned off.

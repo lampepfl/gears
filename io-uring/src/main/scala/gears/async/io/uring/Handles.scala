@@ -49,6 +49,9 @@ sealed abstract class UringHandle(fd: Int, kind: String, owner: HandleOwner) ext
 
   @volatile private[uring] var parked: Command | Null = null
 
+  // - set once, by the first read that receives, which holds the reading direction
+  @volatile private[uring] var receiver: Receiver | Null = null
+
   def isClosing: Boolean = getState != HandleState.OpenState
 
   private[uring] def triesAtOnce: Boolean = true
@@ -58,6 +61,8 @@ sealed abstract class UringHandle(fd: Int, kind: String, owner: HandleOwner) ext
   /** Once the handle is closing, with work claimed on it: what waits fails, and the entries on it are cancelled. */
   private[uring] def closing(): Unit = {
     failWaiting()
+    val r = receiver
+    if r != null then r.worker.endReceive(r)
     val waiting = parked
     if waiting != null && waiting.leaveParking() then waiting.owner.nn.startTurn(waiting)
     rings.forEach { (ring, n) =>

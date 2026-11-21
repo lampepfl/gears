@@ -111,6 +111,8 @@ private[uring] abstract class Command extends RepeatableAbstractTimerHeapOp, Uri
 
   private[uring] def leaveParking(): Boolean = false
 
+  private[uring] def performerOf(current: UringWorker): UringWorker = current
+
   protected final def park(): Unit = stage = Command.Stage.Parked
 
   private[uring] final def resume(): Unit =
@@ -336,8 +338,75 @@ private[uring] abstract class Transfer(bufs: Array[ByteBuffer], copyIn: Boolean)
   override protected def discard(): Unit = staging.end()
 }
 
+// - a connection's read takes what its receive got first, and goes to the kernel itself only while the receive is idle
+private[uring] trait Receiving extends Command {
+  protected def receives: Boolean = false
+  protected def fromQueue(r: Receiver): Boolean
+  protected def atEnd(): Boolean
+  protected def directAtOnce(): Boolean
+  protected def directReady(): Boolean = true
+  protected def directLeave(): Boolean = false
+  protected def waitForRoom(): Boolean = false
+  protected def failing: String
+
+  private var receiver: Receiver | Null = null
+  private val onReceiver = new java.util.concurrent.atomic.AtomicBoolean()
+
+  override private[uring] def performerOf(current: UringWorker): UringWorker = {
+    var r = handle.receiver
+    if r == null && receives && handle.isInstanceOf[ConnectionHandle] then r = current.receiverFor(handle)
+    receiver = r
+    if r == null then current else r.worker
+  }
+
+  override def tryAtOnce(): Boolean = {
+    val r = receiver
+    if r == null then directAtOnce()
+    else if r.hasQueued then fromQueue(r)
+    else if r.idle then directAtOnce()
+    else !r.armed && r.outcome(failing) && atEnd()
+  }
+
+  override private[uring] def readyToSubmit(): Boolean = {
+    val r = receiver
+    if r == null then directReady()
+    else if r.hasQueued || !(r.idle || r.armed) then {
+      if !waitForRoom() then restart()
+      false
+    } else if receives && r.worker.arm(r) then waitOnReceiver(r)
+    else if r.armed then {
+      r.worker.stopReceive(r)
+      r.worker.collectNow()
+      if r.armed then waitOnReceiver(r)
+      else {
+        restart()
+        false
+      }
+    } else directReady()
+  }
+
+  private def restart(): Unit = owner.nn.startTurn(this)
+
+  private def waitOnReceiver(r: Receiver): Boolean = {
+    r.worker.readsOnReceives.incrementAndGet()
+    onReceiver.set(true)
+    handle.parked = this
+    park()
+    if handle.isClosing && leaveParking() then restart()
+    false
+  }
+
+  override private[uring] def leaveParking(): Boolean =
+    if onReceiver.compareAndSet(true, false) then {
+      if handle.parked eq this then handle.parked = null
+      owner.nn.readsOnReceives.decrementAndGet()
+      true
+    } else directLeave()
+}
+
 private[uring] final class ReadIntoBuffer(val handle: UringHandle, buf: ByteBuffer)
-    extends Transfer(Array(buf), copyIn = false) {
+    extends Transfer(Array(buf), copyIn = false),
+      Receiving {
   Checks.checkFillable(buf)
   override protected def direction = Command.Direction.Reading
   override def check(): Unit = if !buf.hasRemaining() then throw Checks.bufferFull(buf)
@@ -349,11 +418,18 @@ private[uring] final class ReadIntoBuffer(val handle: UringHandle, buf: ByteBuff
     io_uring_prep_read(sqe, fd, NativeBuffer.atPosition(b), b.remaining().toUInt, Results.currentPosition)
   }
 
-  override def tryAtOnce(): Boolean = !NonBlocking.read(fd, buf).isBlocked
+  override protected def receives: Boolean = Receive.enabled && buf.remaining() <= Receive.LargestRead
+  protected def fromQueue(r: Receiver): Boolean = {
+    r.take(buf)
+    true
+  }
+  protected def atEnd(): Boolean = true
+  protected def directAtOnce(): Boolean = !NonBlocking.read(fd, buf).isBlocked
 }
 
 private[uring] final class ReadIntoBuffers(val handle: UringHandle, bufs: Array[ByteBuffer])
-    extends Transfer(bufs, copyIn = false) {
+    extends Transfer(bufs, copyIn = false),
+      Receiving {
   Checks.checkBuffers(bufs)
   Checks.checkFillable(bufs)
   override protected def direction = Command.Direction.Reading
@@ -367,7 +443,16 @@ private[uring] final class ReadIntoBuffers(val handle: UringHandle, bufs: Array[
     io_uring_prep_readv(sqe, fd, header.vectors.asInstanceOf[Ptr[iovec]], count.toUInt, Results.currentPosition)
   }
 
-  override def tryAtOnce(): Boolean = !NonBlocking.readv(fd, bufs).isBlocked
+  protected def fromQueue(r: Receiver): Boolean = {
+    var i = 0
+    while i < bufs.length && r.hasQueued do {
+      r.take(bufs(i))
+      i += 1
+    }
+    true
+  }
+  protected def atEnd(): Boolean = true
+  protected def directAtOnce(): Boolean = !NonBlocking.readv(fd, bufs).isBlocked
 }
 
 private[uring] final class WriteFromBuffer(val handle: UringHandle, buf: ByteBuffer)
@@ -404,7 +489,9 @@ private[uring] final class WriteFromBuffers(val handle: UringHandle, bufs: Array
 
 // - a read waiting on a socket holds no buffer: it waits for readiness, and takes one as it reads, while the pool has
 //   more than half free; a file's read takes one before it is submitted
-private[uring] final class PooledRead(val handle: UringHandle, pool: NativePool, into: Slot[Received]) extends Command {
+private[uring] final class PooledRead(val handle: UringHandle, pool: NativePool, into: Slot[Received])
+    extends Command,
+      Receiving {
   override protected def direction = Command.Direction.Reading
   override def check(): Unit = Checks.checkEmpty(into)
   private var held: pool.PoolBuffer | Null = null
@@ -423,13 +510,36 @@ private[uring] final class PooledRead(val handle: UringHandle, pool: NativePool,
     }
   }
 
-  override private[uring] def leaveParking(): Boolean =
+  protected def failing: String = s"read from $handle"
+
+  override protected def directLeave(): Boolean =
     pool.leave(this) && {
       handle.parked = null
       true
     }
 
-  override private[uring] def readyToSubmit(): Boolean =
+  override protected def waitForRoom(): Boolean = parkOnPool()
+
+  protected def fromQueue(r: Receiver): Boolean = {
+    val slot = pool.take()
+    slot != null && {
+      r.take(slot.buffer)
+      slot.buffer.flip()
+      into.set(slot)
+      true
+    }
+  }
+
+  protected def atEnd(): Boolean = {
+    val slot = pool.take()
+    slot != null && {
+      slot.buffer.flip()
+      into.set(slot)
+      true
+    }
+  }
+
+  override protected def directReady(): Boolean =
     if file then {
       var ready = true
       while held == null && ready && !handle.isClosing do {
@@ -452,7 +562,7 @@ private[uring] final class PooledRead(val handle: UringHandle, pool: NativePool,
       pollNext = false
       if Results.transient(res) then false
       else if res < 0 then throw Results.failure(s"Failed to wait for $handle", res)
-      else tryAtOnce()
+      else directAtOnce()
     } else if Results.transient(res) then {
       held = null
       slot.release()
@@ -473,7 +583,7 @@ private[uring] final class PooledRead(val handle: UringHandle, pool: NativePool,
     }
   }
 
-  override def tryAtOnce(): Boolean = {
+  protected def directAtOnce(): Boolean = {
     val slot = pool.take()
     if slot == null then return false
     val read =
