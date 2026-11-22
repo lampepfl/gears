@@ -113,6 +113,10 @@ private[uring] object uring {
   final val IORING_FEAT_NODROP = 1 << 1
   final val IORING_FEAT_EXT_ARG = 1 << 8
 
+  final val IORING_CQE_F_BUFFER = 1 << 0
+  final val IORING_CQE_F_MORE = 1 << 1
+  final val IORING_CQE_BUFFER_SHIFT = 16
+
 }
 
 private[uring] object uringStructOps {

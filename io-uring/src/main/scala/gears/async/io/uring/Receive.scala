@@ -5,6 +5,7 @@ import java.io.IOException
 import java.nio.ByteBuffer
 import scala.scalanative.libc.stdlib
 import scala.scalanative.memory.PointerBuffer
+import scala.scalanative.posix.errno
 import scala.scalanative.unsafe.*
 import scala.scalanative.unsigned.*
 
@@ -31,10 +32,6 @@ private[uring] object Receive {
   //   sender back; the stop lands after the burst the kernel is receiving, which may take every free buffer, and the
   //   worker's other reads then go to the kernel themselves until those are read
   inline val MostQueued = 16
-
-  inline val FBuffer = 1
-  inline val FMore = 2
-  inline val BufferShift = 16
 }
 
 // - its worker's alone
@@ -84,19 +81,47 @@ private[uring] final class Receiver(val worker: UringWorker, val handle: UringHa
   private var count = 0
   private var taken = 0
 
-  var armed = false
-  var stopping = false
-  var id = 0L
-  var sqe: Ptr[uring.io_uring_sqe] | Null = null
-  var ended = false
-  var failure = 0
-  var lost: IOException | Null = null
+  private var isArmed = false
+  private var isStopping = false
+  private var entryId = 0L
+  private var entry: Ptr[uring.io_uring_sqe] | Null = null
+  private var hasEnded = false
+  private var failure = 0
+  private var lost: IOException | Null = null
+
+  def armed: Boolean = isArmed
+  def stopping: Boolean = isStopping
+  def id: Long = entryId
+  def sqe: Ptr[uring.io_uring_sqe] = entry.nn
+  def ended: Boolean = hasEnded
 
   def queued: Int = count
   def hasQueued: Boolean = count > 0
 
   // - a read may go to the kernel itself only while it is idle: nothing received waits, and nothing more can come
-  def idle: Boolean = count == 0 && !armed && !ended && failure == 0 && lost == null
+  def idle: Boolean = count == 0 && !isArmed && !hasEnded && failure == 0 && lost == null
+
+  def armedAs(id: Long, sqe: Ptr[uring.io_uring_sqe]): Unit = {
+    isArmed = true
+    entryId = id
+    entry = sqe
+  }
+
+  def disarmed(): Unit = {
+    isArmed = false
+    isStopping = false
+  }
+
+  def stopAsked(): Unit = isStopping = true
+
+  def completed(res: Int): Unit =
+    if res == 0 then hasEnded = true
+    else if res < 0 && res != -errno.ENOBUFS && res != -errno.ECANCELED then failure = res
+
+  def lose(cause: IOException): Unit = {
+    lost = cause
+    drop()
+  }
 
   def add(bid: Int, length: Int): Unit = {
     if count == bids.length then grow()

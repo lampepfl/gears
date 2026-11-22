@@ -172,9 +172,7 @@ final class UringWorker private[uring] (id: Int, owner: HandleOwner, ring: Ring,
         false
       } else {
         nextReceive += 1
-        r.armed = true
-        r.id = id
-        r.sqe = sqe
+        r.armedAs(id, sqe.nn)
         armed(id) = r
         true
       }
@@ -188,8 +186,7 @@ final class UringWorker private[uring] (id: Int, owner: HandleOwner, ring: Ring,
 
   private def disarmed(r: Receiver): Unit = {
     armed -= r.id
-    r.armed = false
-    r.stopping = false
+    r.disarmed()
     r.handle.releaseWork()
   }
 
@@ -197,13 +194,13 @@ final class UringWorker private[uring] (id: Int, owner: HandleOwner, ring: Ring,
   // - a cancel that finds the receive running is refused: it is asked again at the next of its completions
   private[uring] def stopReceive(r: Receiver): Unit =
     if r.armed && !r.stopping && !ring.isClosed then
-      if ring.pending(r.sqe.nn, r.id) then {
-        ring.nop(r.sqe.nn)
+      if ring.pending(r.sqe, r.id) then {
+        ring.nop(r.sqe)
         disarmed(r)
       } else if stopsToRefuse > 0 then stopsToRefuse -= 1
       else {
         val res = ring.cancelNow(r.id, wait = false)
-        r.stopping = res == 0 || res == -errno.ENOENT
+        if res == 0 || res == -errno.ENOENT then r.stopAsked()
       }
 
   private[uring] def collectNow(): Unit = ring.collectNow(dispatch): Unit
@@ -215,19 +212,22 @@ final class UringWorker private[uring] (id: Int, owner: HandleOwner, ring: Ring,
       if !r.armed then receivers -= r
     }
 
-  ring.onReceive = (id, res, flags) => {
+  ring.onReceive = new Ring.OnReceive {
+    def receive(id: Long, res: Int, flags: Int): Unit = received(id, res, flags)
+  }
+
+  private def received(id: Long, res: Int, flags: Int): Unit = {
     val r = armed.getOrNull(id)
     if r != null then {
       val h = r.handle
-      if (flags & Receive.FBuffer) != 0 then {
+      if (flags & IORING_CQE_F_BUFFER) != 0 then {
         val b = buffers.nn
         b.taken()
-        val bid = flags >>> Receive.BufferShift
+        val bid = flags >>> IORING_CQE_BUFFER_SHIFT
         if h.isClosing || res <= 0 then b.recycle(bid) else r.add(bid, res)
       }
-      if (flags & Receive.FMore) == 0 then disarmed(r)
-      if res == 0 then r.ended = true
-      else if res < 0 && res != -errno.ENOBUFS && res != -errno.ECANCELED then r.failure = res
+      if (flags & IORING_CQE_F_MORE) == 0 then disarmed(r)
+      r.completed(res)
       if h.isClosing then {
         stopReceive(r)
         r.drop()
@@ -257,8 +257,7 @@ final class UringWorker private[uring] (id: Int, owner: HandleOwner, ring: Ring,
         try disarmed(r)
         catch case e: Throwable => e.printStackTrace()
       }
-      r.lost = lost
-      r.drop()
+      r.lose(lost)
     }
     receivers.clear()
     armed.clear()

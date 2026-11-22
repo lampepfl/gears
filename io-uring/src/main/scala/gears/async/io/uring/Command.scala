@@ -338,7 +338,7 @@ private[uring] abstract class Transfer(bufs: Array[ByteBuffer], copyIn: Boolean)
   override protected def discard(): Unit = staging.end()
 }
 
-// - a connection's read takes what its receive got first, and goes to the kernel itself only while the receive is idle
+// - a read takes what its receive got before it reads from the kernel: read past it, the bytes would come out of order
 private[uring] trait Receiving extends Command {
   private[uring] def arms: Boolean = false
   protected def fromQueue(r: Receiver): Boolean

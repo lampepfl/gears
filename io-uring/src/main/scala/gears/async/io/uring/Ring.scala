@@ -117,7 +117,7 @@ private[uring] final class Ring(entries: Int, completions: Int) {
 
   var afterSubmit: () => Unit = () => ()
 
-  var onReceive: (Long, Int, Int) => Unit = (_, _, _) => ()
+  var onReceive: Ring.OnReceive = Ring.NoReceive
 
   // - never inside a reap: its batch is the reap's
   def collectNow(dispatch: (Long, Int) => Unit): Boolean =
@@ -204,7 +204,7 @@ private[uring] final class Ring(entries: Int, completions: Int) {
         val res = cqe.res
         io_uring_cq_advance(ring, 1.toUInt)
         if id == Ring.WakeId then wakeArmed = false
-        else if id >= Ring.ReceiveBase then onReceive(id, res, cqe.flags.toInt)
+        else if id >= Ring.ReceiveBase then onReceive.receive(id, res, cqe.flags.toInt)
         else if id != Ring.InternalId then dispatch(id, res)
         i += 1
       }
@@ -247,6 +247,10 @@ private[uring] object Ring {
   inline val ReceiveBase = 1L << 62
 
   abstract class Check { def check(): Boolean }
+
+  abstract class OnReceive { def receive(id: Long, res: Int, flags: Int): Unit }
+
+  private object NoReceive extends OnReceive { def receive(id: Long, res: Int, flags: Int): Unit = () }
 
   def failure(what: String, res: Int): IOException = Results.failure(what, res)
 
