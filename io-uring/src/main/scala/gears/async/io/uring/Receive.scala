@@ -88,6 +88,7 @@ private[uring] final class Receiver(val worker: UringWorker, val handle: UringHa
   private var hasEnded = false
   private var failure = 0
   private var lost: IOException | Null = null
+  @volatile private var canMove = true
 
   def armed: Boolean = isArmed
   def stopping: Boolean = isStopping
@@ -101,22 +102,35 @@ private[uring] final class Receiver(val worker: UringWorker, val handle: UringHa
   // - a read may go to the kernel itself only while it is idle: nothing received waits, and nothing more can come
   def idle: Boolean = count == 0 && !isArmed && !hasEnded && failure == 0 && lost == null
 
+  // - read on any worker: an idle receiver changes only by a read, which holds its handle's reading direction, so a
+  //   read on another worker may take its place
+  def movable: Boolean = canMove
+
+  private def settle(): Unit = {
+    val now = idle
+    if now != canMove then canMove = now
+  }
+
   def armedAs(id: Long, sqe: Ptr[uring.io_uring_sqe]): Unit = {
     isArmed = true
     entryId = id
     entry = sqe
+    settle()
   }
 
   def disarmed(): Unit = {
     isArmed = false
     isStopping = false
+    settle()
   }
 
   def stopAsked(): Unit = isStopping = true
 
-  def completed(res: Int): Unit =
+  def completed(res: Int): Unit = {
     if res == 0 then hasEnded = true
     else if res < 0 && res != -errno.ENOBUFS && res != -errno.ECANCELED then failure = res
+    settle()
+  }
 
   def lose(cause: IOException): Unit = {
     lost = cause
@@ -129,6 +143,7 @@ private[uring] final class Receiver(val worker: UringWorker, val handle: UringHa
     bids(at) = bid
     lengths(at) = length
     count += 1
+    settle()
   }
 
   private def grow(): Unit = {
@@ -146,7 +161,7 @@ private[uring] final class Receiver(val worker: UringWorker, val handle: UringHa
     head = 0
   }
 
-  def take(into: ByteBuffer): Unit =
+  def take(into: ByteBuffer): Unit = {
     while into.hasRemaining && count > 0 do {
       val bid = bids(head)
       val left = lengths(head) - taken
@@ -161,14 +176,18 @@ private[uring] final class Receiver(val worker: UringWorker, val handle: UringHa
         buffers.recycle(bid)
       } else taken += n
     }
+    settle()
+  }
 
-  def drop(): Unit =
+  def drop(): Unit = {
     while count > 0 do {
       if lost == null then buffers.recycle(bids(head))
       head = (head + 1) % bids.length
       count -= 1
       taken = 0
     }
+    settle()
+  }
 
   def outcome(what: => String): Boolean =
     if lost != null then throw lost.nn

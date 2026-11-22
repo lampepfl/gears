@@ -21,12 +21,21 @@ import uring.*
 import uringStructOps.*
 
 /** The io_uring backend's pool: io-poller's workers, each with a ring for its poller. */
-final class UringScheduler private[uring] (rings: Array[Ring], onStarvation: Starvation.Handler)
-    extends WorkpoolScheduler[UringOps.type](UringBackend, UringOps, rings.length, onStarvation),
+final class UringScheduler private[uring] (
+    rings: Array[Ring],
+    onStarvation: Starvation.Handler,
+    made: Array[UringWorker | Null]
+) extends WorkpoolScheduler[UringOps.type](UringBackend, UringOps, rings.length, onStarvation),
       NativeSuspend {
   override protected def selectWorker() = workerOfCurrentThread()
 
-  override def makeWorker(id: Int, owner: HandleOwner): UringWorker = new UringWorker(id, owner, rings(id), this)
+  override def makeWorker(id: Int, owner: HandleOwner): UringWorker = {
+    val worker = new UringWorker(id, owner, rings(id), this)
+    made(id) = worker
+    worker
+  }
+
+  private[uring] def worker(id: Int): UringWorker = made(id).nn
 
   private[uring] def workerOfThread(thread: Thread): AnyRef | Null = workerOf(thread)
 
@@ -51,7 +60,7 @@ object UringScheduler {
         for i <- 0 until made do rings(i).close()
         throw e
     }
-    try new UringScheduler(rings, onStarvation)
+    try new UringScheduler(rings, onStarvation, new Array[UringWorker | Null](workers))
     catch {
       case e: Throwable =>
         rings.foreach(_.close())
@@ -141,7 +150,7 @@ final class UringWorker private[uring] (id: Int, owner: HandleOwner, ring: Ring,
     if b == null then Receive.Entries else b.free
   }
 
-  private[uring] def receiverFor(h: UringHandle): Receiver | Null =
+  private[uring] def receiverFor(h: UringHandle, from: Receiver | Null): Receiver | Null =
     if receivesOff || hasGivenUp || ring.isClosed then null
     else {
       if buffers == null then
@@ -150,11 +159,16 @@ final class UringWorker private[uring] (id: Int, owner: HandleOwner, ring: Ring,
       if buffers == null then null
       else {
         val r = new Receiver(this, h, buffers.nn)
-        h.receiver = r
-        receivers += r
-        r
+        if !h.takeReceiver(from, r) then null
+        else {
+          receivers += r
+          if from != null then from.worker.forget(from)
+          r
+        }
       }
     }
+
+  private def forget(r: Receiver): Unit = runOnRing(() => receivers -= r)
 
   // - an armed receive is work claimed on its handle, as a command in the kernel is: the descriptor closes once it ends
   private[uring] def arm(r: Receiver): Boolean =

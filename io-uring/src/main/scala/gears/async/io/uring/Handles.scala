@@ -49,8 +49,12 @@ sealed abstract class UringHandle(fd: Int, kind: String, owner: HandleOwner) ext
 
   @volatile private[uring] var parked: Command | Null = null
 
-  // - set once, by the first read that receives, which holds the reading direction
-  @volatile private[uring] var receiver: Receiver | Null = null
+  // - set by a read, which holds the reading direction: the first that receives, or one that takes an idle receiver over
+  private val receiving = new java.util.concurrent.atomic.AtomicReference[Receiver | Null]()
+
+  private[uring] def receiver: Receiver | Null = receiving.get()
+
+  private[uring] def takeReceiver(from: Receiver | Null, to: Receiver): Boolean = receiving.compareAndSet(from, to)
 
   def isClosing: Boolean = getState != HandleState.OpenState
 

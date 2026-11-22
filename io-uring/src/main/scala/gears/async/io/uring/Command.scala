@@ -354,7 +354,13 @@ private[uring] trait Receiving extends Command {
 
   override private[uring] def performerOf(current: UringWorker): UringWorker = {
     var r = handle.receiver
-    if r == null && arms && handle.isInstanceOf[ConnectionHandle] then r = current.receiverFor(handle)
+    if r == null then {
+      if arms && handle.isInstanceOf[ConnectionHandle] then r = current.receiverFor(handle, null)
+    } else if (r.worker ne current) && r.movable then {
+      val taken = current.receiverFor(handle, r)
+      if taken != null then r = taken
+    }
+    if r == null then r = handle.receiver
     receiver = r
     if r == null then current else r.worker
   }

@@ -369,6 +369,33 @@ class ReceiveSuite extends munit.FunSuite {
     }
   }
 
+  private def workerOf(here: Thread)(using io: Io[UringOps.type]): UringWorker =
+    io.asInstanceOf[UringScheduler].workerOfThread(here).asInstanceOf[UringWorker]
+
+  // - a future starts on the worker that spawns it
+  private def onWorker[T](w: UringWorker)(body: Async ?=> T)(using spawn: Async.Spawn): Future[T] = {
+    val started = Future.Promise[Future[T]]()
+    w.runOnRing(() => started.complete(Try(Future(body))))
+    started.await
+  }
+
+  // - a large read with nothing queued stops the receive, which then stays idle
+  private def idle(client: ConnectionHandle, server: ConnectionHandle)(using
+      io: Io[UringOps.type],
+      spawn: Async.Spawn
+  ) = {
+    arm(client, server)
+    val r = receiverOf(server)
+    val waiting = Future {
+      val b = ByteBuffer.allocate(64 * 1024)
+      io.perform(ops.read(server, b))
+      contents(b)
+    }
+    until(s"the receive stopped: ${state(r)}")(onItsWorker(r)(!r.armed))
+    send(client, "idle")
+    assertEquals(waiting.await, "idle")
+  }
+
   receiving("a connection read to the end of its stream and then closed leaves no receive behind") {
     onPool(1) { io ?=>
       val (client, server) = connection()
@@ -397,6 +424,31 @@ class ReceiveSuite extends munit.FunSuite {
       until(s"every buffer is back: ${state(r)}")(onItsWorker(r)(worker.freeBuffers) == Receive.Entries)
       assertEquals(onItsWorker(r)(worker.receiverCount), 0)
       io.perform(ops.close(client))
+    }
+  }
+
+  receiving("reads from two workers in turn on an idle connection are each performed where they were made, in order") {
+    onPool(2) { io ?=>
+      val (client, server) = connection()
+      idle(client, server)
+      val pool = io.asInstanceOf[UringScheduler]
+      val results = (1 to 100).map { i =>
+        val reader = onWorker(pool.worker(i % 2)) {
+          val here = workerOf(Thread.currentThread())
+          val b = ByteBuffer.allocate(64 * 1024)
+          io.perform(ops.read(server, b))
+          (here, receiverOf(server).worker, contents(b))
+        }
+        if i % 3 == 0 then AsyncOperations.sleep(1)
+        send(client, f"${i % 10}")
+        reader.await
+      }
+      assertEquals(results.map(_._3).mkString, (1 to 100).map(_ % 10).mkString)
+      assert(results.map(_._1).distinct.size == 2, "every read was made on one worker: the test showed nothing")
+      val elsewhere = results.count((here, on, _) => here ne on)
+      assertEquals(elsewhere, 0, "reads were performed on another worker than the one they were made on")
+      io.perform(ops.close(client))
+      io.perform(ops.close(server))
     }
   }
 
