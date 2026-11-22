@@ -132,6 +132,8 @@ final class UringWorker private[uring] (id: Int, owner: HandleOwner, ring: Ring,
   private val receivers = scala.collection.mutable.HashSet.empty[Receiver]
   private[uring] val readsOnReceives = new java.util.concurrent.atomic.AtomicInteger()
 
+  private[uring] def receiverCount: Int = receivers.size
+
   private[uring] def freeBuffers: Int = {
     val b = buffers
     if b == null then Receive.Entries else b.free
@@ -234,22 +236,27 @@ final class UringWorker private[uring] (id: Int, owner: HandleOwner, ring: Ring,
 
   private def loseReceives(outcome: Try[Unit]): Unit = {
     val lost = new IOException("The io_uring worker's ring is gone")
-    for r <- receivers do {
+    var letGo = true
+    // - a snapshot: a disarm may close its handle, whose last act ends its receive here
+    val all = receivers.toArray
+    for r <- all do {
       if r.armed then {
-        ring.cancelNow(r.id, wait = true): Unit
+        val res = ring.cancelNow(r.id, wait = true)
+        if res != 0 && res != -errno.ENOENT then letGo = false
         try disarmed(r)
         catch case e: Throwable => e.printStackTrace()
       }
       r.lost = lost
       r.drop()
     }
-    val all = receivers.toList
     receivers.clear()
     armed.clear()
     val b = buffers
     buffers = null
     receivesOff = true
-    if b != null then b.close()
+    // - a receive the kernel has not let go of may still write into them: they are kept, as `UringScheduler.kept` keeps
+    //   the commands' memory
+    if b != null && letGo then b.close()
     for r <- all do {
       val waiting = r.handle.parked
       if waiting != null && (waiting.owner eq this) && waiting.leaveParking() then

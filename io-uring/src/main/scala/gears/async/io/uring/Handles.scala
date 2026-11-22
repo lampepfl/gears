@@ -111,7 +111,13 @@ final class ConnectionHandle private[uring] (
 ) extends UringHandle(fd, if kind.unix then "Unix connection" else "connection", owner)
     with UringReadable
     with UringWritable
-    with PosixSocket
+    with PosixSocket {
+  // - a receive that is no longer armed claims no work, so a close may take the idle path, past `closing`
+  override protected def beforeDescriptorCloses(): Unit = {
+    val r = receiver
+    if r != null then r.worker.endReceive(r)
+  }
+}
 
 final class ListenerHandle private[uring] (
     fd: Int,

@@ -369,6 +369,37 @@ class ReceiveSuite extends munit.FunSuite {
     }
   }
 
+  receiving("a connection read to the end of its stream and then closed leaves no receive behind") {
+    onPool(1) { io ?=>
+      val (client, server) = connection()
+      arm(client, server)
+      val r = receiverOf(server)
+      val worker = r.worker
+      send(client, "last")
+      io.perform(ops.close(client))
+      assertEquals(read(server, 8), "last")
+      assertEquals(read(server, 8), "")
+      io.perform(ops.close(server))
+      until(s"the receive is gone: ${state(r)}")(onItsWorker(r)(worker.receiverCount) == 0)
+      assertEquals(onItsWorker(r)(worker.freeBuffers), Receive.Entries)
+    }
+  }
+
+  receiving("a connection closed with what its stopped receive got unread gives back every buffer") {
+    onPool(1) { io ?=>
+      val (client, server) = connection()
+      arm(client, server)
+      val r = receiverOf(server)
+      val worker = r.worker
+      send(client, bytes(2 * Receive.MostQueued * Receive.Size))
+      until(s"the receive stopped: ${state(r)}")(onItsWorker(r)(!r.armed && r.queued >= Receive.MostQueued))
+      io.perform(ops.close(server))
+      until(s"every buffer is back: ${state(r)}")(onItsWorker(r)(worker.freeBuffers) == Receive.Entries)
+      assertEquals(onItsWorker(r)(worker.receiverCount), 0)
+      io.perform(ops.close(client))
+    }
+  }
+
   receiving("a failing ring fails the reads waiting on its receives, and those that come after") {
     val outcome = Try(onPool(1) { io ?=>
       val (client, server) = connection()
