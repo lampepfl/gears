@@ -87,6 +87,7 @@ private[uring] final class Receiver(val worker: UringWorker, val handle: UringHa
   var armed = false
   var stopping = false
   var id = 0L
+  var sqe: Ptr[uring.io_uring_sqe] | Null = null
   var ended = false
   var failure = 0
   var lost: IOException | Null = null

@@ -156,15 +156,23 @@ final class UringWorker private[uring] (id: Int, owner: HandleOwner, ring: Ring,
   private[uring] def arm(r: Receiver): Boolean =
     r.armed || r.idle && !r.handle.isClosing && !ring.isClosed && buffers.nn.free > 0 && claimed(r.handle) && {
       val id = nextReceive
-      ring.armReceive(r.handle.fd, Receive.Group, id) && {
+      val sqe =
+        try ring.armReceive(r.handle.fd, Receive.Group, id)
+        catch {
+          case failure: Throwable =>
+            r.handle.releaseWork()
+            throw failure
+        }
+      if sqe == null then {
+        r.handle.releaseWork()
+        false
+      } else {
         nextReceive += 1
         r.armed = true
         r.id = id
+        r.sqe = sqe
         armed(id) = r
         true
-      } || {
-        r.handle.releaseWork()
-        false
       }
     }
 
@@ -181,12 +189,17 @@ final class UringWorker private[uring] (id: Int, owner: HandleOwner, ring: Ring,
     r.handle.releaseWork()
   }
 
+  // - one the ring has not submitted yet becomes a no-op: a cancel would not find it, and it would stay armed
   // - a cancel that finds the receive running is refused: it is asked again at the next of its completions
   private[uring] def stopReceive(r: Receiver): Unit =
-    if r.armed && !r.stopping && !ring.isClosed then {
-      val res = ring.cancelNow(r.id, wait = false)
-      r.stopping = res == 0 || res == -errno.ENOENT
-    }
+    if r.armed && !r.stopping && !ring.isClosed then
+      if ring.pending(r.sqe.nn, r.id) then {
+        ring.nop(r.sqe.nn)
+        disarmed(r)
+      } else {
+        val res = ring.cancelNow(r.id, wait = false)
+        r.stopping = res == 0 || res == -errno.ENOENT
+      }
 
   private[uring] def collectNow(): Unit = ring.collectNow(dispatch): Unit
 

@@ -254,6 +254,27 @@ class ReceiveSuite extends munit.FunSuite {
     }
   }
 
+  receiving(
+    "a close in the turn a receive is armed in, before the ring has submitted it, still closes the connection"
+  ) {
+    onPool(1) { io ?=>
+      for i <- 1 to 20 do {
+        val (client, server) = connection()
+        val reading = Future(read(server, 8))
+        val closing = Future(Try(io.perform(ops.close(server), 2.seconds)))
+        val closed = closing.await
+        assert(closed.isSuccess, s"round $i: the close did not complete: $closed")
+        val waited = reading.awaitResult
+        assert(waited.failed.toOption.exists(_.isInstanceOf[ClosedChannelException]), s"round $i: $waited")
+        val end = Try(io.perform(ops.read(client, ByteBuffer.allocate(8)), 2.seconds))
+        assert(end.isSuccess, s"round $i: the peer did not see the close: $end")
+        io.perform(ops.close(client))
+      }
+      val worker = io.asInstanceOf[UringScheduler].workerOfThread(Thread.currentThread()).asInstanceOf[UringWorker]
+      until(s"every buffer is back: ${worker.freeBuffers} free")(worker.freeBuffers == Receive.Entries)
+    }
+  }
+
   receiving("the end of the stream reaches the reads after what came before it") {
     onPool(1) { io ?=>
       val (client, server) = connection()

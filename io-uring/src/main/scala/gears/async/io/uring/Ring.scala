@@ -138,12 +138,10 @@ private[uring] final class Ring(entries: Int, completions: Int) {
   def freeBufRing(br: Ptr[Byte], entries: Int, bgid: Int): Unit =
     if !closed then buf_ring_free(ring, br, entries.toUInt, bgid): Unit
 
-  def armReceive(fd: Int, bgid: Int, id: Long): Boolean = {
+  def armReceive(fd: Int, bgid: Int, id: Long): Ptr[io_uring_sqe] | Null = {
     val sqe = nextSqe()
-    sqe != null && {
-      prep_recv_multishot(sqe.nn, fd, bgid, id.toULong)
-      true
-    }
+    if sqe != null then prep_recv_multishot(sqe.nn, fd, bgid, id.toULong)
+    sqe
   }
 
   def isClosed: Boolean = closed
