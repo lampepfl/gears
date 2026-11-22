@@ -362,7 +362,7 @@ class ReceiveSuite extends munit.FunSuite {
       for i <- 1 to 200 do send(client, f"${i % 10}")
       val results = readers.map(_.await)
       val elsewhere = results.count(_._1)
-      assertEquals(results.map(_._2).mkString.length, 200)
+      assertEquals(results.map(_._2).mkString, (1 to 200).map(_ % 10).mkString)
       assert(elsewhere > 0, "no read was performed from another worker: the test showed nothing")
       io.perform(ops.close(client))
       io.perform(ops.close(server))

@@ -62,16 +62,21 @@ stream ends or fails, the connection closes, or no buffer is free; then the next
 
 What a receive got is its worker's alone, so every read of the connection is performed on that worker: one performed
 elsewhere is handed to it as a ring task, as a command whose turn has come is, and taken back there if its performer is
-cancelled. Every read takes what was received first, a vectored or pooled one too, and goes to the kernel itself only
-while the receive is idle, nothing taken and nothing more to come; a larger read, or one of these, stops an armed
-receive, takes what came before the stop, and then reads from the kernel, which saves a copy of every byte of a bulk
-transfer. A cancelled or timed-out read loses nothing: what arrives after is the next read's.
+cancelled. A receive that is idle, nothing queued and nothing armed, moves to the worker of the read that finds it so:
+its worker publishes that it is idle, and the read, which holds the connection's reading direction, puts a receive of
+its own worker's in its place. A read handed over resumes its future on the receive's worker, so an armed receive keeps
+the connection's reads where it is. Every read takes what was received first, a vectored or pooled one too, and goes to
+the kernel itself only while the receive is idle, nothing taken and nothing more to come; a larger read, or one of
+these, stops an armed receive, takes what came before the stop, and then reads from the kernel, which saves a copy of
+every byte of a bulk transfer. A cancelled or timed-out read loses nothing: what arrives after is the next read's.
 
-An armed receive is work claimed on its handle, so a close cancels it and the descriptor closes once it has ended; the
-buffers it held are given back. A connection holding 16 buffers with no read waiting stops receiving, and the kernel's
-flow control then holds its sender back; the kernel receives what is already there in one burst before the stop lands,
-which may take every free buffer for a while, and a worker with none free reads from the kernel itself. A worker spins
-on its completion queue while a read waits on a receive, as it does while a command is in the kernel.
+An armed receive is work claimed on its handle, so a close cancels it and the descriptor closes once it has ended.
+However the connection closes, armed or not, its receive ends as the descriptor closes, and the buffers it held are
+given back. A connection holding 16 buffers with no read waiting on its receive stops receiving, a pooled read waiting
+for its pool too, and the kernel's flow control then holds its sender back; the kernel receives what is already there in
+one burst before the stop lands, which may take every free buffer for a while, and a worker with none free reads from
+the kernel itself. A stop the kernel refuses, finding the receive running, is asked again at its next completion. A
+worker spins on its completion queue while a read waits on a receive, as it does while a command is in the kernel.
 
 Multishot receives are turned off with `gears.io.uring.multishot=false`, or `GEARS_IO_URING_MULTISHOT=false`.
 
@@ -90,6 +95,8 @@ close between a read's preparation and its submission, and closes reaching entri
 ring, a kernel worker's read in it; pooled reads holding at most half the pool, waiting while it is empty, and ended by
 a cancel, a time limit or a close; and that every handle is close-on-exec. `ReceiveSuite` checks receives: reads in
 order however they cut what came, bytes that came with no read waiting, a large, vectored or pooled read after a
-receive, a cancel or time limit losing nothing, a close giving every buffer back, the end of the stream, a stopped
-receive holding its sender back, a worker with no buffer free, reads performed from other workers, and a failing ring.
-The whole suite also runs with receives turned off.
+receive, a cancel or time limit losing nothing, a close giving every buffer back, whether the receive was armed, ended
+or stopped with buffers unread, the end of the stream, a stopped receive holding its sender back, a pooled read waiting
+for its pool not keeping it past its cap, a worker with no buffer free, reads performed from other workers, in order, an
+idle receive moving to the worker of the read, a stop the kernel refused asked again, and a failing ring. The suite is
+also run by hand with receives turned off, with `GEARS_IO_URING_MULTISHOT=false`, which `ReceiveSuite` skips.
