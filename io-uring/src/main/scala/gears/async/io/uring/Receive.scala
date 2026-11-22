@@ -88,7 +88,7 @@ private[uring] final class Receiver(val worker: UringWorker, val handle: UringHa
   private var hasEnded = false
   private var failure = 0
   private var lost: IOException | Null = null
-  @volatile private var canMove = true
+  @volatile private var shown = Receiver.Idle
 
   def armed: Boolean = isArmed
   def stopping: Boolean = isStopping
@@ -104,11 +104,16 @@ private[uring] final class Receiver(val worker: UringWorker, val handle: UringHa
 
   // - read on any worker: an idle receiver changes only by a read, which holds its handle's reading direction, so a
   //   read on another worker may take its place
-  def movable: Boolean = canMove
+  def movable: Boolean = shown == Receiver.Idle
+
+  def waitsForBytes: Boolean = shown == Receiver.Waiting
 
   private def settle(): Unit = {
-    val now = idle
-    if now != canMove then canMove = now
+    val now =
+      if idle then Receiver.Idle
+      else if isArmed && count == 0 && !hasEnded && failure == 0 && lost == null then Receiver.Waiting
+      else Receiver.Holding
+    if now != shown then shown = now
   }
 
   def armedAs(id: Long, sqe: Ptr[uring.io_uring_sqe]): Unit = {
@@ -193,4 +198,10 @@ private[uring] final class Receiver(val worker: UringWorker, val handle: UringHa
     if lost != null then throw lost.nn
     else if failure != 0 then throw Results.failure(s"Failed to $what", failure)
     else ended
+}
+
+private[uring] object Receiver {
+  inline val Idle = 0
+  inline val Waiting = 1
+  inline val Holding = 2
 }

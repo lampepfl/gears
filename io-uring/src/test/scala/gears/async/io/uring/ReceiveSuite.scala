@@ -452,6 +452,133 @@ class ReceiveSuite extends munit.FunSuite {
     }
   }
 
+  receiving("a read on another worker takes over an armed receive with nothing queued, and reads its bytes there") {
+    onPool(2) { io ?=>
+      val (client, server) = connection()
+      val pool = io.asInstanceOf[UringScheduler]
+      val first = onWorker(pool.worker(0))(read(server, 8))
+      AsyncOperations.sleep(10)
+      send(client, "!")
+      assertEquals(first.await, "!")
+      assert(receiverOf(server).worker eq pool.worker(0), "the receive is not on the first worker")
+      val second = onWorker(pool.worker(1))(read(server, 8))
+      AsyncOperations.sleep(10)
+      send(client, "moved")
+      assertEquals(second.await, "moved")
+      val r = receiverOf(server)
+      assert(r.worker eq pool.worker(1), "the receive stayed on the first worker")
+      val armed = onItsWorker(r)(r.armed)
+      assert(armed, "the receive is not armed on the second worker")
+      io.perform(ops.close(client))
+      io.perform(ops.close(server))
+    }
+  }
+
+  receiving("a read on another worker of a receive with bytes queued takes them on the receive's worker") {
+    onPool(2) { io ?=>
+      val (client, server) = connection()
+      val pool = io.asInstanceOf[UringScheduler]
+      val first = onWorker(pool.worker(0))(read(server, 8))
+      AsyncOperations.sleep(10)
+      send(client, "!")
+      assertEquals(first.await, "!")
+      val r = receiverOf(server)
+      send(client, "queued")
+      until(s"the receive got it: ${state(r)}")(onItsWorker(r)(r.queued) == 1)
+      assertEquals(onWorker(pool.worker(1))(read(server, 8)).await, "queued")
+      io.perform(ops.close(client))
+      io.perform(ops.close(server))
+    }
+  }
+
+  receiving(
+    "small reads on two workers in turn, with bytes arriving as the receive moves, lose nothing and keep order"
+  ) {
+    onPool(2) { io ?=>
+      val (client, server) = connection()
+      val pool = io.asInstanceOf[UringScheduler]
+      val expected = (1 to 300).map(i => ('a' + i % 26).toChar).mkString
+      val sending = Future {
+        for c <- expected do {
+          send(client, c.toString)
+          if c == 'a' then AsyncOperations.sleep(1)
+        }
+      }
+      val got = new StringBuilder
+      var i = 0
+      while got.length < expected.length do {
+        i += 1
+        got ++= onWorker(pool.worker(i % 2))(read(server, 3)).await
+      }
+      sending.await
+      assertEquals(got.toString, expected)
+      io.perform(ops.close(client))
+      io.perform(ops.close(server))
+    }
+  }
+
+  receiving("a read waiting for the receive to move that is cancelled, or runs out of time, loses nothing") {
+    onPool(2) { io ?=>
+      val (client, server) = connection()
+      val pool = io.asInstanceOf[UringScheduler]
+      val first = onWorker(pool.worker(0))(read(server, 8))
+      AsyncOperations.sleep(10)
+      send(client, "!")
+      assertEquals(first.await, "!")
+      val r = receiverOf(server)
+      onItsWorker(r)(r.worker.stopsToRefuse = 1)
+      val waiting = onWorker(pool.worker(1))(read(server, 8))
+      AsyncOperations.sleep(10)
+      waiting.cancel()
+      val cancelled = waiting.awaitResult
+      assert(cancelled.failed.toOption.exists(_.isInstanceOf[CancellationException]), cancelled)
+      val timed = onWorker(pool.worker(1))(Try(io.perform(ops.read(server, ByteBuffer.allocate(8)), 20.millis))).await
+      assert(timed.failed.toOption.exists(_.isInstanceOf[TimeoutException]), timed)
+      val next = onWorker(pool.worker(1))(read(server, 8))
+      AsyncOperations.sleep(10)
+      send(client, "after")
+      assertEquals(next.await, "after")
+      io.perform(ops.close(client))
+      io.perform(ops.close(server))
+    }
+  }
+
+  receiving("a close fails a read waiting for the receive to move, and completes") {
+    onPool(2) { io ?=>
+      val (client, server) = connection()
+      val pool = io.asInstanceOf[UringScheduler]
+      val first = onWorker(pool.worker(0))(read(server, 8))
+      AsyncOperations.sleep(10)
+      send(client, "!")
+      assertEquals(first.await, "!")
+      val r = receiverOf(server)
+      onItsWorker(r)(r.worker.stopsToRefuse = 1)
+      val waiting = onWorker(pool.worker(1))(read(server, 8))
+      AsyncOperations.sleep(10)
+      val closed = Try(io.perform(ops.close(server), 2.seconds))
+      assert(closed.isSuccess, s"the close did not complete: $closed")
+      val failed = waiting.awaitResult
+      assert(failed.failed.toOption.exists(_.isInstanceOf[ClosedChannelException]), failed)
+      until(s"every buffer is back: ${state(r)}")(onItsWorker(r)(r.worker.freeBuffers) == Receive.Entries)
+      io.perform(ops.close(client))
+    }
+  }
+
+  for refused <- List(false, true) do
+    receiving(s"a torn-down ring keeps its buffers only while a receive may still hold them: refused $refused") {
+      var worker: UringWorker | Null = null
+      val outcome = Try(onPool(1) { io ?=>
+        val (client, server) = connection()
+        arm(client, server)
+        val r = receiverOf(server)
+        worker = r.worker
+        if refused then onItsWorker(r)(r.worker.cancelsToFail = 1)
+        io.asInstanceOf[UringScheduler].failRing(new java.io.IOException("failed for the test"))
+      })
+      assert(outcome.isFailure, outcome)
+      assertEquals(worker.nn.keptBuffers, refused)
+    }
+
   receiving("a pooled read waiting for its pool does not keep the receive past its cap") {
     onPool(1) { io ?=>
       val (client, server) = connection()

@@ -145,13 +145,19 @@ final class UringWorker private[uring] (id: Int, owner: HandleOwner, ring: Ring,
 
   private[uring] var stopsToRefuse = 0
 
+  private[uring] var cancelsToFail = 0
+
+  @volatile private[uring] var keptBuffers = false
+
   private[uring] def freeBuffers: Int = {
     val b = buffers
     if b == null then Receive.Entries else b.free
   }
 
+  private[uring] def takesReceives: Boolean = !(receivesOff || hasGivenUp || ring.isClosed)
+
   private[uring] def receiverFor(h: UringHandle, from: Receiver | Null): Receiver | Null =
-    if receivesOff || hasGivenUp || ring.isClosed then null
+    if !takesReceives then null
     else {
       if buffers == null then
         try buffers = new BufferRing(ring, Receive.Entries)
@@ -219,6 +225,20 @@ final class UringWorker private[uring] (id: Int, owner: HandleOwner, ring: Ring,
 
   private[uring] def collectNow(): Unit = ring.collectNow(dispatch): Unit
 
+  /** Stops `r` for a read on another worker that waits to take it over, and wakes that read once it may. */
+  private[uring] def release(r: Receiver): Unit =
+    runOnRing { () =>
+      stopReceive(r)
+      wakeParked(r)
+    }
+
+  private def wakeParked(r: Receiver): Unit = {
+    val h = r.handle
+    val waiting = h.parked
+    if waiting != null && (r.hasQueued || !r.armed || h.isClosing) && waiting.leaveParking() then
+      waiting.owner.nn.startTurn(waiting)
+  }
+
   private[uring] def endReceive(r: Receiver): Unit =
     runOnRing { () =>
       stopReceive(r)
@@ -247,15 +267,14 @@ final class UringWorker private[uring] (id: Int, owner: HandleOwner, ring: Ring,
         r.drop()
         if !r.armed then receivers -= r
       } else {
-        // - a read waiting on it that does not arm receives waits for its stop
+        // - a read waiting on it waits for its stop if it does not arm receives, or waits to take it over
         val stops = h.parked match {
-          case read: Receiving if read.waitsOnReceiver => !read.arms
+          case read: Receiving if read.waitsOnReceiver => read.wantsStop
           case _                                       => r.queued >= Receive.MostQueued
         }
         if stops then stopReceive(r)
       }
-      val waiting = h.parked
-      if waiting != null && (r.hasQueued || !r.armed || h.isClosing) && waiting.leaveParking() then startTurn(waiting)
+      wakeParked(r)
     }
   }
 
@@ -266,7 +285,11 @@ final class UringWorker private[uring] (id: Int, owner: HandleOwner, ring: Ring,
     val all = receivers.toArray
     for r <- all do {
       if r.armed then {
-        val res = ring.cancelNow(r.id, wait = true)
+        val res =
+          if cancelsToFail > 0 then {
+            cancelsToFail -= 1
+            -errno.EALREADY
+          } else ring.cancelNow(r.id, wait = true)
         if res != 0 && res != -errno.ENOENT then letGo = false
         try disarmed(r)
         catch case e: Throwable => e.printStackTrace()
@@ -280,12 +303,14 @@ final class UringWorker private[uring] (id: Int, owner: HandleOwner, ring: Ring,
     receivesOff = true
     // - a receive the kernel has not let go of may still write into them: they are kept, as `UringScheduler.kept` keeps
     //   the commands' memory
-    if b != null && letGo then b.close()
+    if b != null then if letGo then b.close() else keptBuffers = true
     for r <- all do {
       val waiting = r.handle.parked
-      if waiting != null && (waiting.owner eq this) && waiting.leaveParking() then
-        try settle(waiting, outcome, done = false)
-        catch case e: Throwable => e.printStackTrace()
+      if waiting != null && waiting.leaveParking() then
+        if waiting.owner eq this then
+          try settle(waiting, outcome, done = false)
+          catch case e: Throwable => e.printStackTrace()
+        else waiting.owner.nn.startTurn(waiting)
     }
   }
 
@@ -500,7 +525,13 @@ final class UringWorker private[uring] (id: Int, owner: HandleOwner, ring: Ring,
   // ---- taking a command back, its performer cancelled or out of time
 
   private[uring] def takeBack(c: Command, performance: Long): Unit =
-    runOnRing(() => if c.performance == performance && (c.owner eq this) && !c.hasLetGo then withdraw(c))
+    runOnRing { () =>
+      if c.performance == performance && !c.hasLetGo then {
+        val owner = c.owner
+        // - a read handed to another worker after its performer began is taken back there
+        if owner eq this then withdraw(c) else if owner != null then owner.takeBack(c, performance)
+      }
+    }
 
   private def withdraw(c: Command): Unit = {
     val gone = c.state match {

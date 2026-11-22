@@ -64,11 +64,13 @@ What a receive got is its worker's alone, so every read of the connection is per
 elsewhere is handed to it as a ring task, as a command whose turn has come is, and taken back there if its performer is
 cancelled. A receive that is idle, nothing queued and nothing armed, moves to the worker of the read that finds it so:
 its worker publishes that it is idle, and the read, which holds the connection's reading direction, puts a receive of
-its own worker's in its place. A read handed over resumes its future on the receive's worker, so an armed receive keeps
-the connection's reads where it is. Every read takes what was received first, a vectored or pooled one too, and goes to
-the kernel itself only while the receive is idle, nothing taken and nothing more to come; a larger read, or one of
-these, stops an armed receive, takes what came before the stop, and then reads from the kernel, which saves a copy of
-every byte of a bulk transfer. A cancelled or timed-out read loses nothing: what arrives after is the next read's.
+its own worker's in its place. A read on another worker that finds the receive armed with nothing queued asks the
+receive's worker to stop it, and waits on its own worker: once the stop has landed it takes the idle receive over, and
+if bytes came first it is handed over to take them. A read handed over resumes its future on the receive's worker. Every
+read takes what was received first, a vectored or pooled one too, and goes to the kernel itself only while the receive
+is idle, nothing taken and nothing more to come; a larger read, or one of these, stops an armed receive, takes what came
+before the stop, and then reads from the kernel, which saves a copy of every byte of a bulk transfer. A cancelled or
+timed-out read loses nothing: what arrives after is the next read's.
 
 An armed receive is work claimed on its handle, so a close cancels it and the descriptor closes once it has ended.
 However the connection closes, armed or not, its receive ends as the descriptor closes, and the buffers it held are
@@ -98,5 +100,7 @@ order however they cut what came, bytes that came with no read waiting, a large,
 receive, a cancel or time limit losing nothing, a close giving every buffer back, whether the receive was armed, ended
 or stopped with buffers unread, the end of the stream, a stopped receive holding its sender back, a pooled read waiting
 for its pool not keeping it past its cap, a worker with no buffer free, reads performed from other workers, in order, an
-idle receive moving to the worker of the read, a stop the kernel refused asked again, and a failing ring. The suite is
-also run by hand with receives turned off, with `GEARS_IO_URING_MULTISHOT=false`, which `ReceiveSuite` skips.
+idle receive moving to the worker of the read, an armed one taken over by a read on another worker, with bytes arriving
+as it moves, and that read cancelled, out of time or closed, a stop the kernel refused asked again, a failing ring, and
+buffers kept at teardown while a receive may hold them. The suite is also run by hand with receives turned off, with
+`GEARS_IO_URING_MULTISHOT=false`, which `ReceiveSuite` skips.

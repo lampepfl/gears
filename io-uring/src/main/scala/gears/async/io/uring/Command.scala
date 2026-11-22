@@ -350,24 +350,44 @@ private[uring] trait Receiving extends Command {
   protected def failing: String
 
   private var receiver: Receiver | Null = null
+  // - the receive is another worker's, armed with nothing queued: the read waits on its own worker for it to stop, and
+  //   touches nothing of it until it is idle and taken over, or the read is handed to that worker
+  private var moving = false
+  private var stopAsked = false
   private val onReceiver = new java.util.concurrent.atomic.AtomicBoolean()
+  private val onMove = new java.util.concurrent.atomic.AtomicBoolean()
 
   override private[uring] def performerOf(current: UringWorker): UringWorker = {
     var r = handle.receiver
+    moving = false
+    stopAsked = false
     if r == null then {
       if arms && handle.isInstanceOf[ConnectionHandle] then r = current.receiverFor(handle, null)
-    } else if (r.worker ne current) && r.movable then {
-      val taken = current.receiverFor(handle, r)
-      if taken != null then r = taken
+    } else if r.worker ne current then {
+      if r.movable then {
+        val taken = current.receiverFor(handle, r)
+        if taken != null then r = taken
+      } else moving = r.waitsForBytes && current.takesReceives
     }
     if r == null then r = handle.receiver
     receiver = r
-    if r == null then current else r.worker
+    if r == null || moving then current else r.worker
+  }
+
+  private def takeOver(): Boolean = {
+    val r = receiver.nn
+    val taken = if r.movable then owner.nn.receiverFor(handle, r) else null
+    taken != null && {
+      receiver = taken
+      moving = false
+      true
+    }
   }
 
   override def tryAtOnce(): Boolean = {
     val r = receiver
-    if r == null then directAtOnce()
+    if moving && !(stopAsked && takeOver()) then false
+    else if r == null then directAtOnce()
     else if r.hasQueued then fromQueue(r)
     else if r.idle then directAtOnce()
     else !r.armed && r.outcome(failing) && atEnd()
@@ -375,7 +395,15 @@ private[uring] trait Receiving extends Command {
 
   override private[uring] def readyToSubmit(): Boolean = {
     val r = receiver
-    if r == null then directReady()
+    if moving then {
+      if !stopAsked then {
+        stopAsked = true
+        waitToMove(r.nn)
+      } else {
+        handOver(r.nn)
+        false
+      }
+    } else if r == null then directReady()
     else if r.hasQueued || !(r.idle || r.armed) then {
       if !waitForRoom() then restart()
       false
@@ -393,6 +421,22 @@ private[uring] trait Receiving extends Command {
 
   private def restart(): Unit = owner.nn.startTurn(this)
 
+  // - the last this worker does with the read: the receive's worker may run it at once
+  private def handOver(r: Receiver): Unit = {
+    moving = false
+    owner = r.worker
+    r.worker.startTurn(this)
+  }
+
+  private def waitToMove(r: Receiver): Boolean = {
+    onMove.set(true)
+    handle.parked = this
+    park()
+    r.worker.release(r)
+    if handle.isClosing && leaveParking() then restart()
+    false
+  }
+
   private def waitOnReceiver(r: Receiver): Boolean = {
     r.worker.readsOnReceives.incrementAndGet()
     onReceiver.set(true)
@@ -402,12 +446,17 @@ private[uring] trait Receiving extends Command {
     false
   }
 
-  private[uring] final def waitsOnReceiver: Boolean = onReceiver.get()
+  private[uring] final def waitsOnReceiver: Boolean = onReceiver.get() || onMove.get()
+
+  private[uring] final def wantsStop: Boolean = onMove.get() || !arms
 
   override private[uring] def leaveParking(): Boolean =
     if onReceiver.compareAndSet(true, false) then {
       if handle.parked eq this then handle.parked = null
       owner.nn.readsOnReceives.decrementAndGet()
+      true
+    } else if onMove.compareAndSet(true, false) then {
+      if handle.parked eq this then handle.parked = null
       true
     } else directLeave()
 }
