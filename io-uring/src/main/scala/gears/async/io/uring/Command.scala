@@ -340,7 +340,7 @@ private[uring] abstract class Transfer(bufs: Array[ByteBuffer], copyIn: Boolean)
 
 // - a connection's read takes what its receive got first, and goes to the kernel itself only while the receive is idle
 private[uring] trait Receiving extends Command {
-  protected def receives: Boolean = false
+  private[uring] def arms: Boolean = false
   protected def fromQueue(r: Receiver): Boolean
   protected def atEnd(): Boolean
   protected def directAtOnce(): Boolean
@@ -354,7 +354,7 @@ private[uring] trait Receiving extends Command {
 
   override private[uring] def performerOf(current: UringWorker): UringWorker = {
     var r = handle.receiver
-    if r == null && receives && handle.isInstanceOf[ConnectionHandle] then r = current.receiverFor(handle)
+    if r == null && arms && handle.isInstanceOf[ConnectionHandle] then r = current.receiverFor(handle)
     receiver = r
     if r == null then current else r.worker
   }
@@ -373,7 +373,7 @@ private[uring] trait Receiving extends Command {
     else if r.hasQueued || !(r.idle || r.armed) then {
       if !waitForRoom() then restart()
       false
-    } else if receives && r.worker.arm(r) then waitOnReceiver(r)
+    } else if arms && r.worker.arm(r) then waitOnReceiver(r)
     else if r.armed then {
       r.worker.stopReceive(r)
       r.worker.collectNow()
@@ -395,6 +395,8 @@ private[uring] trait Receiving extends Command {
     if handle.isClosing && leaveParking() then restart()
     false
   }
+
+  private[uring] final def waitsOnReceiver: Boolean = onReceiver.get()
 
   override private[uring] def leaveParking(): Boolean =
     if onReceiver.compareAndSet(true, false) then {
@@ -418,7 +420,7 @@ private[uring] final class ReadIntoBuffer(val handle: UringHandle, buf: ByteBuff
     io_uring_prep_read(sqe, fd, NativeBuffer.atPosition(b), b.remaining().toUInt, Results.currentPosition)
   }
 
-  override protected def receives: Boolean = Receive.enabled && buf.remaining() <= Receive.LargestRead
+  override private[uring] def arms: Boolean = Receive.enabled && buf.remaining() <= Receive.LargestRead
   protected def fromQueue(r: Receiver): Boolean = {
     r.take(buf)
     true

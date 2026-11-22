@@ -134,6 +134,8 @@ final class UringWorker private[uring] (id: Int, owner: HandleOwner, ring: Ring,
 
   private[uring] def receiverCount: Int = receivers.size
 
+  private[uring] var stopsToRefuse = 0
+
   private[uring] def freeBuffers: Int = {
     val b = buffers
     if b == null then Receive.Entries else b.free
@@ -198,7 +200,8 @@ final class UringWorker private[uring] (id: Int, owner: HandleOwner, ring: Ring,
       if ring.pending(r.sqe.nn, r.id) then {
         ring.nop(r.sqe.nn)
         disarmed(r)
-      } else {
+      } else if stopsToRefuse > 0 then stopsToRefuse -= 1
+      else {
         val res = ring.cancelNow(r.id, wait = false)
         r.stopping = res == 0 || res == -errno.ENOENT
       }
@@ -226,9 +229,17 @@ final class UringWorker private[uring] (id: Int, owner: HandleOwner, ring: Ring,
       if res == 0 then r.ended = true
       else if res < 0 && res != -errno.ENOBUFS && res != -errno.ECANCELED then r.failure = res
       if h.isClosing then {
+        stopReceive(r)
         r.drop()
         if !r.armed then receivers -= r
-      } else if r.queued >= Receive.MostQueued && h.parked == null then stopReceive(r)
+      } else {
+        // - a read waiting on it that does not arm receives waits for its stop
+        val stops = h.parked match {
+          case read: Receiving if read.waitsOnReceiver => !read.arms
+          case _                                       => r.queued >= Receive.MostQueued
+        }
+        if stops then stopReceive(r)
+      }
       val waiting = h.parked
       if waiting != null && (r.hasQueued || !r.armed || h.isClosing) && waiting.leaveParking() then startTurn(waiting)
     }

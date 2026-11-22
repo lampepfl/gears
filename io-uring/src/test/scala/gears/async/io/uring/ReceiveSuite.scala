@@ -400,6 +400,86 @@ class ReceiveSuite extends munit.FunSuite {
     }
   }
 
+  receiving("a pooled read waiting for its pool does not keep the receive past its cap") {
+    onPool(1) { io ?=>
+      val (client, server) = connection()
+      arm(client, server)
+      val r = receiverOf(server)
+      val pool = UringBackend.pool(4096, 1)
+      send(client, "held")
+      until(s"the receive got it: ${state(r)}")(onItsWorker(r)(r.queued) == 1)
+      val held = Slot[Received]()
+      io.perform(ops.read(server, pool, held))
+      val holding = held.clear()
+      send(client, "x")
+      until(s"the receive got it: ${state(r)}")(onItsWorker(r)(r.queued) == 1)
+      val into = Slot[Received]()
+      val waiting = Future(io.perform(ops.read(server, pool, into)))
+      AsyncOperations.sleep(10)
+      val data = bytes(4 * Receive.MostQueued * Receive.Size)
+      for piece <- data.grouped(Receive.Size) do {
+        send(client, piece)
+        AsyncOperations.sleep(1)
+      }
+      until(s"the receive stopped: ${state(r)}")(onItsWorker(r)(!r.armed))
+      val queued = onItsWorker(r)(r.queued)
+      assert(queued < 3 * Receive.MostQueued, s"the receive kept $queued buffers")
+      holding.release()
+      waiting.await
+      val first = into.clear()
+      val head = new Array[Byte](first.buffer.remaining())
+      first.buffer.get(head)
+      first.release()
+      assertEquals(head(0), 'x'.toByte)
+      val got = head.drop(1) ++ readFully(server, data.length - head.length + 1, 4096)
+      assert(got.sameElements(data), "the bytes differ")
+      pool.close()
+      io.perform(ops.close(client))
+      io.perform(ops.close(server))
+    }
+  }
+
+  receiving("a close whose stop the kernel refused stops the receive at its next completion") {
+    onPool(1) { io ?=>
+      val (client, server) = connection()
+      arm(client, server)
+      val r = receiverOf(server)
+      onItsWorker(r)(r.worker.stopsToRefuse = 1)
+      val sending = Future {
+        var going = true
+        while going do {
+          going = Try(send(client, "more")).isSuccess
+          AsyncOperations.sleep(2)
+        }
+      }
+      AsyncOperations.sleep(10)
+      val closed = Try(io.perform(ops.close(server), 2.seconds))
+      assert(closed.isSuccess, s"the close did not complete: $closed")
+      io.perform(ops.close(client))
+      sending.awaitResult: Unit
+    }
+  }
+
+  receiving("a large read whose stop the kernel refused stops the receive at its next completion") {
+    onPool(1) { io ?=>
+      val (client, server) = connection()
+      arm(client, server)
+      val r = receiverOf(server)
+      onItsWorker(r)(r.worker.stopsToRefuse = 1)
+      val waiting = Future {
+        val b = ByteBuffer.allocate(64 * 1024)
+        io.perform(ops.read(server, b))
+        contents(b)
+      }
+      AsyncOperations.sleep(10)
+      send(client, "data")
+      assertEquals(waiting.await, "data")
+      until(s"the receive stopped: ${state(r)}")(onItsWorker(r)(!r.armed))
+      io.perform(ops.close(client))
+      io.perform(ops.close(server))
+    }
+  }
+
   receiving("a failing ring fails the reads waiting on its receives, and those that come after") {
     val outcome = Try(onPool(1) { io ?=>
       val (client, server) = connection()
