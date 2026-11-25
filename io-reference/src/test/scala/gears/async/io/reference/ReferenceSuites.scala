@@ -86,3 +86,11 @@ class ReferenceSimpleIOIpStreamSuite extends SimpleIOIpStreamChecks {
 class ReferenceSimpleIOResolveSuite extends SimpleIOResolveChecks {
   val backend: Backend { type Interface <: Resolving } = ReferenceBackend
 }
+
+class ReferenceRunEndSuite extends RunEndContract {
+  val backend: Backend { type Interface <: IpStreams } = ReferenceBackend
+}
+
+class ReferenceThreadedRunSuite extends ThreadedRunContract {
+  val backend: Backend { type Interface <: Blocking & IpStreams } = ReferenceBackend
+}

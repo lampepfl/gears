@@ -1,0 +1,15 @@
+[package]
+name = "io-bench-tokio"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "io-bench-tokio"
+path = "src/main.rs"
+
+[dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util"] }
+
+[profile.release]
+opt-level = 3

@@ -8,6 +8,7 @@ import gears.async.withTimeout
 
 import java.util.concurrent.CancellationException
 import java.util.concurrent.TimeoutException
+import java.util.concurrent.atomic.AtomicBoolean
 import scala.concurrent.duration.*
 
 /** Timers, deadlines and program execution on every backend. No optional capability or handle fixture is required. */
@@ -260,5 +261,95 @@ trait OpsContract extends ContractSuite {
 
   test("a failure of the program is rethrown") {
     intercept[IllegalStateException](running(throw new IllegalStateException("boom")))
+  }
+
+  test("a negative timer is refused as the op is built") {
+    running { io ?=>
+      intercept[IllegalArgumentException](io.ops.timer(-1))
+      intercept[IllegalArgumentException](io.ops.timer(-1.millis))
+    }
+  }
+
+  test("timers that complete at once, performed without end, let a sibling future run") {
+    running { io ?=>
+      val ran = new AtomicBoolean(false)
+      val sibling = Future(ran.set(true))
+      val timer = io.ops.timer(0)
+      var performed = 0
+      while !ran.get() && performed < 1_000_000 do {
+        io.perform(timer)
+        performed += 1
+      }
+      assert(ran.get(), s"$performed timers completed, and the future beside them never ran")
+      sibling.await
+    }
+  }
+
+  test("many short timers all complete") {
+    running { io ?=>
+      for round <- 1 to 300 do {
+        val futures = for _ <- 1 to 16 yield Future(io.perform(io.ops.timer(0)))
+        futures.foreach(_.await)
+      }
+    }
+  }
+
+  test("a timer cancelled as it fires leaves its next performance to run its full time") {
+    running { io ?=>
+      val delay = 300.micros
+      val timer = io.ops.timer(delay)
+      for round <- 1 to 500 do {
+        val waiting = Future(io.perform(timer))
+        val cancelAt = System.nanoTime() + delay.toNanos - 100_000L + (round % 20) * 10_000L // either side of it firing
+        while System.nanoTime() < cancelAt do ()
+        waiting.cancel()
+        waiting.awaitResult: Unit
+        val started = System.nanoTime()
+        io.perform(timer)
+        assert(System.nanoTime() - started >= delay.toNanos, s"round $round fired early")
+      }
+    }
+  }
+
+  test("a timer cancelled by a waiter resumed from the same batch of timers still finishes") {
+    running { io ?=>
+      for round <- 1 to 100 do {
+        val deadline = System.nanoTime() + 5_000_000L
+        // Many futures on one deadline: the first resumed cancels the rest, some of them resumed with it.
+        val waiters = new Array[Future[Unit]](16)
+        for i <- waiters.indices do
+          waiters(i) = Future {
+            io.perform(io.ops.deadlineTimer(deadline))
+            for j <- waiters.indices if j != i && waiters(j) != null do waiters(j).cancel()
+          }
+        waiters.foreach(_.awaitResult)
+      }
+    }
+  }
+
+  test("a run ending with many timers pending cancels them, and ends without waiting for them") {
+    val started = System.nanoTime()
+    val waiters = running { io ?=>
+      val waiters = for _ <- 1 to 1000 yield Future(io.perform(io.ops.timer(60_000)))
+      io.perform(io.ops.timer(50)) // so that they are waiting
+      waiters
+    }
+    val elapsed = System.nanoTime() - started
+    // Half the timers' minute, not a few seconds: cancelling a future costs most where an exception does, and a
+    // loaded machine multiplies it.
+    assert(elapsed < 30_000_000_000L, s"it took ${elapsed / 1_000_000}ms, as if it waited for the timers")
+    assert(waiters.forall(_.poll().exists(_.failed.toOption.exists(_.isInstanceOf[CancellationException]))))
+  }
+
+  test("an op that uses no handle is no run's: performed by one run, it is performed by another") {
+    var kept: AnyRef | Null = null
+    running { io ?=>
+      val timer = io.ops.timer(1) // repeatable
+      io.perform(timer)
+      kept = timer
+    }
+    running { io ?=>
+      io.perform(kept.asInstanceOf[io.Op])
+    }
   }
 }

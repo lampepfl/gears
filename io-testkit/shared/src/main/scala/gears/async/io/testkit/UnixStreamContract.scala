@@ -6,7 +6,6 @@ import gears.async.Future
 
 import java.nio.ByteBuffer
 import java.nio.charset.StandardCharsets
-import java.nio.file.Files
 
 /** What a backend with Unix stream sockets must do, with or without IP sockets. */
 trait UnixStreamContract extends FileSystemFixture {
@@ -98,11 +97,11 @@ trait UnixStreamContract extends FileSystemFixture {
     withTempDir { dir =>
       running { io ?=>
         val path = dir.resolve("data.txt")
-        Files.write(path, "data".getBytes(StandardCharsets.UTF_8))
+        HostFiles.write(path, "data".getBytes(StandardCharsets.UTF_8))
         val into = Slot[io.ops.Listener]()
         val failure = attempt(io, io.ops.listen(UnixAddress(path.toString), into))
         assert(failure.isInstanceOf[java.io.IOException], String.valueOf(failure))
-        assertEquals(Files.readString(path), "data")
+        assertEquals(HostFiles.readString(path), "data")
       }
     }
   }
@@ -121,9 +120,9 @@ trait UnixStreamContract extends FileSystemFixture {
       running { io ?=>
         val path = dir.resolve("gone.sock")
         val listener = unixListen(io, UnixAddress(path.toString))
-        assert(Files.exists(path))
+        assert(HostFiles.exists(path))
         close(io, listener)
-        assert(!Files.exists(path))
+        assert(!HostFiles.exists(path))
       }
     }
   }

@@ -39,8 +39,8 @@ jobs:
     - uses: sbt/setup-sbt@v1
     - name: Test
       run: sbt rootJVM/test
-  # The I/O interface's contracts over the reference backend, the only backend so far, on the JVM; the testkit, which a
-  # backend on any platform runs, compiled for the other two.
+  # The I/O interface's contracts over the reference backend on the JVM; the testkit, which a backend on any platform
+  # runs, compiled for the other two.
   test-io:
     strategy:
       fail-fast: false
@@ -58,6 +58,49 @@ jobs:
     - uses: sbt/setup-sbt@v1
     - name: Test
       run: sbt 'ioReference/test; ioTestkitJVM/test; ioReferenceDemos/compile; ioTestkitNative/compile; ioTestkitJS/compile'
+  # The pool backends (`io-poller`) on the JVM: the contracts and the pool's own tests over `NioPoolBackend`, and the
+  # contracts over `NioBackend`, on the JDK's threads. The demos and the bench are compiled.
+  test-io-poller-jvm:
+    strategy:
+      fail-fast: false
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+        fetch-depth: 0
+    - uses: coursier/cache-action@v6
+    - uses: actions/setup-java@v3
+      with:
+        distribution: temurin
+        java-version: 21
+    - uses: sbt/setup-sbt@v1
+    - name: Test
+      run: sbt 'ioPollerJVM/testFull; ioPollerDemosJVM/compile; ioCapBenchJVM/compile'
+  # The same on Scala Native, where the backend is over the system's event queue: epoll on Linux and kqueue on macOS,
+  # each with the tests of its poller's own.
+  test-io-poller-native:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+        fetch-depth: 0
+    - uses: coursier/cache-action@v6
+    - uses: actions/setup-java@v3
+      with:
+        distribution: temurin
+        java-version: 21
+    - uses: sbt/setup-sbt@v1
+    - name: Install scala-native dependencies
+      if: runner.os == 'Linux'
+      run: sudo apt-get install clang libstdc++-12-dev
+    - name: Test
+      run: sbt 'ioPollerNative/testFull; ioPollerDemosNative/compile; ioCapBenchNative/compile'
   test-native:
     strategy:
       fail-fast: false
@@ -100,3 +143,24 @@ jobs:
     - uses: sbt/setup-sbt@v1
     - name: Test
       run: sbt rootJS/test
+  # The I/O interface's contracts over the Node.js backend, and its demo application linked.
+  test-io-node:
+    strategy:
+      fail-fast: false
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+        fetch-depth: 0
+    - uses: coursier/cache-action@v6
+    - uses: actions/setup-java@v3
+      with:
+        distribution: temurin
+        java-version: 21
+    - uses: actions/setup-node@v4
+      with:
+          node-version: '26'
+    - uses: sbt/setup-sbt@v1
+    - name: Test
+      run: sbt 'ioPollerJS/testFull; ioPollerDemosJS/fastLinkJS; ioCapBenchJS/fastLinkJS'
