@@ -51,6 +51,8 @@ A backend can start with `OpsContract`, which requires no handle fixture or opti
 | `FifoContract` | `Fifos` and host filesystem setup |
 | `FifoFileContract` | `Fifos & RegularFiles`, checking that the two kinds are distinguished |
 | `ResolveContract`, `SimpleIOResolveChecks` | `Resolving` |
+| `RunEndContract` | `IpStreams`: what a run leaves as it ends, and that its handles are no other run's |
+| `ThreadedRunContract` | `Blocking & IpStreams`, and host threads: a blocking op at a run's end, and runs under way at once |
 
 A stream fixture supplies independently closable, connected, buffered byte-stream ends; closing the write end delivers
 EOF after queued bytes. Allow at least 64 bytes of setup writes before a reader starts; transfer and chunk sizes may
