@@ -4,9 +4,6 @@ package testkit
 import gears.async.Async
 import gears.async.Future
 
-import java.nio.charset.StandardCharsets
-import java.nio.file.Files
-
 /** FIFO operations, requiring only Fifos and host filesystem setup. */
 trait FifoContract extends FileSystemFixture {
   val backend: Backend { type Interface <: Fifos }
